@@ -1,39 +1,93 @@
 schema: spec-driven
 
 context: |
-  Project: TicketBox - High-Concurrency Ticket Booking System
-  Domain: Concert Ticketing, Event Management, Offline Access Control.
+  Project: TicketBox - High-Concurrency Concert Ticketing System
+  Domain: Concert ticketing, event management, payment processing, notifications, AI artist bio generation, VIP guest-list import, and offline venue check-in.
 
-  Tech Stack (Local-first execution via Docker Compose):
-  - Backend: NestJS, TypeScript (Modular Monolith architecture)
-  - Database: PostgreSQL (with TypeORM or Prisma for ACID and Row-level locks)
-  - Cache & Distributed Locks: Redis (ioredis for Token Bucket & Lua scripts)
-  - Message Broker: Kafka (kafkajs for Async processing of CSV and AI tasks)
-  - Mobile App: React Native (with local SQLite and WatermelonDB for offline sync)
-  - Infrastructure: Docker & Docker Compose (No Cloud deployment required)
+  Global source-of-truth documents:
 
-  Core Technical Constraints (MUST strictly adhere to):
-  1. Traffic Spikes (80k users/5 mins): MUST implement Token Bucket / Fixed Window Rate Limiting at the API Gateway/Middleware level using Redis.
-  2. Ticket Concurrency & Overselling: MUST use Distributed Locks (Redis Lua scripts) combined with PostgreSQL pessimistic locking (Row-level locks via FOR UPDATE) for ticket assignment.
-  3. Strict Per-User Quota under high load: MUST enforce quotas using Redis atomic counters before writing to PostgreSQL.
-  4. Payment Instability: MUST implement Circuit Breaker pattern (Closed/Open/Half-Open) for VNPAY/MoMo. MUST use Idempotency Keys to prevent double charging on timeouts.
-  5. Read-Heavy Overload: MUST implement Cache-aside pattern with Redis for Concert list and Ticket availability. MUST define active cache invalidation strategies.
-  6. Offline Check-in: Mobile app MUST function offline using a pre-downloaded SQLite database. MUST implement a sync mechanism (conflict resolution) when the network is restored to prevent double-entry.
-  7. Async One-way Integration: VIP CSV import MUST be processed asynchronously via Kafka without blocking the main application.
+  - Proposal: `openspec/changes/archive/2026-06-04-ticketbox-blueprint/proposal.md`
+  - Technical Design: `openspec/changes/archive/2026-06-04-ticketbox-blueprint/design.md`
 
-  CRITICAL RULE FOR AI: Before generating any specs or design for a new feature, you MUST read and strictly align with the global architecture defined in `openspec/archive/ticketbox-blueprint/design.md` (once created). Do not invent new databases or external cloud services.
+  CRITICAL ALIGNMENT RULE:
+  Before generating any proposal, design, spec, or task for a new feature, you MUST read and align with the global Proposal and Technical Design documents.
+  Feature-level documents MUST NOT contradict the global architecture, database design, access-control model, or protection mechanisms.
+  If a feature requires changes to the global Proposal or Technical Design, explicitly call it out as an open question instead of silently inventing a new architecture.
+
+  Architectural style:
+
+  - System level: Client-Server Architecture.
+  - Backend organization: Layered Architecture.
+  - Asynchronous workflows: Event-driven Architecture using Kafka.
+  - Backend implementation: NestJS TypeScript modular monolith.
+  - Local execution: Docker Compose.
+
+  Main runtime components:
+
+  - Web Application: audience area and organizer admin area.
+  - Check-in Mobile App: React Native with local SQLite/WatermelonDB storage.
+  - Backend API: NestJS modular monolith.
+  - Background Workers: asynchronous jobs for notifications, reminders, CSV import, AI bio generation, and analytics.
+  - PostgreSQL: authoritative transactional database.
+  - Redis: caching, rate limiting, quota pre-checks, short-lived coordination, and temporary state.
+  - Kafka: message broker for asynchronous workflows.
+  - External systems: VNPAY/MoMo, Email Provider, AI Model, Sponsor CSV Files.
+
+  Core technical constraints:
+
+  - PostgreSQL is the source of truth for users, concerts, ticket types, orders, payments, tickets, check-ins, VIP guests, AI content, notifications, and audit logs.
+  - Redis MUST NOT be treated as the final authority for ticket ownership, payment state, or check-in validity.
+  - Checkout-related features MUST prevent overselling and enforce per-user purchase limits under concurrent requests.
+  - Payment-related features MUST be idempotent and MUST prevent duplicate charge attempts and duplicate ticket issuance.
+  - Payment gateway failures MUST NOT break public concert browsing or ticket availability viewing.
+  - Read-heavy public concert APIs SHOULD use Redis cache-aside where applicable.
+  - Offline check-in features MUST preserve local scan logs and resolve duplicate or conflicting scans during synchronization.
+  - Sponsor VIP guest-list integration is limited to scheduled CSV import; do not invent direct API, webhook, or database integration with sponsor systems.
+  - AI artist bio generation is asynchronous and MUST expose processing status, fallback behavior, and organizer edit/review capability.
+  - Do not introduce new databases, cloud-only services, external managed infrastructure, or real payment settlement unless explicitly requested.
 
 rules:
   proposal:
-    - MUST clearly identify which user roles (Audience, Organizer, Staff) are impacted.
-    - MUST explicitly state if the feature interacts with external systems (Payment, AI, CSV).
+    - MUST clearly identify which user roles are impacted (Audience, Organizer, or Check-in Staff).
+    - MUST explicitly state whether the feature interacts with external systems such as VNPAY/MoMo, Email Provider, AI Model, or Sponsor CSV Files.
+    - MUST state which existing global goals, risks, or constraints the feature supports.
+    - MUST stay within the global project scope defined in the global Proposal.
+    - MUST mark any conflict with the global Proposal or Technical Design as an open question.
+    - MUST NOT introduce capabilities that are outside the global scope, such as cloud production deployment, real payment settlement, direct sponsor API integration, or seat-level booking.
+
   design:
-    - MUST design a detailed PostgreSQL Database Schema specific to the feature being developed.
-    - MUST explicitly document the chosen System Protection Mechanism (if applicable to the feature).
+    - MUST read and align with the global Technical Design before proposing feature-level design.
+    - MUST describe how the feature fits into the existing Client-Server, Layered, and Event-driven architecture.
+    - MUST identify existing components involved, such as Web Application, Check-in Mobile App, Backend API, Background Workers, PostgreSQL, Redis, Kafka, or external systems.
+    - MUST reference existing PostgreSQL tables from the global design when possible.
+    - MUST only propose new tables, columns, indexes, events, or jobs when the feature clearly requires them.
+    - MUST identify relevant access-control checks, including role, permission, ownership, or assignment checks.
+    - MUST document relevant protection mechanisms only when applicable to the feature, such as rate limiting, caching, idempotency, inventory locking, payment circuit breaker behavior, offline sync conflict handling, CSV validation, or AI fallback behavior.
+    - MUST NOT introduce new architectural styles, databases, message brokers, or external services unless explicitly justified as a proposed change to the global design.
+
   specs:
-    - MUST write scenarios using the BDD format (GIVEN / WHEN / THEN).
-    - MUST explicitly include Edge Cases and Failure Scenarios (e.g., Redis timeout, Kafka broker down, VNPAY timeout, Offline sync conflict).
-    - MUST define the RBAC permissions required for each endpoint.
+    - |
+      MUST follow the following course-required structure:
+      ## Specification: [Feature Name]
+      ## Description
+      ## Main Flow
+      ## Failure Scenarios
+      ## Constraints
+      ## Acceptance Criteria
+    - Description MUST explain what the feature does and which user role uses it.
+    - Main Flow MUST describe the steps in order and mention the participating components, such as Web Application, Check-in Mobile App, Backend API, PostgreSQL, Redis, Kafka, Background Worker, or external system.
+    - Failure Scenarios MUST include relevant failure cases, such as timeout, invalid input, permission denied, Redis failure, Kafka failure, payment callback duplication, stale cache, offline sync conflict, malformed CSV, or AI unavailable where applicable.
+    - Constraints MUST include relevant security, consistency, performance, availability, and data integrity constraints.
+    - Acceptance Criteria MUST define how the team can verify the feature works correctly through tests or demo scenarios.
+    - SHOULD include GIVEN / WHEN / THEN scenarios inside Acceptance Criteria when it improves clarity.
+    - MUST define required RBAC permissions for protected user actions.
+    - MUST identify which existing global architecture components the feature depends on.
+    - MUST NOT include implementation tasks inside `spec.md`.
+    - MUST NOT contradict the global Proposal or Technical Design.
+
   tasks:
+    - MUST map each implementation task back to one or more Acceptance Criteria in the feature spec.
     - MUST ensure all implementation steps can be run locally via Docker Compose.
-    - MUST include steps to write Seed Data for testing.
+    - MUST include database migration or seed-data tasks when the feature requires new data.
+    - MUST include test or demo tasks for happy paths and important failure scenarios.
+    - MUST not implement behavior that is not described in the feature spec unless the spec is updated first.
