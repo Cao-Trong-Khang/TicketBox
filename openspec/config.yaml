@@ -1,0 +1,39 @@
+schema: spec-driven
+
+context: |
+  Project: TicketBox - High-Concurrency Ticket Booking System
+  Domain: Concert Ticketing, Event Management, Offline Access Control.
+
+  Tech Stack (Local-first execution via Docker Compose):
+  - Backend: NestJS, TypeScript (Modular Monolith architecture)
+  - Database: PostgreSQL (with TypeORM or Prisma for ACID and Row-level locks)
+  - Cache & Distributed Locks: Redis (ioredis for Token Bucket & Lua scripts)
+  - Message Broker: Kafka (kafkajs for Async processing of CSV and AI tasks)
+  - Mobile App: React Native (with local SQLite and WatermelonDB for offline sync)
+  - Infrastructure: Docker & Docker Compose (No Cloud deployment required)
+
+  Core Technical Constraints (MUST strictly adhere to):
+  1. Traffic Spikes (80k users/5 mins): MUST implement Token Bucket / Fixed Window Rate Limiting at the API Gateway/Middleware level using Redis.
+  2. Ticket Concurrency & Overselling: MUST use Distributed Locks (Redis Lua scripts) combined with PostgreSQL pessimistic locking (Row-level locks via FOR UPDATE) for ticket assignment.
+  3. Strict Per-User Quota under high load: MUST enforce quotas using Redis atomic counters before writing to PostgreSQL.
+  4. Payment Instability: MUST implement Circuit Breaker pattern (Closed/Open/Half-Open) for VNPAY/MoMo. MUST use Idempotency Keys to prevent double charging on timeouts.
+  5. Read-Heavy Overload: MUST implement Cache-aside pattern with Redis for Concert list and Ticket availability. MUST define active cache invalidation strategies.
+  6. Offline Check-in: Mobile app MUST function offline using a pre-downloaded SQLite database. MUST implement a sync mechanism (conflict resolution) when the network is restored to prevent double-entry.
+  7. Async One-way Integration: VIP CSV import MUST be processed asynchronously via Kafka without blocking the main application.
+
+  CRITICAL RULE FOR AI: Before generating any specs or design for a new feature, you MUST read and strictly align with the global architecture defined in `openspec/archive/ticketbox-blueprint/design.md` (once created). Do not invent new databases or external cloud services.
+
+rules:
+  proposal:
+    - MUST clearly identify which user roles (Audience, Organizer, Staff) are impacted.
+    - MUST explicitly state if the feature interacts with external systems (Payment, AI, CSV).
+  design:
+    - MUST design a detailed PostgreSQL Database Schema specific to the feature being developed.
+    - MUST explicitly document the chosen System Protection Mechanism (if applicable to the feature).
+  specs:
+    - MUST write scenarios using the BDD format (GIVEN / WHEN / THEN).
+    - MUST explicitly include Edge Cases and Failure Scenarios (e.g., Redis timeout, Kafka broker down, VNPAY timeout, Offline sync conflict).
+    - MUST define the RBAC permissions required for each endpoint.
+  tasks:
+    - MUST ensure all implementation steps can be run locally via Docker Compose.
+    - MUST include steps to write Seed Data for testing.
