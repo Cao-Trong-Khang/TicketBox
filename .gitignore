@@ -1,2 +1,32 @@
 # OpenAI Codex
 .codex/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Docker/local data
+.docker/
+docker-data/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
