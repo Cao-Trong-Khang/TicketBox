@@ -62,7 +62,7 @@ flowchart TB
     subgraph ticketbox["TicketBox System"]
         web["Web Application<br/>[Container: Web Frontend]<br/>Provides the audience area for concert browsing and checkout, and the organizer admin area for concert management and reporting."]
 
-        mobile["Check-in Mobile App<br/>[Container: React Native + SQLite/WatermelonDB]<br/>Allows check-in staff to scan QR codes, validate tickets and VIP guests, store offline scans, and synchronize when online."]
+        mobile["Check-in Mobile App<br/>[Container: Android/Kotlin + Room/WorkManager]<br/>Allows check-in staff to scan QR codes, validate tickets and VIP guests, store offline scans, and synchronize when online."]
 
         api["Backend API<br/>[Container: NestJS Modular Monolith]<br/>Exposes REST APIs, enforces RBAC, handles checkout, payment callbacks, ticket issuance, concert management, and check-in synchronization."]
 
