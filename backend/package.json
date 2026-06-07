@@ -14,10 +14,12 @@
     "test": "node --test -r ts-node/register \"src/**/*.spec.ts\""
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^11.1.24",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.24",
     "@nestjs/platform-express": "^11.1.24",
+    "pdf-parse": "^2.4.5",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },
@@ -26,6 +28,7 @@
     "@nestjs/cli": "^11.0.21",
     "@nestjs/schematics": "^11.1.0",
     "@types/node": "^25.9.2",
+    "@types/pdf-parse": "^1.1.5",
     "eslint": "^10.4.1",
     "globals": "^17.6.0",
     "prettier": "^3.8.3",
