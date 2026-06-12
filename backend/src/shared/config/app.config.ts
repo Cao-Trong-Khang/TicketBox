@@ -22,6 +22,11 @@ export type KafkaConfig = {
   brokers: string[];
 };
 
+export type JwtConfig = {
+  accessSecret: string;
+  accessTokenTtl: string;
+};
+
 export function getHttpConfig(configService: ConfigService): HttpConfig {
   return {
     port: readNumber(configService, 'PORT', 3000),
@@ -49,6 +54,19 @@ export function getRedisConfig(configService: ConfigService): RedisConfig {
 export function getKafkaConfig(configService: ConfigService): KafkaConfig {
   return {
     brokers: readList(configService, 'KAFKA_BROKERS', ['localhost:9092']),
+  };
+}
+
+export function getJwtConfig(configService: ConfigService): JwtConfig {
+  const accessSecret = configService.get<string>('JWT_ACCESS_SECRET', 'local-development-jwt-secret');
+
+  if (!accessSecret.trim()) {
+    throw new Error('Invalid empty environment value for JWT_ACCESS_SECRET');
+  }
+
+  return {
+    accessSecret,
+    accessTokenTtl: configService.get<string>('JWT_ACCESS_TOKEN_TTL', '1h'),
   };
 }
 

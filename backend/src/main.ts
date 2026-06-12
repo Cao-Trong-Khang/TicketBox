@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { getHttpConfig } from './shared/config/app.config';
 
@@ -12,6 +13,12 @@ async function bootstrap() {
     origin: httpConfig.frontendOrigins,
     credentials: true,
   });
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+    }),
+  );
 
   await app.listen(httpConfig.port);
 }
