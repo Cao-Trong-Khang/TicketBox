@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
+import { RbacModule } from './rbac/rbac.module';
 import { AppConfigModule } from './shared/config/app-config.module';
 
 @Module({
@@ -12,6 +13,7 @@ import { AppConfigModule } from './shared/config/app-config.module';
     }),
     AppConfigModule,
     AuthModule,
+    RbacModule,
     HealthModule,
   ],
 })

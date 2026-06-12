@@ -1,5 +1,9 @@
 import { Activity, CalendarDays, Gauge, Settings, ShieldCheck, Ticket } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { Routes, Route, Link, useNavigate } from 'react-router-dom';
+import { RegisterPage } from './pages/RegisterPage';
+import { LoginPage } from './pages/LoginPage';
+import { ProfilePage } from './pages/ProfilePage';
 
 type HealthState = {
   service: string;
@@ -29,7 +33,7 @@ const organizerRoutes = [
   'Artist docs and VIP imports',
 ];
 
-export function App() {
+function Home() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>({ state: 'checking' });
 
   useEffect(() => {
@@ -69,19 +73,7 @@ export function App() {
   }, [apiStatus]);
 
   return (
-    <main className="app-shell">
-      <nav className="topbar" aria-label="Primary">
-        <a className="brand" href="/">
-          <Ticket size={28} aria-hidden="true" />
-          <span>TicketBox</span>
-        </a>
-        <div className="nav-links">
-          <a href="#audience">Audience</a>
-          <a href="#organizer">Organizer</a>
-          <a href="#status">Status</a>
-        </div>
-      </nav>
-
+    <>
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">Local development foundation</p>
@@ -127,7 +119,7 @@ export function App() {
         <Gauge aria-hidden="true" />
         <span>Prepared for the archived TicketBox blueprint without simulating domain authority.</span>
       </section>
-    </main>
+    </>
   );
 }
 
@@ -154,5 +146,41 @@ function RouteGroup({
         ))}
       </ul>
     </article>
+  );
+}
+
+export function App() {
+  const navigate = useNavigate();
+  const token = localStorage.getItem('accessToken');
+
+  const handleLogout = () => {
+    localStorage.removeItem('accessToken');
+    navigate('/login');
+  };
+
+  return (
+    <main className="app-shell">
+      <nav className="topbar" aria-label="Primary">
+        <Link className="brand" to="/">
+          <Ticket size={28} aria-hidden="true" />
+          <span>TicketBox</span>
+        </Link>
+        <div className="nav-links">
+          <Link to="/register">Register</Link>
+          <Link to="/login">Login</Link>
+          <Link to="/profile">Profile</Link>
+          {token && <button onClick={handleLogout} className="logout-btn" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', font: 'inherit', padding: 0 }}>Logout</button>}
+        </div>
+      </nav>
+
+      <div style={{ padding: '2rem' }}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+        </Routes>
+      </div>
+    </main>
   );
 }

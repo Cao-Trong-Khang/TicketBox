@@ -1,7 +1,13 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, User, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { ROLE_CODES } from '../rbac/rbac.constants';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -21,18 +27,40 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS);
 
     try {
-      const user = await this.prisma.user.create({
-        data: {
-          email,
-          passwordHash,
-          displayName: normalizeOptionalText(dto.displayName),
-        },
+      const user = await this.prisma.$transaction(async (tx) => {
+        const createdUser = await tx.user.create({
+          data: {
+            email,
+            passwordHash,
+            displayName: normalizeOptionalText(dto.displayName),
+          },
+        });
+        const audienceRole = await tx.role.findUnique({
+          where: { code: ROLE_CODES.audience },
+        });
+
+        if (!audienceRole) {
+          throw new MissingDefaultAudienceRoleError();
+        }
+
+        await tx.userRole.create({
+          data: {
+            userId: createdUser.id,
+            roleId: audienceRole.id,
+          },
+        });
+
+        return createdUser;
       });
 
       return toPublicUser(user);
     } catch (error) {
       if (isUniqueConstraintError(error, 'email')) {
         throw new ConflictException('Email is already registered');
+      }
+
+      if (error instanceof MissingDefaultAudienceRoleError) {
+        throw new InternalServerErrorException('Default AUDIENCE role is not seeded');
       }
 
       throw error;
@@ -63,6 +91,8 @@ export class AuthService {
     };
   }
 }
+
+class MissingDefaultAudienceRoleError extends Error {}
 
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
