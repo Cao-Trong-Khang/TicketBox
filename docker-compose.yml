@@ -1,49 +1,4 @@
 services:
-  frontend:
-    build:
-      context: ./frontend
-    environment:
-      VITE_API_BASE_URL: http://localhost:3000
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-    depends_on:
-      backend:
-        condition: service_started
-
-  backend:
-    build:
-      context: ./backend
-    environment:
-      NODE_ENV: development
-      PORT: 3000
-      FRONTEND_ORIGIN: http://localhost:5173
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: ticketbox
-      POSTGRES_PASSWORD: ticketbox
-      POSTGRES_DB: ticketbox
-      DATABASE_URL: postgresql://ticketbox:ticketbox@postgres:5432/ticketbox?schema=public
-      JWT_ACCESS_SECRET: local-development-jwt-secret
-      JWT_ACCESS_TOKEN_TTL: 1h
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      KAFKA_BROKERS: kafka:29092
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./backend:/app
-      - backend_node_modules:/app/node_modules
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      kafka:
-        condition: service_started
-
   postgres:
     image: postgres:18-alpine
     environment:
@@ -90,6 +45,4 @@ services:
       KAFKA_NUM_PARTITIONS: 3
 
 volumes:
-  frontend_node_modules:
-  backend_node_modules:
   postgres_data_18:
