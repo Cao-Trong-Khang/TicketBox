@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { AuthModule } from './auth/auth.module';
-import { HealthModule } from './health/health.module';
-import { RbacModule } from './rbac/rbac.module';
-import { AppConfigModule } from './shared/config/app-config.module';
+import { AppConfigModule } from './config/app-config.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { HealthModule } from './modules/health/health.module';
+import { RbacModule } from './modules/rbac/rbac.module';
 
 @Module({
   imports: [
