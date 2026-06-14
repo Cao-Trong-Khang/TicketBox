@@ -7,12 +7,148 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =====================
+// ENUMS
+// =====================
+
 enum UserStatus {
   ACTIVE
   DISABLED
 
   @@map("user_status")
 }
+
+enum ConcertStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  FINISHED
+
+  @@map("concert_status")
+}
+
+enum TicketTypeStatus {
+  ACTIVE
+  INACTIVE
+  SOLD_OUT
+
+  @@map("ticket_type_status")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+  CANCELLED
+
+  @@map("order_status")
+}
+
+enum PaymentProvider {
+  VNPAY
+  MOMO
+
+  @@map("payment_provider")
+}
+
+enum PaymentStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  TIMEOUT
+
+  @@map("payment_status")
+}
+
+enum TicketStatus {
+  ACTIVE
+  USED
+  CANCELLED
+
+  @@map("ticket_status")
+}
+
+enum CheckInMode {
+  ONLINE
+  OFFLINE
+
+  @@map("check_in_mode")
+}
+
+enum CheckInStatus {
+  SUCCESS
+  INVALID_QR
+  ALREADY_USED
+  WRONG_CONCERT
+  CANCELLED_TICKET
+  CONFLICT
+
+  @@map("check_in_status")
+}
+
+enum CheckInSyncStatus {
+  SYNCED
+  PENDING
+  FAILED
+
+  @@map("check_in_sync_status")
+}
+
+enum NotificationType {
+  ORDER_PAID
+  TICKET_ISSUED
+  CONCERT_REMINDER
+  CONCERT_CANCELLED
+
+  @@map("notification_type")
+}
+
+enum NotificationChannel {
+  APP
+  EMAIL
+
+  @@map("notification_channel")
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+
+  @@map("notification_status")
+}
+
+enum ArtistBioJobStatus {
+  UPLOADED
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("artist_bio_job_status")
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("import_status")
+}
+
+enum VipGuestStatus {
+  ACTIVE
+  CHECKED_IN
+  CANCELLED
+
+  @@map("vip_guest_status")
+}
+
+// =====================
+// AUTHORIZATION
+// Giữ nguyên phần đã có, chỉ bổ sung relation field vào User
+// =====================
 
 model User {
   id           String     @id @default(uuid()) @db.Uuid
@@ -22,7 +158,16 @@ model User {
   status       UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
-  userRoles    UserRole[]
+
+  userRoles UserRole[]
+
+  // Relations nghiệp vụ TicketBox
+  concerts      Concert[]      @relation("ConcertOrganizer")
+  orders        Order[]
+  tickets       Ticket[]
+  checkIns      CheckIn[]      @relation("CheckInStaff")
+  notifications Notification[]
+  artistBioJobs ArtistBioJob[] @relation("ArtistBioUploader")
 
   @@map("users")
 }
@@ -54,20 +199,347 @@ model UserRole {
   userId    String   @map("user_id") @db.Uuid
   roleId    String   @map("role_id") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
   @@map("user_roles")
 }
 
 model RolePermission {
-  roleId       String     @map("role_id") @db.Uuid
-  permissionId String     @map("permission_id") @db.Uuid
-  createdAt    DateTime   @default(now()) @map("created_at")
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  roleId       String   @map("role_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
+}
+
+// =====================
+// CONCERTS & TICKET TYPES
+// =====================
+
+model Concert {
+  id          String @id @default(uuid()) @db.Uuid
+  organizerId String @map("organizer_id") @db.Uuid
+
+  title        String
+  artistName   String? @map("artist_name")
+  description  String? @db.Text
+  venueName    String  @map("venue_name")
+  venueAddress String? @map("venue_address") @db.Text
+  bannerUrl    String? @map("banner_url")
+  seatingSvg   String? @map("seating_svg") @db.Text
+
+  status   ConcertStatus @default(DRAFT)
+  startsAt DateTime      @map("starts_at")
+  endsAt   DateTime?     @map("ends_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  organizer       User             @relation("ConcertOrganizer", fields: [organizerId], references: [id])
+  ticketTypes     TicketType[]
+  orders          Order[]
+  tickets         Ticket[]
+  checkIns        CheckIn[]
+  notifications   Notification[]
+  artistBioJobs   ArtistBioJob[]
+  vipGuestImports VipGuestImport[]
+  vipGuests       VipGuest[]
+
+  @@index([status])
+  @@index([startsAt])
+  @@index([status, startsAt])
+  @@map("concerts")
+}
+
+model TicketType {
+  id        String @id @default(uuid()) @db.Uuid
+  concertId String @map("concert_id") @db.Uuid
+
+  code String
+  name String
+
+  priceVnd         Int @map("price_vnd")
+  totalQuantity    Int @map("total_quantity")
+  reservedQuantity Int @default(0) @map("reserved_quantity")
+  soldQuantity     Int @default(0) @map("sold_quantity")
+  perUserLimit     Int @map("per_user_limit")
+
+  saleStartAt DateTime  @map("sale_start_at")
+  saleEndAt   DateTime? @map("sale_end_at")
+
+  status    TicketTypeStatus @default(ACTIVE)
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  concert    Concert     @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+  tickets    Ticket[]
+
+  @@unique([concertId, code])
+  @@index([concertId])
+  @@index([concertId, status])
+  @@map("ticket_types")
+}
+
+// =====================
+// ORDERS & PAYMENTS
+// =====================
+
+model Order {
+  id        String @id @default(uuid()) @db.Uuid
+  orderCode String @unique @map("order_code")
+
+  userId    String @map("user_id") @db.Uuid
+  concertId String @map("concert_id") @db.Uuid
+
+  status         OrderStatus @default(PENDING)
+  totalAmountVnd Int         @map("total_amount_vnd")
+
+  expiresAt      DateTime  @map("expires_at")
+  paidAt         DateTime? @map("paid_at")
+  idempotencyKey String    @map("idempotency_key")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User                 @relation(fields: [userId], references: [id])
+  concert  Concert              @relation(fields: [concertId], references: [id])
+  items    OrderItem[]
+  payments PaymentTransaction[]
+  tickets  Ticket[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId])
+  @@index([concertId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String @id @default(uuid()) @db.Uuid
+  orderId      String @map("order_id") @db.Uuid
+  ticketTypeId String @map("ticket_type_id") @db.Uuid
+
+  quantity     Int
+  unitPriceVnd Int @map("unit_price_vnd")
+  subtotalVnd  Int @map("subtotal_vnd")
+
+  order      Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
+  tickets    Ticket[]
+
+  @@index([orderId])
+  @@index([ticketTypeId])
+  @@map("order_items")
+}
+
+model PaymentTransaction {
+  id      String @id @default(uuid()) @db.Uuid
+  orderId String @map("order_id") @db.Uuid
+
+  provider              PaymentProvider
+  providerTransactionId String? @map("provider_transaction_id")
+  idempotencyKey        String  @unique @map("idempotency_key")
+
+  status    PaymentStatus @default(INITIATED)
+  amountVnd Int           @map("amount_vnd")
+
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  confirmedAt DateTime? @map("confirmed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerTransactionId])
+  @@index([orderId])
+  @@index([status])
+  @@map("payment_transactions")
+}
+
+// =====================
+// TICKETS & CHECK-IN
+// =====================
+
+model Ticket {
+  id         String @id @default(uuid()) @db.Uuid
+  ticketCode String @unique @map("ticket_code")
+  qrHash     String @unique @map("qr_hash")
+
+  orderId      String @map("order_id") @db.Uuid
+  orderItemId  String @map("order_item_id") @db.Uuid
+  ownerUserId  String @map("owner_user_id") @db.Uuid
+  concertId    String @map("concert_id") @db.Uuid
+  ticketTypeId String @map("ticket_type_id") @db.Uuid
+
+  status      TicketStatus @default(ACTIVE)
+  issuedAt    DateTime     @default(now()) @map("issued_at")
+  checkedInAt DateTime?    @map("checked_in_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  order      Order      @relation(fields: [orderId], references: [id])
+  orderItem  OrderItem  @relation(fields: [orderItemId], references: [id])
+  owner      User       @relation(fields: [ownerUserId], references: [id])
+  concert    Concert    @relation(fields: [concertId], references: [id])
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
+  checkIns   CheckIn[]
+
+  @@index([ownerUserId])
+  @@index([concertId])
+  @@index([ticketTypeId])
+  @@index([status])
+  @@map("tickets")
+}
+
+model CheckIn {
+  id String @id @default(uuid()) @db.Uuid
+
+  ticketId   String? @map("ticket_id") @db.Uuid
+  vipGuestId String? @map("vip_guest_id") @db.Uuid
+
+  concertId   String @map("concert_id") @db.Uuid
+  staffUserId String @map("staff_user_id") @db.Uuid
+
+  sourceDeviceId String? @map("source_device_id")
+
+  mode       CheckInMode
+  status     CheckInStatus
+  syncStatus CheckInSyncStatus @default(SYNCED) @map("sync_status")
+
+  scannedAt DateTime  @map("scanned_at")
+  syncedAt  DateTime? @map("synced_at")
+  note      String?   @db.Text
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  ticket    Ticket?   @relation(fields: [ticketId], references: [id])
+  vipGuest  VipGuest? @relation(fields: [vipGuestId], references: [id])
+  concert   Concert   @relation(fields: [concertId], references: [id])
+  staffUser User      @relation("CheckInStaff", fields: [staffUserId], references: [id])
+
+  @@index([ticketId])
+  @@index([vipGuestId])
+  @@index([concertId])
+  @@index([staffUserId])
+  @@index([sourceDeviceId])
+  @@index([scannedAt])
+  @@map("check_ins")
+}
+
+// =====================
+// NOTIFICATIONS
+// =====================
+
+model Notification {
+  id        String  @id @default(uuid()) @db.Uuid
+  userId    String  @map("user_id") @db.Uuid
+  concertId String? @map("concert_id") @db.Uuid
+
+  type    NotificationType
+  channel NotificationChannel
+  status  NotificationStatus @default(PENDING)
+
+  subject String?
+  body    String  @db.Text
+
+  scheduledAt DateTime? @map("scheduled_at")
+  sentAt      DateTime? @map("sent_at")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  concert Concert? @relation(fields: [concertId], references: [id])
+
+  @@index([userId])
+  @@index([concertId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("notifications")
+}
+
+// =====================
+// AI ARTIST BIO
+// =====================
+
+model ArtistBioJob {
+  id         String @id @default(uuid()) @db.Uuid
+  concertId  String @map("concert_id") @db.Uuid
+  uploadedBy String @map("uploaded_by") @db.Uuid
+
+  fileName      String  @map("file_name")
+  storageKey    String  @map("storage_key")
+  extractedText String? @map("extracted_text") @db.Text
+  generatedBio  String? @map("generated_bio") @db.Text
+  failureReason String? @map("failure_reason") @db.Text
+
+  status    ArtistBioJobStatus @default(UPLOADED)
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  concert Concert @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  user    User    @relation("ArtistBioUploader", fields: [uploadedBy], references: [id])
+
+  @@index([concertId])
+  @@index([status])
+  @@map("artist_bio_jobs")
+}
+
+// =====================
+// VIP GUEST LIST CSV
+// =====================
+
+model VipGuestImport {
+  id        String @id @default(uuid()) @db.Uuid
+  concertId String @map("concert_id") @db.Uuid
+
+  fileName      String       @map("file_name")
+  status        ImportStatus @default(PENDING)
+  totalRows     Int          @default(0) @map("total_rows")
+  acceptedRows  Int          @default(0) @map("accepted_rows")
+  rejectedRows  Int          @default(0) @map("rejected_rows")
+  duplicateRows Int          @default(0) @map("duplicate_rows")
+
+  importedAt DateTime? @map("imported_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  concert Concert    @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  guests  VipGuest[]
+
+  @@index([concertId])
+  @@index([status])
+  @@map("vip_guest_imports")
+}
+
+model VipGuest {
+  id        String @id @default(uuid()) @db.Uuid
+  importId  String @map("import_id") @db.Uuid
+  concertId String @map("concert_id") @db.Uuid
+
+  sponsorSource    String? @map("sponsor_source")
+  externalGuestKey String? @map("external_guest_key")
+
+  fullName String  @map("full_name")
+  email    String?
+  phone    String?
+
+  status      VipGuestStatus @default(ACTIVE)
+  checkedInAt DateTime?      @map("checked_in_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  import   VipGuestImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  concert  Concert        @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  checkIns CheckIn[]
+
+  @@unique([concertId, sponsorSource, externalGuestKey])
+  @@index([concertId])
+  @@index([email])
+  @@index([phone])
+  @@index([status])
+  @@map("vip_guests")
 }

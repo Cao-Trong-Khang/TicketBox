@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcrypt');
 
 const prisma = new PrismaClient();
 
@@ -74,6 +75,43 @@ async function main() {
       });
     }
   }
+
+  const organizerEmail = process.env.ORGANIZER_EMAIL || 'org.@gmail.com';
+  const organizerPassword = process.env.ORGANIZER_PASSWORD || '12345678';
+
+  const organizerPasswordHash = await bcrypt.hash(organizerPassword, 10);
+
+  const organizerUser = await prisma.user.upsert({
+    where: { email: organizerEmail },
+    update: {
+      displayName: 'Default Organizer',
+      status: 'ACTIVE',
+    },
+    create: {
+      email: organizerEmail,
+      passwordHash: organizerPasswordHash,
+      displayName: 'Default Organizer',
+      status: 'ACTIVE',
+    },
+  });
+
+  const organizerRole = await prisma.role.findUniqueOrThrow({
+    where: { code: 'ORGANIZER' },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: organizerUser.id,
+        roleId: organizerRole.id,
+      },
+    },
+    update: {},
+    create: {
+      userId: organizerUser.id,
+      roleId: organizerRole.id,
+    },
+  });
 }
 
 main()
