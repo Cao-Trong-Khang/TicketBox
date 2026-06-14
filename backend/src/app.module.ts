@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppConfigModule } from './config/app-config.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { ConcertsModule } from './modules/concerts/concerts.module';
 import { HealthModule } from './modules/health/health.module';
 import { RbacModule } from './modules/rbac/rbac.module';
+import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
 
 @Module({
   imports: [
@@ -12,8 +14,10 @@ import { RbacModule } from './modules/rbac/rbac.module';
       envFilePath: ['.env'],
     }),
     AppConfigModule,
+    RedisCacheModule,
     AuthModule,
     RbacModule,
+    ConcertsModule,
     HealthModule,
   ],
 })
