@@ -31,6 +31,22 @@ type PrismaConcertFindFirstArgs = {
   select: Record<string, boolean>;
 };
 
+type PrismaConcertFindFirstTicketTypesArgs = {
+  where: {
+    id: string;
+    status: ConcertStatus;
+  };
+  select: {
+    ticketTypes: {
+      where: {
+        status: TicketTypeStatus;
+      };
+      orderBy: [{ priceVnd: 'asc' }, { code: 'asc' }];
+      select: Record<string, boolean>;
+    };
+  };
+};
+
 test('public concerts list maps upcoming published concerts to public DTOs and caches the mapped response', async () => {
   const startsAt = new Date('2026-08-20T12:30:00.000Z');
   const endsAt = new Date('2026-08-20T15:30:00.000Z');
@@ -254,6 +270,161 @@ test('public concert detail throws not found when no published concert exists', 
 
   await assert.rejects(
     () => service.findPublishedConcertDetail('33333333-3333-4333-8333-333333333333'),
+    NotFoundException,
+  );
+});
+
+test('public concert ticket types maps active ticket types with computed availability and short cache TTL', async () => {
+  const concertId = '44444444-4444-4444-8444-444444444444';
+  const saleStartAt = new Date('2026-06-01T13:00:00.000Z');
+  const saleEndAt = new Date('2026-08-20T12:30:00.000Z');
+  const findFirstCalls: PrismaConcertFindFirstTicketTypesArgs[] = [];
+  let cachedValue: string | null = null;
+
+  const prisma = {
+    concert: {
+      findFirst: async (args: PrismaConcertFindFirstTicketTypesArgs) => {
+        findFirstCalls.push(args);
+
+        return {
+          ticketTypes: [
+            {
+              id: 'ticket-type-1',
+              code: 'GA',
+              name: 'General Admission',
+              priceVnd: 800000,
+              totalQuantity: 100,
+              reservedQuantity: 20,
+              soldQuantity: 30,
+              perUserLimit: 4,
+              saleStartAt,
+              saleEndAt,
+            },
+            {
+              id: 'ticket-type-2',
+              code: 'VIP',
+              name: 'VIP',
+              priceVnd: 2000000,
+              totalQuantity: 10,
+              reservedQuantity: 8,
+              soldQuantity: 8,
+              perUserLimit: 2,
+              saleStartAt,
+              saleEndAt: null,
+            },
+          ],
+        };
+      },
+    },
+  };
+  const redisCache = {
+    get: async () => cachedValue,
+    set: async (key: string, value: string, ttlSeconds: number) => {
+      assert.equal(key, `concerts:${concertId}:ticket-types`);
+      assert.equal(ttlSeconds, 5);
+      cachedValue = value;
+    },
+    del: async () => undefined,
+  };
+  const service = new ConcertsService(prisma as never, redisCache as never);
+
+  const response = await service.findPublishedConcertTicketTypes(concertId);
+
+  assert.equal(findFirstCalls.length, 1);
+  assert.deepEqual(findFirstCalls[0].where, {
+    id: concertId,
+    status: ConcertStatus.PUBLISHED,
+  });
+  assert.equal(findFirstCalls[0].select.ticketTypes.where.status, TicketTypeStatus.ACTIVE);
+  assert.deepEqual(findFirstCalls[0].select.ticketTypes.orderBy, [
+    { priceVnd: 'asc' },
+    { code: 'asc' },
+  ]);
+  assert.equal(findFirstCalls[0].select.ticketTypes.select.reservedQuantity, true);
+  assert.equal(findFirstCalls[0].select.ticketTypes.select.soldQuantity, true);
+  assert.equal(findFirstCalls[0].select.ticketTypes.select.concertId, undefined);
+  assert.equal(findFirstCalls[0].select.ticketTypes.select.createdAt, undefined);
+  assert.deepEqual(response, [
+    {
+      id: 'ticket-type-1',
+      code: 'GA',
+      name: 'General Admission',
+      priceVnd: 800000,
+      totalQuantity: 100,
+      availableQuantity: 50,
+      perUserLimit: 4,
+      saleStartAt: saleStartAt.toISOString(),
+      saleEndAt: saleEndAt.toISOString(),
+    },
+    {
+      id: 'ticket-type-2',
+      code: 'VIP',
+      name: 'VIP',
+      priceVnd: 2000000,
+      totalQuantity: 10,
+      availableQuantity: 0,
+      perUserLimit: 2,
+      saleStartAt: saleStartAt.toISOString(),
+      saleEndAt: null,
+    },
+  ]);
+
+  const cachedResponse = await service.findPublishedConcertTicketTypes(concertId);
+
+  assert.equal(findFirstCalls.length, 1);
+  assert.deepEqual(cachedResponse, response);
+});
+
+test('public concert ticket types recovers corrupted cache and returns empty array for no active types', async () => {
+  const concertId = '55555555-5555-4555-8555-555555555555';
+  const deletedKeys: string[] = [];
+  let cachedValue: string | null = '{not-json';
+  let findFirstCalls = 0;
+
+  const service = new ConcertsService(
+    {
+      concert: {
+        findFirst: async () => {
+          findFirstCalls += 1;
+          return { ticketTypes: [] };
+        },
+      },
+    } as never,
+    {
+      get: async () => cachedValue,
+      set: async (_key: string, value: string) => {
+        cachedValue = value;
+      },
+      del: async (key: string) => {
+        deletedKeys.push(key);
+        cachedValue = null;
+      },
+    } as never,
+  );
+
+  const response = await service.findPublishedConcertTicketTypes(concertId);
+
+  assert.equal(findFirstCalls, 1);
+  assert.deepEqual(deletedKeys, [`concerts:${concertId}:ticket-types`]);
+  assert.deepEqual(response, []);
+});
+
+test('public concert ticket types throws not found when no published concert exists', async () => {
+  const service = new ConcertsService(
+    {
+      concert: {
+        findFirst: async () => null,
+      },
+    } as never,
+    {
+      get: async () => null,
+      set: async () => undefined,
+      del: async () => undefined,
+    } as never,
+  );
+
+  await assert.rejects(
+    () => service.findPublishedConcertTicketTypes('66666666-6666-4666-8666-666666666666'),
     NotFoundException,
   );
 });
