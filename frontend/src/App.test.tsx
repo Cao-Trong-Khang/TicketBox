@@ -31,10 +31,14 @@ describe('frontend auth shell', () => {
     localStorage.clear();
   });
 
-  it('renders the empty home route', () => {
+  it('renders the concerts route from home redirect', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse(createConcerts())));
+
     renderApp('/');
 
-    expect(screen.getByLabelText('Home content')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
+    expect(await screen.findByText('Anh Trai Say Hi Concert 2026')).toBeInTheDocument();
+    expect(screen.getByText('Từ 800.000 ₫')).toBeInTheDocument();
     expect(screen.queryByText('Backend online')).not.toBeInTheDocument();
     expect(screen.queryByText('Concert discovery')).not.toBeInTheDocument();
   });
@@ -84,7 +88,10 @@ describe('frontend auth shell', () => {
   });
 
   it('stores access token and routes home after successful login', async () => {
-    const fetchMock = vi.fn().mockImplementation(() => mockJsonResponse({ accessToken: 'jwt-token' }));
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
+      .mockImplementationOnce(() => mockJsonResponse(createConcerts()));
     vi.stubGlobal('fetch', fetchMock);
 
     renderApp('/login');
@@ -95,6 +102,23 @@ describe('frontend auth shell', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/login', expect.any(Object)));
     await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('jwt-token'));
-    expect(screen.getByLabelText('Home content')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
   });
 });
+
+function createConcerts() {
+  return [
+    {
+      id: '11111111-1111-4111-8111-111111111111',
+      title: 'Anh Trai Say Hi Concert 2026',
+      artistName: 'Various Artists',
+      description: 'Concert description',
+      venueName: 'Sân vận động Mỹ Đình',
+      venueAddress: 'Nam Từ Liêm, Hà Nội',
+      bannerUrl: null,
+      startsAt: '2026-08-20T12:30:00.000Z',
+      endsAt: '2026-08-20T15:30:00.000Z',
+      minPriceVnd: 800000,
+    },
+  ];
+}

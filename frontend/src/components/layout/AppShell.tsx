@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { LogOut, Ticket } from 'lucide-react';
 
 type AppShellProps = {
@@ -37,6 +37,9 @@ export function AppShell({ children }: AppShellProps) {
         </Link>
 
         <nav className="nav-links" aria-label="Primary">
+          <NavLink to="/concerts">Concerts</NavLink>
+          {!hasToken && <NavLink to="/login">Đăng nhập</NavLink>}
+          {!hasToken && <NavLink to="/register">Đăng ký</NavLink>}
           {hasToken && (
             <button className="nav-button" type="button" onClick={handleLogout}>
               <LogOut size={18} aria-hidden="true" />
