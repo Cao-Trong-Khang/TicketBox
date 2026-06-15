@@ -655,6 +655,78 @@ h1 {
   font-size: 0.92rem;
 }
 
+/* Order Pending Page Styles */
+.order-pending-page {
+  min-height: 100vh;
+  padding: clamp(20px, 4vw, 40px);
+}
+
+.order-pending-container {
+  max-width: 600px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: clamp(20px, 4vw, 32px);
+}
+
+.order-pending-container h1 {
+  margin: 0 0 24px;
+  color: var(--ink);
+  font-size: 1.5rem;
+}
+
+.order-empty-message {
+  color: var(--muted);
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.order-details {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--surface-soft);
+  border-radius: 8px;
+}
+
+.order-detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.order-detail-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.order-detail-value {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.order-back-button {
+  width: 100%;
+}
+
+/* Order Error Styles */
+.order-error-container {
+  margin-bottom: 24px;
+}
+
+.order-error-hint {
+  margin-top: 8px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.alert-action {
+  margin-top: 12px;
+}
+
 .summary-item-prices {
   display: flex;
   align-items: center;

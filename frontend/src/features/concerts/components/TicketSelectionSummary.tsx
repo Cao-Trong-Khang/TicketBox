@@ -13,6 +13,7 @@ type TicketSelectionSummaryProps = {
   totalQuantity: number;
   totalAmount: number;
   onContinue: () => void;
+  isSubmitting?: boolean;
 };
 
 export function TicketSelectionSummary({
@@ -20,6 +21,7 @@ export function TicketSelectionSummary({
   totalQuantity,
   totalAmount,
   onContinue,
+  isSubmitting = false,
 }: TicketSelectionSummaryProps) {
   return (
     <section className="ticket-selection-summary" aria-labelledby="summary-title">
@@ -55,9 +57,9 @@ export function TicketSelectionSummary({
         type="button"
         className="summary-continue-button"
         onClick={onContinue}
-        disabled={totalQuantity === 0}
+        disabled={totalQuantity === 0 || isSubmitting}
       >
-        Tiếp tục đặt vé
+        {isSubmitting ? 'Đang tạo đơn...' : 'Tiếp tục đặt vé'}
       </Button>
     </section>
   );
