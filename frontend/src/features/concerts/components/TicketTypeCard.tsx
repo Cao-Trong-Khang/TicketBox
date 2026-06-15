@@ -1,13 +1,19 @@
-import { Button } from '../../../components/ui/Button';
 import { formatConcertDate, formatVnd } from '../api';
 import { TicketType } from '../types';
 
 type TicketTypeCardProps = {
   ticketType: TicketType;
+  quantity: number;
+  onIncrease: () => void;
+  onDecrease: () => void;
 };
 
-export function TicketTypeCard({ ticketType }: TicketTypeCardProps) {
+export function TicketTypeCard({ ticketType, quantity, onIncrease, onDecrease }: TicketTypeCardProps) {
   const isSoldOut = ticketType.availableQuantity === 0;
+  const maxQty = Math.min(ticketType.availableQuantity, ticketType.perUserLimit);
+  const canIncrease = !isSoldOut && quantity < maxQty;
+  const canDecrease = quantity > 0;
+
   const saleEndLabel = ticketType.saleEndAt
     ? formatConcertDate(ticketType.saleEndAt)
     : 'Không giới hạn';
@@ -37,9 +43,33 @@ export function TicketTypeCard({ ticketType }: TicketTypeCardProps) {
         <span>Tổng {ticketType.totalQuantity.toLocaleString('vi-VN')} vé</span>
       </div>
 
-      <Button className="ticket-type-card-button" type="button" disabled>
-        Chọn vé
-      </Button>
+      {isSoldOut ? (
+        <div className="ticket-quantity-selector ticket-quantity-selector--disabled">
+          <span>Hết vé</span>
+        </div>
+      ) : (
+        <div className="ticket-quantity-selector">
+          <button
+            className="ticket-qty-button"
+            type="button"
+            onClick={onDecrease}
+            disabled={!canDecrease}
+            aria-label="Giảm số lượng vé"
+          >
+            −
+          </button>
+          <span className="ticket-qty-display">{quantity}</span>
+          <button
+            className="ticket-qty-button"
+            type="button"
+            onClick={onIncrease}
+            disabled={!canIncrease}
+            aria-label="Tăng số lượng vé"
+          >
+            +
+          </button>
+        </div>
+      )}
     </article>
   );
 }
