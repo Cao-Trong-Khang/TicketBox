@@ -392,6 +392,177 @@ h1 {
   justify-self: start;
 }
 
+.concert-detail-page {
+  min-height: calc(100vh - 184px);
+}
+
+.concert-detail-container {
+  display: grid;
+  gap: 28px;
+  width: min(100%, 1080px);
+  margin: 0 auto;
+}
+
+.concert-header {
+  display: grid;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.concert-info {
+  display: grid;
+  gap: 12px;
+  padding: clamp(22px, 4vw, 34px);
+}
+
+.concert-info h1 {
+  margin-bottom: 4px;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+}
+
+.concert-info p:not(.eyebrow) {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.concert-info svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}
+
+.concert-description,
+.concert-seatmap,
+.concert-seatmap-placeholder,
+.concert-tickets-section {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.concert-description,
+.concert-tickets-section {
+  padding: clamp(20px, 4vw, 28px);
+}
+
+.concert-description h2,
+.concert-tickets-section h2,
+.concert-detail-container > section > h2 {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-size: 1.15rem;
+}
+
+.concert-description p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.75;
+  white-space: pre-line;
+}
+
+.concert-seatmap {
+  overflow: auto;
+  padding: 18px;
+}
+
+.concert-seatmap svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.concert-seatmap-placeholder {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  padding: 24px;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.ticket-types-list {
+  display: grid;
+  gap: 14px;
+}
+
+.ticket-type-card {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  padding: 18px;
+  background: #fbfdff;
+  border: 1px solid #d5deea;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(28, 37, 54, 0.06);
+}
+
+.ticket-type-card--sold-out {
+  opacity: 0.72;
+}
+
+.ticket-type-card-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ticket-type-card-main h3 {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
+.ticket-type-card-main strong {
+  color: var(--success);
+  white-space: nowrap;
+}
+
+.ticket-type-card-period {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.ticket-type-card-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.ticket-type-card-details span,
+.ticket-type-badge {
+  padding: 7px 10px;
+  background: var(--surface-soft);
+  border-radius: 8px;
+}
+
+.ticket-type-badge {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.ticket-type-card-button,
+.ticket-type-card-button:disabled {
+  justify-self: start;
+  color: #6e7788;
+  background: #e8edf5;
+  border-color: #d9e1ec;
+  cursor: not-allowed;
+}
+
 @media (max-width: 640px) {
   .topbar {
     align-items: flex-start;
@@ -414,6 +585,32 @@ h1 {
 @media (min-width: 768px) {
   .concerts-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .concert-header {
+    grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+    align-items: stretch;
+  }
+
+  .concert-header .concert-card-banner {
+    height: 100%;
+    min-height: 360px;
+  }
+
+  .ticket-type-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .ticket-type-card-main,
+  .ticket-type-card-details {
+    grid-column: 1;
+  }
+
+  .ticket-type-card-button {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
   }
 }
 

@@ -1,8 +1,16 @@
 import { apiFetch } from '../../lib/api-client';
-import { Concert, GetConcertsResponse } from './types';
+import { Concert, ConcertDetail, GetConcertsResponse, TicketType } from './types';
 
 export function getConcerts(): Promise<GetConcertsResponse> {
   return apiFetch<Concert[]>('/concerts');
+}
+
+export function getConcertDetail(id: string): Promise<ConcertDetail> {
+  return apiFetch<ConcertDetail>(`/concerts/${id}`);
+}
+
+export function getConcertTicketTypes(id: string): Promise<TicketType[]> {
+  return apiFetch<TicketType[]>(`/concerts/${id}/ticket-types`);
 }
 
 export function formatConcertDate(isoString: string): string {
@@ -22,4 +30,8 @@ export function formatPrice(priceVnd: number | null): string {
   }
 
   return `Từ ${priceVnd.toLocaleString('vi-VN')} ₫`;
+}
+
+export function formatVnd(priceVnd: number): string {
+  return `${priceVnd.toLocaleString('vi-VN')} ₫`;
 }
