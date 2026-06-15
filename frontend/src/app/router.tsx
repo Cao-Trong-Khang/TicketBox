@@ -1,16 +1,17 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { LoginPage } from '../features/auth/pages/LoginPage';
+import { ConcertsListPage } from '../features/concerts/pages/ConcertsListPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
-import { HomePage } from '../pages/HomePage';
 
 export function AppRouter() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="/" element={<Navigate to="/concerts" replace />} />
+      <Route path="/concerts" element={<ConcertsListPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
-      <Route path="/home" element={<HomePage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="/home" element={<Navigate to="/concerts" replace />} />
+      <Route path="*" element={<Navigate to="/concerts" replace />} />
     </Routes>
   );
 }
