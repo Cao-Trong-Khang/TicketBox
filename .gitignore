@@ -12,6 +12,11 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Android/Gradle local files
+.gradle/
+.kotlin/
+local.properties
+
 # Logs
 *.log
 npm-debug.log*
