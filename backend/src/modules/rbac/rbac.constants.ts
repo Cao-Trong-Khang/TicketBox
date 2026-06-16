@@ -15,6 +15,7 @@ export const PERMISSION_CODES = {
   concertAnalyticsRead: 'concert:analytics:read',
   ticketPurchase: 'ticket:purchase',
   ticketReadOwn: 'ticket:read_own',
+  checkinPreload: 'checkin:preload',
   checkinScan: 'checkin:scan',
   checkinSync: 'checkin:sync',
 } as const;
