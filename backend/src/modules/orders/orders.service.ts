@@ -4,7 +4,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { ConcertStatus, TicketTypeStatus, OrderStatus, Prisma } from '@prisma/client';
+import { ConcertStatus, TicketTypeStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { CreateOrderRequestDto } from './dto/create-order.request.dto';

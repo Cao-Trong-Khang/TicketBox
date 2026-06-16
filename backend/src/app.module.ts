@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 import { AppConfigModule } from './config/app-config.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -16,6 +17,7 @@ import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
     }),
     AppConfigModule,
     RedisCacheModule,
+    ScheduleModule.forRoot(),
     AuthModule,
     RbacModule,
     ConcertsModule,
