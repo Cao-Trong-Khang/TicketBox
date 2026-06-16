@@ -1,0 +1,56 @@
+# Offline Gate Check-in Demo
+
+This demo uses local seed data created by `backend/prisma/seed.js`.
+
+## Seeded Staff and Scan Data
+
+- Staff login: `checkin@ticketbox.local` / `Checkin@123456`
+- Assigned source devices: `demo-device-a`, `demo-device-b`
+- Valid ticket QR hashes: `qr-ticket-demo-valid-001`, `qr-ticket-demo-valid-002`
+- Valid VIP QR hashes: `qr-vip-demo-valid-001`, `qr-vip-demo-valid-002`
+
+## Online Preload
+
+1. Start infrastructure: `docker compose up -d postgres redis kafka`.
+2. Run backend migrations and seed: `cd backend && npm run prisma:deploy && npm run prisma:seed`.
+3. Start the API: `npm run start:dev`.
+4. Log in through `POST /auth/login` using the staff login above.
+5. In the mobile app, paste the JWT, set device ID `demo-device-a`, refresh assignments, and preload the assigned concert.
+
+Expected result: the app stores assignment metadata, ticket records, VIP guest records, and a snapshot version in Room.
+
+## Offline Valid and Duplicate Scan
+
+1. Disable network on the Android emulator or device.
+2. Scan `qr-ticket-demo-valid-001`.
+3. Scan `qr-ticket-demo-valid-001` again.
+
+Expected result: the first scan is persisted as a pending local accepted log before display; the second scan is also persisted and shown as a local duplicate.
+
+## Reconnect Sync
+
+1. Re-enable network.
+2. Tap Sync or let WorkManager run.
+
+Expected result: pending logs are posted to `POST /check-in/events/:concertId/sync`; the backend returns one outcome per local scan, and Room stores accepted or duplicate backend outcomes without deleting local records.
+
+## Cross-device Conflict Fixture
+
+Backend unit coverage in `backend/src/modules/check-in/check-in.service.spec.ts` includes a fixture where:
+
+1. `device-a` syncs `ticket-qr-1` first and receives `accepted`.
+2. `device-b` syncs the same ticket later with a different `localScanId`.
+3. PostgreSQL success-only uniqueness allows only one successful check-in; the later scan receives `duplicate`.
+
+The same scenario can be repeated manually with seeded devices `demo-device-a` and `demo-device-b` scanning `qr-ticket-demo-valid-002` offline before either device reconnects.
+
+## Idempotent Retry Fixture
+
+Backend unit coverage also uploads the same `(sourceDeviceId, localScanId)` twice. The second request returns the original `checkInId` and does not create a second successful check-in.
+
+Manual retry: after a successful sync response is lost at the client, send the same scan again with the same `sourceDeviceId` and `localScanId`; the API returns the original outcome.
+
+## Rate Limit and Kafka Notes
+
+- Redis `429` responses are retryable. The mobile app leaves affected scan logs pending and records retry state.
+- Kafka publishing is optional for analytics/projections. Backend tests simulate a publisher failure and verify that the authoritative sync response is still returned from PostgreSQL state.
