@@ -3,11 +3,13 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 import { AppConfigModule } from './config/app-config.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CheckInModule } from './modules/check-in/check-in.module';
 import { ConcertsModule } from './modules/concerts/concerts.module';
 import { HealthModule } from './modules/health/health.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
+import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
 
 @Module({
   imports: [
@@ -20,7 +22,9 @@ import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
     ScheduleModule.forRoot(),
     AuthModule,
     RbacModule,
+    CheckInModule,
     ConcertsModule,
+    VipImportsModule,
     OrdersModule,
     HealthModule,
   ],

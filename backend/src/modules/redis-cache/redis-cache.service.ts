@@ -51,6 +51,22 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  async incrementWithTtl(key: string, ttlSeconds: number): Promise<number | null> {
+    try {
+      await this.ensureConnected();
+      const count = await this.redis.incr(key);
+
+      if (count === 1) {
+        await this.redis.expire(key, ttlSeconds);
+      }
+
+      return count;
+    } catch (error) {
+      this.warn('increment', key, error);
+      return null;
+    }
+  }
+
   onModuleDestroy(): void {
     if (this.redis.status !== 'end') {
       this.redis.disconnect();

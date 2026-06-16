@@ -211,6 +211,7 @@ function createSeededState(): TestState {
     ]),
     ...mapPermissions(roles, permissions, ROLE_CODES.checkinStaff, [
       PERMISSION_CODES.concertRead,
+      PERMISSION_CODES.checkinPreload,
       PERMISSION_CODES.checkinScan,
       PERMISSION_CODES.checkinSync,
     ]),

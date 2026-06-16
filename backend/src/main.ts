@@ -20,7 +20,7 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(httpConfig.port);
+  await app.listen(httpConfig.port, '0.0.0.0');
 }
 
 void bootstrap();

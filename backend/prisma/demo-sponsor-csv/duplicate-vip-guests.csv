@@ -1,0 +1,5 @@
+concert_title,sponsor_source,external_guest_key,full_name,email,phone
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,SPONSOR-DUP-001,Duplicate Key One,dup.key.one@example.test,+84908880001
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,SPONSOR-DUP-001,Duplicate Key Two,dup.key.two@example.test,+84908880002
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,,Identity Duplicate,identity.dup@example.test,+84908880003
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,, identity   duplicate ,IDENTITY.DUP@example.test,+84 908 880 003

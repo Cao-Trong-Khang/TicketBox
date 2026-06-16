@@ -15,6 +15,9 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main.js",
     "start:worker": "node dist/worker.js",
+    "start:vip-import-scheduler": "node dist/vip-import-scheduler.js",
+    "vip-imports:scan": "ts-node src/vip-import-scheduler.ts",
+    "vip-imports:worker": "ts-node src/worker.ts",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "node --test -r ts-node/register \"src/**/*.spec.ts\""
   },

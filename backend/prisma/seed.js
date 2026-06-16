@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
 const prisma = new PrismaClient();
 
@@ -20,6 +21,7 @@ const permissions = [
   { code: 'concert:analytics:read', description: 'Read concert analytics' },
   { code: 'ticket:purchase', description: 'Purchase tickets' },
   { code: 'ticket:read_own', description: 'Read own tickets' },
+  { code: 'checkin:preload', description: 'Preload assigned check-in event data' },
   { code: 'checkin:scan', description: 'Scan and validate tickets at check-in' },
   { code: 'checkin:sync', description: 'Synchronize offline check-in records' },
 ];
@@ -34,7 +36,7 @@ const rolePermissions = {
     'concert:ticket_type:manage',
     'concert:analytics:read',
   ],
-  CHECKIN_STAFF: ['concert:read', 'checkin:scan', 'checkin:sync'],
+  CHECKIN_STAFF: ['concert:read', 'checkin:preload', 'checkin:scan', 'checkin:sync'],
 };
 
 const concertSeeds = [
@@ -259,10 +261,13 @@ async function main() {
     },
   });
 
-  await seedConcerts(organizerUser.id);
+  const seededConcerts = await seedConcerts(organizerUser.id);
+  await seedCheckInDemo(seededConcerts[0]);
 }
 
 async function seedConcerts(organizerId) {
+  const seededConcerts = [];
+
   for (const concertSeed of concertSeeds) {
     const { ticketTypes, ...concertData } = concertSeed;
 
@@ -329,7 +334,344 @@ async function seedConcerts(organizerId) {
         },
       });
     }
+
+    seededConcerts.push(concert);
   }
+
+  return seededConcerts;
+}
+
+async function seedCheckInDemo(concert) {
+  if (!concert) {
+    return;
+  }
+
+  const staffPasswordHash = await bcrypt.hash(
+    process.env.CHECKIN_STAFF_PASSWORD || 'Checkin@123456',
+    BCRYPT_SALT_ROUNDS,
+  );
+  const audiencePasswordHash = await bcrypt.hash('Audience@123456', BCRYPT_SALT_ROUNDS);
+
+  const staffUser = await prisma.user.upsert({
+    where: { email: process.env.CHECKIN_STAFF_EMAIL || 'checkin@ticketbox.local' },
+    update: {
+      displayName: 'Demo Check-in Staff',
+      status: 'ACTIVE',
+    },
+    create: {
+      email: process.env.CHECKIN_STAFF_EMAIL || 'checkin@ticketbox.local',
+      passwordHash: staffPasswordHash,
+      displayName: 'Demo Check-in Staff',
+      status: 'ACTIVE',
+    },
+  });
+
+  const audienceUser = await prisma.user.upsert({
+    where: { email: 'audience@ticketbox.local' },
+    update: {
+      displayName: 'Demo Audience',
+      status: 'ACTIVE',
+    },
+    create: {
+      email: 'audience@ticketbox.local',
+      passwordHash: audiencePasswordHash,
+      displayName: 'Demo Audience',
+      status: 'ACTIVE',
+    },
+  });
+
+  await assignRole(staffUser.id, 'CHECKIN_STAFF');
+  await assignRole(audienceUser.id, 'AUDIENCE');
+
+  await seedCheckInAssignment(staffUser.id, concert.id, 'Gate A', 'demo-device-a');
+  await seedCheckInAssignment(staffUser.id, concert.id, 'Gate B', 'demo-device-b');
+
+  const ticketType = await prisma.ticketType.findFirstOrThrow({
+    where: {
+      concertId: concert.id,
+      status: 'ACTIVE',
+    },
+    orderBy: { priceVnd: 'asc' },
+  });
+
+  const order = await prisma.order.upsert({
+    where: { orderCode: 'DEMO-CHECKIN-ORDER-001' },
+    update: {
+      status: 'PAID',
+      paidAt: new Date('2026-06-15T12:00:00.000Z'),
+    },
+    create: {
+      orderCode: 'DEMO-CHECKIN-ORDER-001',
+      userId: audienceUser.id,
+      concertId: concert.id,
+      status: 'PAID',
+      totalAmountVnd: ticketType.priceVnd * 2,
+      expiresAt: new Date('2026-06-15T13:00:00.000Z'),
+      paidAt: new Date('2026-06-15T12:00:00.000Z'),
+      idempotencyKey: 'demo-checkin-order-001',
+    },
+  });
+
+  let orderItem = await prisma.orderItem.findFirst({
+    where: {
+      orderId: order.id,
+      ticketTypeId: ticketType.id,
+    },
+  });
+
+  if (!orderItem) {
+    orderItem = await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        ticketTypeId: ticketType.id,
+        quantity: 2,
+        unitPriceVnd: ticketType.priceVnd,
+        subtotalVnd: ticketType.priceVnd * 2,
+      },
+    });
+  }
+
+  await seedTicket({
+    ticketCode: 'DEMO-CHECKIN-TICKET-001',
+    qrHash: 'qr-ticket-demo-valid-001',
+    orderId: order.id,
+    orderItemId: orderItem.id,
+    ownerUserId: audienceUser.id,
+    concertId: concert.id,
+    ticketTypeId: ticketType.id,
+  });
+  await seedTicket({
+    ticketCode: 'DEMO-CHECKIN-TICKET-002',
+    qrHash: 'qr-ticket-demo-valid-002',
+    orderId: order.id,
+    orderItemId: orderItem.id,
+    ownerUserId: audienceUser.id,
+    concertId: concert.id,
+    ticketTypeId: ticketType.id,
+  });
+
+  let vipImport = await prisma.vipGuestImport.findFirst({
+    where: {
+      concertId: concert.id,
+      fileName: 'demo-checkin-vip.csv',
+    },
+  });
+
+  if (!vipImport) {
+    vipImport = await prisma.vipGuestImport.create({
+      data: {
+        concertId: concert.id,
+        sourceName: 'LOCAL_DEMO',
+        fileName: 'demo-checkin-vip.csv',
+        sourceFingerprint: 'demo-checkin-vip-20260615',
+        status: 'COMPLETED',
+        totalRows: 3,
+        acceptedRows: 3,
+        importedAt: new Date('2026-06-15T12:00:00.000Z'),
+      },
+    });
+  } else {
+    vipImport = await prisma.vipGuestImport.update({
+      where: { id: vipImport.id },
+      data: {
+        sourceName: 'LOCAL_DEMO',
+        sourceFingerprint: 'demo-checkin-vip-20260615',
+        status: 'COMPLETED',
+        totalRows: 3,
+        acceptedRows: 3,
+        rejectedRows: 0,
+        duplicateRows: 0,
+        failureCode: null,
+        failureMessage: null,
+        importedAt: new Date('2026-06-15T12:00:00.000Z'),
+      },
+    });
+  }
+
+  await seedVipGuest(vipImport.id, concert.id, {
+    externalGuestKey: 'VIP-DEMO-001',
+    qrHash: 'qr-vip-demo-valid-001',
+    fullName: 'Demo VIP Guest One',
+    email: 'vip.one@example.test',
+    phone: '+84901230001',
+    sponsorCompany: 'TicketBox Partners',
+    invitedBy: 'Sponsor Team',
+    guestType: 'Artist Guest',
+    allowedGate: 'VIP Gate',
+    notes: 'Demo guest with full metadata',
+    sourceRowNumber: 2,
+  });
+  await seedVipGuest(vipImport.id, concert.id, {
+    externalGuestKey: 'VIP-DEMO-002',
+    qrHash: 'qr-vip-demo-valid-002',
+    fullName: 'Demo VIP Guest Two',
+    email: 'vip.two@example.test',
+    phone: '+84901230002',
+    sponsorCompany: 'Media Partner',
+    invitedBy: 'Press Desk',
+    guestType: 'Press',
+    allowedGate: 'Gate A',
+    notes: 'Press entrance',
+    sourceRowNumber: 3,
+  });
+  await seedVipGuest(vipImport.id, concert.id, {
+    externalGuestKey: 'VIP-DEMO-003',
+    qrHash: 'qr-vip-demo-checked-in-003',
+    fullName: 'Demo VIP Guest Three',
+    email: 'vip.three@example.test',
+    phone: '+84901230003',
+    sponsorCompany: 'Production Partner',
+    invitedBy: 'Production Office',
+    guestType: 'Production Guest',
+    allowedGate: 'Gate B',
+    notes: 'Already checked in duplicate fixture',
+    sourceRowNumber: 4,
+    status: 'CHECKED_IN',
+    checkedInAt: new Date('2026-06-15T12:15:00.000Z'),
+  });
+}
+
+async function assignRole(userId, roleCode) {
+  const role = await prisma.role.findUniqueOrThrow({
+    where: { code: roleCode },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId,
+        roleId: role.id,
+      },
+    },
+    update: {},
+    create: {
+      userId,
+      roleId: role.id,
+    },
+  });
+}
+
+async function seedCheckInAssignment(staffUserId, concertId, gateName, sourceDeviceId) {
+  await prisma.checkInAssignment.upsert({
+    where: {
+      staffUserId_concertId_gateName: {
+        staffUserId,
+        concertId,
+        gateName,
+      },
+    },
+    update: {
+      sourceDeviceId,
+      active: true,
+    },
+    create: {
+      staffUserId,
+      concertId,
+      gateName,
+      sourceDeviceId,
+      active: true,
+    },
+  });
+}
+
+async function seedTicket(ticket) {
+  const status = ticket.status || 'ACTIVE';
+  const checkedInAt = ticket.checkedInAt || null;
+
+  await prisma.ticket.upsert({
+    where: { ticketCode: ticket.ticketCode },
+    update: {
+      qrHash: ticket.qrHash,
+      status,
+      checkedInAt,
+    },
+    create: {
+      ...ticket,
+      status,
+      checkedInAt,
+    },
+  });
+}
+
+async function seedVipGuest(importId, concertId, guest) {
+  const normalized = normalizeVipGuestIdentity(guest);
+  const status = guest.status || 'ACTIVE';
+  const checkedInAt = guest.checkedInAt || null;
+
+  await prisma.vipGuest.upsert({
+    where: {
+      concertId_sponsorSource_externalGuestKey: {
+        concertId,
+        sponsorSource: 'LOCAL_DEMO',
+        externalGuestKey: guest.externalGuestKey,
+      },
+    },
+    update: {
+      qrHash: guest.qrHash,
+      fullName: guest.fullName,
+      email: guest.email,
+      phone: guest.phone || null,
+      normalizedFullName: normalized.fullName,
+      normalizedEmail: normalized.email,
+      normalizedPhone: normalized.phone,
+      normalizedIdentityKey: normalized.identityKey,
+      sourceRowNumber: guest.sourceRowNumber || null,
+      sponsorCompany: guest.sponsorCompany || null,
+      invitedBy: guest.invitedBy || null,
+      guestType: guest.guestType || null,
+      allowedGate: guest.allowedGate || null,
+      notes: guest.notes || null,
+      status,
+      checkedInAt,
+    },
+    create: {
+      importId,
+      concertId,
+      sponsorSource: 'LOCAL_DEMO',
+      externalGuestKey: guest.externalGuestKey,
+      qrHash: guest.qrHash,
+      fullName: guest.fullName,
+      email: guest.email,
+      phone: guest.phone || null,
+      normalizedFullName: normalized.fullName,
+      normalizedEmail: normalized.email,
+      normalizedPhone: normalized.phone,
+      normalizedIdentityKey: normalized.identityKey,
+      sourceRowNumber: guest.sourceRowNumber || null,
+      sponsorCompany: guest.sponsorCompany || null,
+      invitedBy: guest.invitedBy || null,
+      guestType: guest.guestType || null,
+      allowedGate: guest.allowedGate || null,
+      notes: guest.notes || null,
+      status,
+      checkedInAt,
+    },
+  });
+}
+
+function normalizeVipGuestIdentity(guest) {
+  const fullName = normalizeName(guest.fullName);
+  const email = guest.email ? guest.email.trim().toLowerCase() : null;
+  const phone = guest.phone ? guest.phone.replace(/[^0-9+]/g, '') || null : null;
+  const identityKey = guest.externalGuestKey ? null : sha256([email || '', phone || '', fullName].join('|'));
+
+  return {
+    fullName,
+    email,
+    phone,
+    identityKey,
+  };
+}
+
+function normalizeName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
 }
 
 main()
