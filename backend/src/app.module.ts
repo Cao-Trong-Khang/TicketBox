@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 import { AppConfigModule } from './config/app-config.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConcertsModule } from './modules/concerts/concerts.module';
 import { HealthModule } from './modules/health/health.module';
+import { OrdersModule } from './modules/orders/orders.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
 
@@ -15,9 +17,11 @@ import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
     }),
     AppConfigModule,
     RedisCacheModule,
+    ScheduleModule.forRoot(),
     AuthModule,
     RbacModule,
     ConcertsModule,
+    OrdersModule,
     HealthModule,
   ],
 })
