@@ -44,5 +44,39 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 3
 
+  backend:
+    build:
+      context: ./backend
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      FRONTEND_ORIGIN: http://localhost:5173
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ticketbox
+      POSTGRES_PASSWORD: ticketbox
+      POSTGRES_DB: ticketbox
+      DATABASE_URL: postgresql://ticketbox:ticketbox@postgres:5432/ticketbox?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BROKERS: kafka:29092
+      JWT_ACCESS_SECRET: local-development-jwt-secret
+      JWT_ACCESS_TOKEN_TTL: 1h
+      VIP_CSV_SOURCE_DIR: /app/prisma/demo-sponsor-csv
+      VIP_CSV_DEFAULT_SOURCE_NAME: SPONSOR_CSV
+      VIP_IMPORT_BATCH_SIZE: 100
+      VIP_IMPORT_KAFKA_FAIL: 0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend/prisma/demo-sponsor-csv:/app/prisma/demo-sponsor-csv:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
 volumes:
   postgres_data_18:

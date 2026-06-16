@@ -7,6 +7,7 @@ import { ConcertsModule } from './modules/concerts/concerts.module';
 import { HealthModule } from './modules/health/health.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
+import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
     RbacModule,
     CheckInModule,
     ConcertsModule,
+    VipImportsModule,
     HealthModule,
   ],
 })
