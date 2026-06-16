@@ -82,6 +82,8 @@ enum CheckInStatus {
   ALREADY_USED
   WRONG_CONCERT
   CANCELLED_TICKET
+  EXPIRED
+  UNAUTHORIZED
   CONFLICT
 
   @@map("check_in_status")
@@ -129,12 +131,24 @@ enum ArtistBioJobStatus {
 }
 
 enum ImportStatus {
+  DETECTED
   PENDING
+  QUEUED
   PROCESSING
   COMPLETED
   FAILED
+  FAILED_TO_ENQUEUE
+  RETRYABLE_FAILED
 
   @@map("import_status")
+}
+
+enum ImportErrorType {
+  FILE
+  ROW
+  DUPLICATE
+
+  @@map("import_error_type")
 }
 
 enum VipGuestStatus {
@@ -162,12 +176,13 @@ model User {
   userRoles UserRole[]
 
   // Relations nghiệp vụ TicketBox
-  concerts      Concert[]      @relation("ConcertOrganizer")
-  orders        Order[]
-  tickets       Ticket[]
-  checkIns      CheckIn[]      @relation("CheckInStaff")
-  notifications Notification[]
-  artistBioJobs ArtistBioJob[] @relation("ArtistBioUploader")
+  concerts           Concert[]           @relation("ConcertOrganizer")
+  checkInAssignments CheckInAssignment[] @relation("CheckInStaffAssignments")
+  orders             Order[]
+  tickets            Ticket[]
+  checkIns           CheckIn[]           @relation("CheckInStaff")
+  notifications      Notification[]
+  artistBioJobs      ArtistBioJob[]      @relation("ArtistBioUploader")
 
   @@map("users")
 }
@@ -242,15 +257,16 @@ model Concert {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  organizer       User             @relation("ConcertOrganizer", fields: [organizerId], references: [id])
-  ticketTypes     TicketType[]
-  orders          Order[]
-  tickets         Ticket[]
-  checkIns        CheckIn[]
-  notifications   Notification[]
-  artistBioJobs   ArtistBioJob[]
-  vipGuestImports VipGuestImport[]
-  vipGuests       VipGuest[]
+  organizer          User                @relation("ConcertOrganizer", fields: [organizerId], references: [id])
+  ticketTypes        TicketType[]
+  orders             Order[]
+  tickets            Ticket[]
+  checkIns           CheckIn[]
+  checkInAssignments CheckInAssignment[]
+  notifications      Notification[]
+  artistBioJobs      ArtistBioJob[]
+  vipGuestImports    VipGuestImport[]
+  vipGuests          VipGuest[]
 
   @@index([status])
   @@index([startsAt])
@@ -346,8 +362,8 @@ model PaymentTransaction {
   orderId String @map("order_id") @db.Uuid
 
   provider              PaymentProvider
-  providerTransactionId String? @map("provider_transaction_id")
-  idempotencyKey        String  @unique @map("idempotency_key")
+  providerTransactionId String?         @map("provider_transaction_id")
+  idempotencyKey        String          @unique @map("idempotency_key")
 
   status    PaymentStatus @default(INITIATED)
   amountVnd Int           @map("amount_vnd")
@@ -407,6 +423,7 @@ model CheckIn {
   concertId   String @map("concert_id") @db.Uuid
   staffUserId String @map("staff_user_id") @db.Uuid
 
+  localScanId    String? @map("local_scan_id")
   sourceDeviceId String? @map("source_device_id")
 
   mode       CheckInMode
@@ -428,8 +445,31 @@ model CheckIn {
   @@index([concertId])
   @@index([staffUserId])
   @@index([sourceDeviceId])
+  @@index([sourceDeviceId, localScanId])
   @@index([scannedAt])
   @@map("check_ins")
+}
+
+model CheckInAssignment {
+  id          String @id @default(uuid()) @db.Uuid
+  staffUserId String @map("staff_user_id") @db.Uuid
+  concertId   String @map("concert_id") @db.Uuid
+
+  gateName       String?  @map("gate_name")
+  sourceDeviceId String?  @map("source_device_id")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  staffUser User    @relation("CheckInStaffAssignments", fields: [staffUserId], references: [id], onDelete: Cascade)
+  concert   Concert @relation(fields: [concertId], references: [id], onDelete: Cascade)
+
+  @@unique([staffUserId, concertId, gateName])
+  @@index([staffUserId])
+  @@index([concertId])
+  @@index([sourceDeviceId])
+  @@index([active])
+  @@map("check_in_assignments")
 }
 
 // =====================
@@ -443,7 +483,7 @@ model Notification {
 
   type    NotificationType
   channel NotificationChannel
-  status  NotificationStatus @default(PENDING)
+  status  NotificationStatus  @default(PENDING)
 
   subject String?
   body    String  @db.Text
@@ -498,21 +538,34 @@ model VipGuestImport {
   id        String @id @default(uuid()) @db.Uuid
   concertId String @map("concert_id") @db.Uuid
 
-  fileName      String       @map("file_name")
-  status        ImportStatus @default(PENDING)
-  totalRows     Int          @default(0) @map("total_rows")
-  acceptedRows  Int          @default(0) @map("accepted_rows")
-  rejectedRows  Int          @default(0) @map("rejected_rows")
-  duplicateRows Int          @default(0) @map("duplicate_rows")
+  sourceName        String       @default("SPONSOR_CSV") @map("source_name")
+  fileName          String       @map("file_name")
+  sourcePath        String?      @map("source_path")
+  sourceFingerprint String       @map("source_fingerprint")
+  status            ImportStatus @default(PENDING)
+  totalRows         Int          @default(0) @map("total_rows")
+  acceptedRows      Int          @default(0) @map("accepted_rows")
+  rejectedRows      Int          @default(0) @map("rejected_rows")
+  duplicateRows     Int          @default(0) @map("duplicate_rows")
+  failureCode       String?      @map("failure_code")
+  failureMessage    String?      @map("failure_message") @db.Text
 
+  queuedAt   DateTime? @map("queued_at")
+  startedAt  DateTime? @map("started_at")
   importedAt DateTime? @map("imported_at")
   createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
-  concert Concert    @relation(fields: [concertId], references: [id], onDelete: Cascade)
-  guests  VipGuest[]
+  concert   Concert               @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  guests    VipGuest[]
+  errors    VipGuestImportError[]
+  auditLogs AuditLog[]
 
+  @@unique([concertId, sourceName, sourceFingerprint])
   @@index([concertId])
-  @@index([status])
+  @@index([concertId, status])
+  @@index([status, createdAt])
+  @@index([sourceFingerprint])
   @@map("vip_guest_imports")
 }
 
@@ -521,16 +574,29 @@ model VipGuest {
   importId  String @map("import_id") @db.Uuid
   concertId String @map("concert_id") @db.Uuid
 
-  sponsorSource    String? @map("sponsor_source")
+  sponsorSource    String  @default("SPONSOR_CSV") @map("sponsor_source")
   externalGuestKey String? @map("external_guest_key")
+  qrHash           String? @unique @map("qr_hash")
 
-  fullName String  @map("full_name")
-  email    String?
-  phone    String?
+  fullName              String  @map("full_name")
+  email                 String?
+  phone                 String?
+  sponsorCompany        String? @map("sponsor_company")
+  invitedBy             String? @map("invited_by")
+  guestType             String? @map("guest_type")
+  allowedGate           String? @map("allowed_gate")
+  notes                 String?
+  normalizedFullName    String  @default("") @map("normalized_full_name")
+  normalizedEmail       String? @map("normalized_email")
+  normalizedPhone       String? @map("normalized_phone")
+  normalizedIdentityKey String? @map("normalized_identity_key")
+  sourceRowNumber       Int?    @map("source_row_number")
 
   status      VipGuestStatus @default(ACTIVE)
   checkedInAt DateTime?      @map("checked_in_at")
+  importedAt  DateTime       @default(now()) @map("imported_at")
   createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
 
   import   VipGuestImport @relation(fields: [importId], references: [id], onDelete: Cascade)
   concert  Concert        @relation(fields: [concertId], references: [id], onDelete: Cascade)
@@ -538,8 +604,54 @@ model VipGuest {
 
   @@unique([concertId, sponsorSource, externalGuestKey])
   @@index([concertId])
+  @@index([concertId, status])
+  @@index([concertId, sponsorSource])
   @@index([email])
   @@index([phone])
+  @@index([normalizedEmail])
+  @@index([normalizedPhone])
+  @@index([normalizedIdentityKey])
   @@index([status])
   @@map("vip_guests")
+}
+
+model VipGuestImportError {
+  id       String @id @default(uuid()) @db.Uuid
+  importId String @map("import_id") @db.Uuid
+
+  type      ImportErrorType
+  rowNumber Int?            @map("row_number")
+  field     String?
+  code      String
+  message   String          @db.Text
+  rawRow    Json?           @map("raw_row")
+  metadata  Json?
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  import VipGuestImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@index([importId])
+  @@index([importId, type])
+  @@index([importId, rowNumber])
+  @@map("vip_guest_import_errors")
+}
+
+model AuditLog {
+  id          String  @id @default(uuid()) @db.Uuid
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  importId    String? @map("import_id") @db.Uuid
+
+  entityType String  @map("entity_type")
+  entityId   String  @map("entity_id")
+  action     String
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  import VipGuestImport? @relation(fields: [importId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([importId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
