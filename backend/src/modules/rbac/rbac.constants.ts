@@ -3,7 +3,7 @@ export const PERMISSIONS_KEY = 'ticketbox:permissions';
 export const ROLE_CODES = {
   audience: 'AUDIENCE',
   organizer: 'ORGANIZER',
-  checkinStaff: 'CHECKIN_STAFF',
+  gateStaff: 'GATE_STAFF',
 } as const;
 
 export const PERMISSION_CODES = {
@@ -11,10 +11,11 @@ export const PERMISSION_CODES = {
   concertCreate: 'concert:create',
   concertUpdate: 'concert:update',
   concertCancel: 'concert:cancel',
-  concertTicketTypeManage: 'concert:ticket_type:manage',
-  concertAnalyticsRead: 'concert:analytics:read',
+  concertStats: 'concert:stats',
   ticketPurchase: 'ticket:purchase',
-  ticketReadOwn: 'ticket:read_own',
+  ticketReadOwn: 'ticket:read-own',
+  documentUpload: 'document:upload',
+  aiBioRead: 'aibio:read',
   checkinScan: 'checkin:scan',
   checkinSync: 'checkin:sync',
 } as const;

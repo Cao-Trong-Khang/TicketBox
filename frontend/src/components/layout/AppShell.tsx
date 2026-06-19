@@ -1,6 +1,9 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogOut, Ticket } from 'lucide-react';
+import { logout } from '../../features/auth/api';
+import { clearSession, getRefreshToken, getStoredUser } from '../../features/auth/session';
+import { UserProfile } from '../../features/auth/types';
 
 type AppShellProps = {
   children: ReactNode;
@@ -8,23 +11,32 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   const navigate = useNavigate();
-  const [hasToken, setHasToken] = useState(() => Boolean(localStorage.getItem('accessToken')));
+  const [user, setUser] = useState<UserProfile | null>(() => getStoredUser());
 
   useEffect(() => {
-    const syncToken = () => setHasToken(Boolean(localStorage.getItem('accessToken')));
+    const syncUser = () => setUser(getStoredUser());
 
-    window.addEventListener('ticketbox-auth-changed', syncToken);
-    window.addEventListener('storage', syncToken);
+    window.addEventListener('ticketbox-auth-changed', syncUser);
+    window.addEventListener('storage', syncUser);
 
     return () => {
-      window.removeEventListener('ticketbox-auth-changed', syncToken);
-      window.removeEventListener('storage', syncToken);
+      window.removeEventListener('ticketbox-auth-changed', syncUser);
+      window.removeEventListener('storage', syncUser);
     };
   }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem('accessToken');
-    window.dispatchEvent(new Event('ticketbox-auth-changed'));
+  const handleLogout = async () => {
+    const refreshToken = getRefreshToken();
+
+    if (refreshToken) {
+      try {
+        await logout(refreshToken);
+      } catch {
+        // Local session cleanup still happens if the server token is already invalid.
+      }
+    }
+
+    clearSession();
     navigate('/login');
   };
 
@@ -37,7 +49,24 @@ export function AppShell({ children }: AppShellProps) {
         </Link>
 
         <nav className="nav-links" aria-label="Primary">
-          {hasToken && (
+          {user?.roles.includes('ORGANIZER') && (
+            <>
+              <Link to="/admin/dashboard">Dashboard</Link>
+              <Link to="/admin/concerts">Concert Management</Link>
+              <Link to="/admin/revenue">Revenue Stats</Link>
+              <Link to="/admin/vip-import">VIP CSV Import</Link>
+              <Link to="/admin/ai-artist-bio">AI Artist Bio</Link>
+            </>
+          )}
+          {user?.roles.includes('GATE_STAFF') && (
+            <>
+              <Link to="/checkin">QR Scanner</Link>
+              <Link to="/checkin/vip-guests">VIP Guest List</Link>
+              <Link to="/checkin/offline-log">Offline Scan Log</Link>
+            </>
+          )}
+          {user?.roles.includes('AUDIENCE') && <Link to="/tickets/my">My Tickets</Link>}
+          {user && (
             <button className="nav-button" type="button" onClick={handleLogout}>
               <LogOut size={18} aria-hidden="true" />
               <span>Đăng xuất</span>

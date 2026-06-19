@@ -154,12 +154,16 @@ model User {
   id           String     @id @default(uuid()) @db.Uuid
   email        String     @unique
   passwordHash String     @map("password_hash")
-  displayName  String?    @map("display_name")
+  fullName     String?    @map("full_name")
+  phone        String?
   status       UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
-  userRoles UserRole[]
+  userRoles            UserRole[]
+  refreshTokens        RefreshToken[]
+  auditLogs            AuditLog[]             @relation("AuditActor")
+  gateStaffAssignments GateStaffAssignment[]
 
   // Relations nghiệp vụ TicketBox
   concerts      Concert[]      @relation("ConcertOrganizer")
@@ -219,6 +223,55 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorUserId  String   @map("actor_user_id") @db.Uuid
+  action       String
+  targetType   String   @map("target_type")
+  targetId     String   @map("target_id") @db.Uuid
+  metadataJson String?  @map("metadata_json") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  actor User @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([actorUserId])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model GateStaffAssignment {
+  id         String   @id @default(uuid()) @db.Uuid
+  concertId  String   @map("concert_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  gateLabel  String   @map("gate_label") @db.VarChar(120)
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  concert Concert @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([concertId, userId])
+  @@index([concertId])
+  @@index([userId])
+  @@map("gate_staff_assignments")
+}
+
 // =====================
 // CONCERTS & TICKET TYPES
 // =====================
@@ -251,6 +304,7 @@ model Concert {
   artistBioJobs   ArtistBioJob[]
   vipGuestImports VipGuestImport[]
   vipGuests       VipGuest[]
+  gateStaffAssignments GateStaffAssignment[]
 
   @@index([status])
   @@index([startsAt])

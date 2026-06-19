@@ -18,13 +18,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   validate(payload: JwtPayload): AuthenticatedUser {
-    if (!payload.sub || !payload.email) {
+    if (!payload.user_id || !Array.isArray(payload.roles)) {
       throw new UnauthorizedException('Invalid access token payload');
     }
 
     return {
-      id: payload.sub,
-      email: payload.email,
+      id: payload.user_id,
+      roles: payload.roles,
     };
   }
 }

@@ -1,18 +1,27 @@
 export type JwtPayload = {
-  sub: string;
-  email: string;
+  user_id: string;
+  roles: string[];
+  exp?: number;
 };
 
 export type AuthenticatedUser = {
   id: string;
-  email: string;
+  roles: string[];
 };
 
 export type PublicUser = {
   id: string;
   email: string;
-  displayName: string | null;
+  fullName: string | null;
+  phone: string | null;
   status: string;
+  roles: string[];
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type AuthTokens = {
+  access_token: string;
+  refresh_token: string;
+  user: PublicUser;
 };

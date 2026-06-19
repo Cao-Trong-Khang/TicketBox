@@ -6,6 +6,7 @@ import { FormField } from '../../../components/ui/FormField';
 import { ApiError } from '../../../lib/api-client';
 import { login } from '../api';
 import { AuthLayout } from '../../../components/layout/AuthLayout';
+import { getPostLoginPath, saveSession } from '../session';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -21,9 +22,12 @@ export function LoginPage() {
 
     try {
       const data = await login({ email, password });
-      localStorage.setItem('accessToken', data.accessToken);
-      window.dispatchEvent(new Event('ticketbox-auth-changed'));
-      navigate('/home');
+      saveSession({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        user: data.user,
+      });
+      navigate(getPostLoginPath(data.user.roles));
     } catch (err: unknown) {
       const apiError = err as ApiError;
       setError(apiError.status === 401 ? 'Email hoặc mật khẩu không đúng.' : apiError.message || 'Không thể đăng nhập lúc này.');

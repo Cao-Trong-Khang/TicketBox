@@ -11,7 +11,7 @@ const LOGIN_REDIRECT_DELAY_MS = 900;
 
 export function RegisterPage() {
   const navigate = useNavigate();
-  const [displayName, setDisplayName] = useState('');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -24,7 +24,7 @@ export function RegisterPage() {
     setError('');
     setSuccess('');
 
-    if (!displayName.trim() || !email.trim()) {
+    if (!fullName.trim() || !email.trim()) {
       setError('Vui lòng nhập tên hiển thị và email.');
       return;
     }
@@ -42,7 +42,7 @@ export function RegisterPage() {
     setIsSubmitting(true);
 
     try {
-      await register({ displayName, email, password });
+      await register({ fullName, email, password });
       setSuccess('Đăng ký thành công. Bạn sẽ được chuyển sang màn hình đăng nhập.');
       window.setTimeout(() => navigate('/login'), LOGIN_REDIRECT_DELAY_MS);
     } catch (err: unknown) {
@@ -65,11 +65,11 @@ export function RegisterPage() {
 
         <FormField
           label="Tên hiển thị"
-          name="displayName"
+          name="fullName"
           type="text"
           autoComplete="name"
-          value={displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
+          value={fullName}
+          onChange={(event) => setFullName(event.target.value)}
           required
         />
         <FormField

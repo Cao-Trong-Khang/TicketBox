@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './config';
+import { clearSession, getAccessToken } from '../features/auth/session';
 
 export type ApiError = {
   status: number;
@@ -7,7 +8,7 @@ export type ApiError = {
 };
 
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   const headers = new Headers(options.headers);
 
   if (token) {
@@ -27,6 +28,10 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   const data = text ? parseJson(text) : {};
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearSession();
+    }
+
     throw {
       status: response.status,
       message: getErrorMessage(data, response.statusText),

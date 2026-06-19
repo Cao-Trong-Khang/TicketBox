@@ -5,6 +5,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class PermissionService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getUserRoles(userId: string): Promise<string[]> {
+    const userRoles = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: { role: true },
+    });
+
+    return userRoles.map((userRole) => userRole.role.code).sort();
+  }
+
   async getUserPermissions(userId: string): Promise<string[]> {
     const userRoles = await this.prisma.userRole.findMany({
       where: { userId },
