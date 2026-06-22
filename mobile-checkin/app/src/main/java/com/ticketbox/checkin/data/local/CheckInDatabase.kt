@@ -13,7 +13,7 @@ import androidx.room.RoomDatabase
         PreloadedVipGuestEntity::class,
         LocalScanLogEntity::class,
     ],
-    version = 3,
+    version = 4,
 )
 abstract class CheckInDatabase : RoomDatabase() {
     abstract fun checkInDao(): CheckInDao
@@ -28,7 +28,7 @@ abstract class CheckInDatabase : RoomDatabase() {
                     CheckInDatabase::class.java,
                     "ticketbox-checkin.db",
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(*Migrations.ALL)
                     .build()
                     .also { instance = it }
             }

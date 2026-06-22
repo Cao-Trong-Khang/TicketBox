@@ -21,6 +21,12 @@ android {
             .orElse("http://192.168.2.14:3000/")
             .get()
         buildConfigField("String", "BACKEND_API_URL", "\"$backendApiUrl\"")
+
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments += mapOf("room.schemaLocation" to "$projectDir/schemas")
+            }
+        }
     }
 
     buildFeatures {
@@ -31,6 +37,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
     }
 }
 
