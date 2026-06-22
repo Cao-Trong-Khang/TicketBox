@@ -842,3 +842,22 @@ h1 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+.artist-bio-admin {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  gap: 24px;
+}
+.artist-bio-admin header p { color: var(--muted); }
+.artist-bio-upload { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.artist-bio-upload .button { width: fit-content; }
+.artist-bio-layout { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(0, 2fr); gap: 20px; }
+.artist-bio-layout aside, .artist-bio-layout article { border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: var(--surface); }
+.artist-document { width: 100%; display: flex; justify-content: space-between; gap: 10px; padding: 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); color: var(--ink); text-align: left; cursor: pointer; }
+.artist-document.active { border-color: var(--brand); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 15%, transparent); }
+.artist-document span, .artist-status { text-transform: capitalize; color: var(--muted); }
+.artist-bio-layout textarea { width: 100%; margin: 10px 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; resize: vertical; font: inherit; }
+.artist-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.artist-biography p { white-space: pre-wrap; }
+@media (max-width: 720px) { .artist-bio-layout { grid-template-columns: 1fr; } }

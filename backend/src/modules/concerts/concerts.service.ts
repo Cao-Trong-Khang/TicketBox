@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ConcertStatus, TicketTypeStatus } from '@prisma/client';
+import { AiArtistBioStatus, ConcertStatus, TicketTypeStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { PublicConcertDetailDto } from './dto/public-concert-detail.dto';
@@ -37,6 +37,7 @@ type PublicConcertDetailQueryResult = {
   seatingSvg: string | null;
   startsAt: Date;
   endsAt: Date | null;
+  aiArtistBios: { generatedBio: string | null }[];
 };
 
 type PublicTicketTypesQueryResult = {
@@ -140,6 +141,12 @@ export class ConcertsService {
         seatingSvg: true,
         startsAt: true,
         endsAt: true,
+        aiArtistBios: {
+          where: { status: AiArtistBioStatus.DONE },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { generatedBio: true },
+        },
       },
     });
 
@@ -241,6 +248,7 @@ export class ConcertsService {
       seatingSvg: concert.seatingSvg,
       startsAt: concert.startsAt.toISOString(),
       endsAt: concert.endsAt?.toISOString() ?? null,
+      ...((concert.aiArtistBios ?? [])[0]?.generatedBio ? { artist_bio: (concert.aiArtistBios ?? [])[0].generatedBio as string } : {}),
     };
   }
 

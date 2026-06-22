@@ -230,6 +230,12 @@ export function ConcertDetailPage() {
           </section>
         )}
 
+        {concertDetail.artist_bio && (
+          <section className="concert-description artist-biography" aria-label="Tiểu sử nghệ sĩ">
+            <h2>Tiểu sử nghệ sĩ</h2>
+            <p>{concertDetail.artist_bio}</p>
+          </section>
+        )}
         <section aria-label="Sơ đồ chỗ ngồi">
           <h2>Sơ đồ chỗ ngồi</h2>
           {concertDetail.seatingSvg ? (
