@@ -129,6 +129,24 @@ enum ArtistBioJobStatus {
 
   @@map("artist_bio_job_status")
 }
+enum ArtistDocumentStatus {
+  UPLOADED   @map("uploaded")
+  EXTRACTING @map("extracting")
+  EXTRACTED  @map("extracted")
+  GENERATING @map("generating")
+  DONE       @map("done")
+  FAILED     @map("failed")
+
+  @@map("artist_document_status")
+}
+
+enum AiArtistBioStatus {
+  GENERATING @map("generating")
+  DONE       @map("done")
+  FAILED     @map("failed")
+
+  @@map("ai_artist_bio_status")
+}
 
 enum ImportStatus {
   DETECTED
@@ -161,7 +179,7 @@ enum VipGuestStatus {
 
 // =====================
 // AUTHORIZATION
-// Giữ nguyên phần đã có, chỉ bổ sung relation field vào User
+// Giá»¯ nguyÃªn pháº§n Ä‘Ã£ cÃ³, chá»‰ bá»• sung relation field vÃ o User
 // =====================
 
 model User {
@@ -175,7 +193,7 @@ model User {
 
   userRoles UserRole[]
 
-  // Relations nghiệp vụ TicketBox
+  // Relations nghiá»‡p vá»¥ TicketBox
   concerts           Concert[]           @relation("ConcertOrganizer")
   checkInAssignments CheckInAssignment[] @relation("CheckInStaffAssignments")
   orders             Order[]
@@ -265,6 +283,8 @@ model Concert {
   checkInAssignments CheckInAssignment[]
   notifications      Notification[]
   artistBioJobs      ArtistBioJob[]
+  artistDocuments    ArtistDocument[]
+  aiArtistBios       AiArtistBio[]
   vipGuestImports    VipGuestImport[]
   vipGuests          VipGuest[]
 
@@ -528,6 +548,42 @@ model ArtistBioJob {
   @@index([concertId])
   @@index([status])
   @@map("artist_bio_jobs")
+}
+
+
+model ArtistDocument {
+  id            String               @id @default(uuid()) @db.Uuid
+  concertId     String               @map("concert_id") @db.Uuid
+  fileName      String               @map("file_name")
+  storageKey    String               @map("storage_key")
+  status        ArtistDocumentStatus @default(UPLOADED)
+  extractedText String?              @map("extracted_text") @db.Text
+  uploadedAt    DateTime             @default(now()) @map("uploaded_at")
+  createdAt     DateTime             @default(now()) @map("created_at")
+
+  concert Concert      @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  bio     AiArtistBio?
+
+  @@index([concertId, createdAt])
+  @@index([status, createdAt])
+  @@map("artist_documents")
+}
+
+model AiArtistBio {
+  id            String            @id @default(uuid()) @db.Uuid
+  documentId    String            @unique @map("document_id") @db.Uuid
+  concertId     String            @map("concert_id") @db.Uuid
+  status        AiArtistBioStatus @default(GENERATING)
+  generatedBio  String?           @map("generated_bio") @db.Text
+  failureReason String?           @map("failure_reason") @db.VarChar(500)
+  generatedAt   DateTime?         @map("generated_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  document ArtistDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  concert  Concert        @relation(fields: [concertId], references: [id], onDelete: Cascade)
+
+  @@index([concertId, status, createdAt])
+  @@map("ai_artist_bios")
 }
 
 // =====================

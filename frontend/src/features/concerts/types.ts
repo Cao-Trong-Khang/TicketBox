@@ -22,6 +22,7 @@ export type ConcertDetail = {
   venueAddress: string | null;
   bannerUrl: string | null;
   seatingSvg: string | null;
+  artist_bio?: string;
   startsAt: string;
   endsAt: string | null;
 };
