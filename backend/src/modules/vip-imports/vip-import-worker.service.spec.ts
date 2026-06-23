@@ -104,6 +104,14 @@ type UpdateManyImportArgs = {
   data: Partial<TestImport>;
 };
 
+type VipGuestWhere = {
+  concertId?: string;
+  sponsorSource?: string | { in: string[] };
+  externalGuestKey?: string | null;
+  normalizedIdentityKey?: string | null;
+  status?: VipGuestStatus | { in: VipGuestStatus[] };
+};
+
 test('worker imports valid unique VIP guests and marks the import completed', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(
@@ -318,6 +326,99 @@ test('worker refreshes concurrently created VIP guests for snapshot imports', as
   });
 });
 
+test('worker cancels active VIP guests missing from a successful sponsor snapshot', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-KEEP,Kept Guest,keep@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const checkedInAt = new Date('2026-06-16T10:00:00.000Z');
+    const state = createState(sourcePath);
+    state.guests.push(
+      createGuest({
+        id: 'guest-keep',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-KEEP',
+      }),
+      createGuest({
+        id: 'guest-remove',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-REMOVE',
+      }),
+      createGuest({
+        id: 'guest-checked-in',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-CHECKED-IN',
+        status: VipGuestStatus.CHECKED_IN,
+        checkedInAt,
+      }),
+    );
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(state.guests.find((guest) => guest.id === 'guest-keep')?.status, VipGuestStatus.ACTIVE);
+    assert.equal(state.guests.find((guest) => guest.id === 'guest-keep')?.importId, 'import-1');
+    assert.equal(
+      state.guests.find((guest) => guest.id === 'guest-remove')?.status,
+      VipGuestStatus.CANCELLED,
+    );
+    assert.equal(state.guests.find((guest) => guest.id === 'guest-remove')?.importId, 'import-1');
+    assert.equal(
+      state.guests.find((guest) => guest.id === 'guest-checked-in')?.status,
+      VipGuestStatus.CHECKED_IN,
+    );
+    assert.equal(
+      state.guests.find((guest) => guest.id === 'guest-checked-in')?.checkedInAt,
+      checkedInAt,
+    );
+    assert.ok(
+      state.auditLogs.some((entry) => entry.action === 'vip_import.guest_snapshot_cancelled'),
+    );
+  });
+});
+
+test('worker does not cancel existing VIP guests when snapshot rows have errors', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-KEEP,Kept Guest,keep@example.test,+84900000001',
+        'Demo Concert,LOCAL_DEMO,VIP-BAD,,bad@example.test,+84900000002',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.guests.push(
+      createGuest({
+        id: 'guest-remove',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-REMOVE',
+      }),
+    );
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.rejectedRows, 1);
+    assert.equal(
+      state.guests.find((guest) => guest.id === 'guest-remove')?.status,
+      VipGuestStatus.ACTIVE,
+    );
+    assert.equal(
+      state.auditLogs.some((entry) => entry.action === 'vip_import.guest_snapshot_cancelled'),
+      false,
+    );
+  });
+});
+
 test('worker retry is idempotent for an already processed import', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(
@@ -526,21 +627,11 @@ function createPrismaMock(state: TestState) {
       findFirst: async ({
         where,
       }: {
-        where: {
-          concertId: string;
-          sponsorSource: string;
-          externalGuestKey?: string | null;
-          normalizedIdentityKey?: string | null;
-        };
+        where: VipGuestWhere;
       }) =>
-        state.guests.find(
-          (guest) =>
-            guest.concertId === where.concertId &&
-            guest.sponsorSource === where.sponsorSource &&
-            (where.externalGuestKey
-              ? guest.externalGuestKey === where.externalGuestKey
-              : guest.normalizedIdentityKey === where.normalizedIdentityKey),
-        ) ?? null,
+        state.guests.find((guest) => matchesGuestWhere(guest, where)) ?? null,
+      findMany: async ({ where }: { where: VipGuestWhere }) =>
+        state.guests.filter((guest) => matchesGuestWhere(guest, where)),
       create: async ({ data }: { data: Partial<TestGuest> }) => {
         state.guestCreateAttempts += 1;
 
@@ -586,6 +677,15 @@ function createPrismaMock(state: TestState) {
         Object.assign(guest, data, { updatedAt: new Date() });
         return guest;
       },
+      updateMany: async ({ where, data }: { where: VipGuestWhere; data: Partial<TestGuest> }) => {
+        const guests = state.guests.filter((guest) => matchesGuestWhere(guest, where));
+
+        for (const guest of guests) {
+          Object.assign(guest, data, { updatedAt: new Date() });
+        }
+
+        return { count: guests.length };
+      },
     },
     auditLog: {
       create: async ({
@@ -609,6 +709,44 @@ function createPrismaMock(state: TestState) {
     ...tx,
     $transaction: async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
   };
+}
+
+function matchesGuestWhere(guest: TestGuest, where: VipGuestWhere): boolean {
+  if (where.concertId && guest.concertId !== where.concertId) {
+    return false;
+  }
+
+  if (typeof where.sponsorSource === 'string' && guest.sponsorSource !== where.sponsorSource) {
+    return false;
+  }
+
+  if (
+    typeof where.sponsorSource === 'object' &&
+    !where.sponsorSource.in.includes(guest.sponsorSource)
+  ) {
+    return false;
+  }
+
+  if (where.externalGuestKey !== undefined && guest.externalGuestKey !== where.externalGuestKey) {
+    return false;
+  }
+
+  if (
+    where.normalizedIdentityKey !== undefined &&
+    guest.normalizedIdentityKey !== where.normalizedIdentityKey
+  ) {
+    return false;
+  }
+
+  if (typeof where.status === 'string' && guest.status !== where.status) {
+    return false;
+  }
+
+  if (typeof where.status === 'object' && !where.status.in.includes(guest.status)) {
+    return false;
+  }
+
+  return true;
 }
 
 function createGuest(input: Partial<TestGuest>): TestGuest {

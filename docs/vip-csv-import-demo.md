@@ -4,7 +4,7 @@ This demo uses the local Sponsor CSV Files directory at `backend/prisma/demo-spo
 
 ## Valid Import
 
-VIP CSV imports use `REPLACE_SNAPSHOT` semantics per concert and sponsor source. When a newer sponsor file includes an existing natural guest key (`external_guest_key` when present, otherwise the normalized identity fallback), the worker refreshes that guest's display metadata, allowed gate, guest type, contact fields, and notes while preserving check-in state.
+VIP CSV imports use `REPLACE_SNAPSHOT` semantics per concert and sponsor source. When a newer sponsor file includes an existing natural guest key (`external_guest_key` when present, otherwise the normalized identity fallback), the worker refreshes that guest's display metadata, allowed gate, guest type, contact fields, and notes while preserving check-in state. When a successful snapshot omits an active guest from the previous completed import, the worker marks that guest `CANCELLED` without hard deleting it; checked-in guests and failed or partial-error snapshots do not trigger cleanup.
 
 1. Start the local infrastructure and backend:
 

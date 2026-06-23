@@ -1,7 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { extname, isAbsolute, join, resolve } from 'node:path';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ImportErrorType, ImportStatus, Prisma, VipGuestImport } from '@prisma/client';
+import {
+  ImportErrorType,
+  ImportStatus,
+  Prisma,
+  VipGuestImport,
+  VipGuestStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   VIP_IMPORT_REQUIRED_COLUMNS,
@@ -57,6 +63,7 @@ type AcceptedGuestInput = {
 type ExistingGuestRecord = {
   id: string;
   importId: string;
+  status: VipGuestStatus;
   fullName: string;
   email: string | null;
   phone: string | null;
@@ -76,6 +83,20 @@ type SnapshotUpdateField =
   | 'guestType'
   | 'allowedGate'
   | 'notes';
+
+type SnapshotGuestKey = {
+  sponsorSource: string;
+  duplicateKey: string;
+  externalGuestKey: string | null;
+  normalizedIdentityKey: string | null;
+};
+
+type SnapshotFinalizationResult = {
+  snapshotGuests: number;
+  promotedGuests: number;
+  cancelledGuests: number;
+  cleanupSkipped: boolean;
+};
 
 const CLAIMABLE_IMPORT_STATUSES = [
   ImportStatus.QUEUED,
@@ -159,6 +180,7 @@ export class VipImportWorkerService {
         duplicateRows: 0,
       };
       const seenGuestKeys = new Set<string>();
+      const snapshotGuestKeys = new Map<string, SnapshotGuestKey>();
       const batchSize = Number.isFinite(this.batchSize) && this.batchSize > 0 ? this.batchSize : 100;
 
       await this.prisma.vipGuestImportError.deleteMany({
@@ -170,7 +192,14 @@ export class VipImportWorkerService {
 
         await this.prisma.$transaction(async (tx) => {
           for (const row of batch) {
-            await this.processRow(tx, importRecord, row, seenGuestKeys, counters);
+            await this.processRow(
+              tx,
+              importRecord,
+              row,
+              seenGuestKeys,
+              snapshotGuestKeys,
+              counters,
+            );
           }
 
           await tx.vipGuestImport.update({
@@ -185,23 +214,40 @@ export class VipImportWorkerService {
         });
       }
 
-      const completed = await this.prisma.vipGuestImport.update({
-        where: { id: importRecord.id },
-        data: {
-          status: ImportStatus.COMPLETED,
-          totalRows: counters.totalRows,
-          acceptedRows: counters.acceptedRows,
-          rejectedRows: counters.rejectedRows,
-          duplicateRows: counters.duplicateRows,
-          failureCode: null,
-          failureMessage: null,
-          importedAt: new Date(),
-        },
+      let snapshotFinalization: SnapshotFinalizationResult = {
+        snapshotGuests: snapshotGuestKeys.size,
+        promotedGuests: 0,
+        cancelledGuests: 0,
+        cleanupSkipped: false,
+      };
+
+      const completed = await this.prisma.$transaction(async (tx) => {
+        snapshotFinalization = await this.finalizeSnapshotGuests(
+          tx,
+          importRecord,
+          snapshotGuestKeys,
+          counters,
+        );
+
+        return tx.vipGuestImport.update({
+          where: { id: importRecord.id },
+          data: {
+            status: ImportStatus.COMPLETED,
+            totalRows: counters.totalRows,
+            acceptedRows: counters.acceptedRows,
+            rejectedRows: counters.rejectedRows,
+            duplicateRows: counters.duplicateRows,
+            failureCode: null,
+            failureMessage: null,
+            importedAt: new Date(),
+          },
+        });
       });
 
       await this.auditImport(importRecord.id, 'vip_import.completed', {
         ...counters,
         importMode: VIP_IMPORT_MODE,
+        snapshotFinalization,
       });
 
       return this.toProcessResult(completed);
@@ -282,6 +328,7 @@ export class VipImportWorkerService {
     importRecord: ImportRecord,
     row: ReturnType<typeof parseCsv>['rows'][number],
     seenGuestKeys: Set<string>,
+    snapshotGuestKeys: Map<string, SnapshotGuestKey>,
     counters: RowCounters,
   ): Promise<void> {
     const validationErrors = this.validateRow(row);
@@ -298,8 +345,8 @@ export class VipImportWorkerService {
 
     const guestInput = this.toAcceptedGuestInput(importRecord, row);
     const duplicateKey = guestInput.externalGuestKey
-      ? `external:${guestInput.externalGuestKey.toLowerCase()}`
-      : `identity:${guestInput.normalizedIdentityKey}`;
+      ? this.toExternalDuplicateKey(guestInput.externalGuestKey)
+      : this.toIdentityDuplicateKey(guestInput.normalizedIdentityKey);
 
     if (seenGuestKeys.has(duplicateKey)) {
       counters.duplicateRows += 1;
@@ -315,6 +362,12 @@ export class VipImportWorkerService {
     }
 
     seenGuestKeys.add(duplicateKey);
+    snapshotGuestKeys.set(this.toSnapshotGuestKeyToken(guestInput.sponsorSource, duplicateKey), {
+      sponsorSource: guestInput.sponsorSource,
+      duplicateKey,
+      externalGuestKey: guestInput.externalGuestKey,
+      normalizedIdentityKey: guestInput.normalizedIdentityKey,
+    });
 
     const existing = await this.findExistingGuest(tx, importRecord.concertId, guestInput);
 
@@ -377,10 +430,7 @@ export class VipImportWorkerService {
 
     await tx.vipGuest.update({
       where: { id: existing.id },
-      data: {
-        importId: importRecord.id,
-        ...this.toGuestUpdateData(guestInput),
-      },
+      data: this.toGuestUpdateData(guestInput),
     });
 
     if (previousImportId !== importRecord.id || changedFields.length > 0) {
@@ -410,6 +460,141 @@ export class VipImportWorkerService {
     };
 
     return SNAPSHOT_UPDATE_FIELDS.filter((field) => existing[field] !== nextValues[field]);
+  }
+
+  private async finalizeSnapshotGuests(
+    tx: Prisma.TransactionClient,
+    importRecord: ImportRecord,
+    snapshotGuestKeys: Map<string, SnapshotGuestKey>,
+    counters: RowCounters,
+  ): Promise<SnapshotFinalizationResult> {
+    const result: SnapshotFinalizationResult = {
+      snapshotGuests: snapshotGuestKeys.size,
+      promotedGuests: 0,
+      cancelledGuests: 0,
+      cleanupSkipped: counters.rejectedRows > 0 || counters.duplicateRows > 0,
+    };
+
+    for (const snapshotGuestKey of snapshotGuestKeys.values()) {
+      result.promotedGuests += await this.promoteSnapshotGuest(
+        tx,
+        importRecord,
+        snapshotGuestKey,
+      );
+    }
+
+    if (result.cleanupSkipped) {
+      return result;
+    }
+
+    const sponsorSources = Array.from(
+      new Set([
+        importRecord.sourceName ?? 'SPONSOR_CSV',
+        ...Array.from(snapshotGuestKeys.values(), (key) => key.sponsorSource),
+      ]),
+    );
+    const activeGuests = await tx.vipGuest.findMany({
+      where: {
+        concertId: importRecord.concertId,
+        sponsorSource: {
+          in: sponsorSources,
+        },
+        status: VipGuestStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        importId: true,
+        sponsorSource: true,
+        externalGuestKey: true,
+        normalizedIdentityKey: true,
+      },
+    });
+
+    for (const guest of activeGuests) {
+      const duplicateKey = guest.externalGuestKey
+        ? this.toExternalDuplicateKey(guest.externalGuestKey)
+        : this.toIdentityDuplicateKey(guest.normalizedIdentityKey);
+      const snapshotKey = this.toSnapshotGuestKeyToken(guest.sponsorSource, duplicateKey);
+
+      if (snapshotGuestKeys.has(snapshotKey)) {
+        continue;
+      }
+
+      await tx.vipGuest.update({
+        where: { id: guest.id },
+        data: {
+          importId: importRecord.id,
+          status: VipGuestStatus.CANCELLED,
+        },
+      });
+      await this.auditGuestSnapshotCancellation(tx, importRecord.id, guest.id, {
+        importMode: VIP_IMPORT_MODE,
+        previousImportId: guest.importId,
+        currentImportId: importRecord.id,
+        sponsorSource: guest.sponsorSource,
+        duplicateKey,
+      });
+      result.cancelledGuests += 1;
+    }
+
+    return result;
+  }
+
+  private async promoteSnapshotGuest(
+    tx: Prisma.TransactionClient,
+    importRecord: ImportRecord,
+    snapshotGuestKey: SnapshotGuestKey,
+  ): Promise<number> {
+    const where = this.toSnapshotGuestWhere(importRecord.concertId, snapshotGuestKey);
+    const activeOrCancelled = await tx.vipGuest.updateMany({
+      where: {
+        ...where,
+        status: {
+          in: [VipGuestStatus.ACTIVE, VipGuestStatus.CANCELLED],
+        },
+      },
+      data: {
+        importId: importRecord.id,
+        status: VipGuestStatus.ACTIVE,
+      },
+    });
+    const checkedIn = await tx.vipGuest.updateMany({
+      where: {
+        ...where,
+        status: VipGuestStatus.CHECKED_IN,
+      },
+      data: {
+        importId: importRecord.id,
+      },
+    });
+
+    return activeOrCancelled.count + checkedIn.count;
+  }
+
+  private toSnapshotGuestWhere(concertId: string, snapshotGuestKey: SnapshotGuestKey) {
+    return snapshotGuestKey.externalGuestKey
+      ? {
+          concertId,
+          sponsorSource: snapshotGuestKey.sponsorSource,
+          externalGuestKey: snapshotGuestKey.externalGuestKey,
+        }
+      : {
+          concertId,
+          sponsorSource: snapshotGuestKey.sponsorSource,
+          normalizedIdentityKey: snapshotGuestKey.normalizedIdentityKey,
+        };
+  }
+
+  private toExternalDuplicateKey(externalGuestKey: string): string {
+    return `external:${externalGuestKey.toLowerCase()}`;
+  }
+
+  private toIdentityDuplicateKey(normalizedIdentityKey: string | null): string {
+    return `identity:${normalizedIdentityKey}`;
+  }
+
+  private toSnapshotGuestKeyToken(sponsorSource: string, duplicateKey: string): string {
+    return `${sponsorSource}:${duplicateKey}`;
   }
 
   private validateRow(row: ReturnType<typeof parseCsv>['rows'][number]): PendingImportError[] {
@@ -519,6 +704,7 @@ export class VipImportWorkerService {
     const select = {
       id: true,
       importId: true,
+      status: true,
       fullName: true,
       email: true,
       phone: true,
@@ -684,6 +870,23 @@ export class VipImportWorkerService {
         entityType: 'vip_guest',
         entityId: guestId,
         action: 'vip_import.guest_snapshot_updated',
+        metadata,
+      },
+    });
+  }
+
+  private async auditGuestSnapshotCancellation(
+    tx: Prisma.TransactionClient,
+    importId: string,
+    guestId: string,
+    metadata: Prisma.InputJsonValue,
+  ): Promise<void> {
+    await tx.auditLog.create({
+      data: {
+        importId,
+        entityType: 'vip_guest',
+        entityId: guestId,
+        action: 'vip_import.guest_snapshot_cancelled',
         metadata,
       },
     });
