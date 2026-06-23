@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { ImportErrorType, ImportStatus, VipGuestStatus } from '@prisma/client';
+import { ImportErrorType, ImportStatus, Prisma, VipGuestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VipImportWorkerService } from './vip-import-worker.service';
 
@@ -76,6 +76,7 @@ type TestState = {
   guestCreateAttempts: number;
   failOnGuestCreateAttempt?: number;
   claimConflictStatus?: ImportStatus;
+  concurrentGuestCreateConflict?: Partial<TestGuest>;
 };
 
 type FindManyImportArgs = {
@@ -208,6 +209,35 @@ test('worker deduplicates by external key first and normalized identity fallback
     assert.equal(result.duplicateRows, 2);
     assert.equal(state.guests.length, 2);
     assert.equal(state.errors.filter((error) => error.type === ImportErrorType.DUPLICATE).length, 2);
+  });
+});
+
+test('worker records concurrent guest create conflicts as duplicate existing guests', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-RACE-001,Race Guest,race@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.concurrentGuestCreateConflict = {
+      id: 'guest-created-by-other-import',
+      importId: 'other-import',
+    };
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.acceptedRows, 0);
+    assert.equal(result.duplicateRows, 1);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].importId, 'other-import');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].code, 'DUPLICATE_EXISTING_GUEST');
   });
 });
 
@@ -439,6 +469,30 @@ function createPrismaMock(state: TestState) {
 
         if (state.failOnGuestCreateAttempt === state.guestCreateAttempts) {
           throw new Error('Simulated database write failure');
+        }
+
+        if (state.concurrentGuestCreateConflict) {
+          const guest = createGuest({
+            ...data,
+            ...state.concurrentGuestCreateConflict,
+            id:
+              state.concurrentGuestCreateConflict.id ??
+              `guest-${state.guests.length + 1}`,
+          });
+
+          state.guests.push(guest);
+          state.concurrentGuestCreateConflict = undefined;
+
+          throw new Prisma.PrismaClientKnownRequestError(
+            'Unique constraint failed on VIP guest identity',
+            {
+              code: 'P2002',
+              clientVersion: 'test',
+              meta: {
+                target: ['concertId', 'sponsorSource', 'externalGuestKey'],
+              },
+            },
+          );
         }
 
         const guest = createGuest({

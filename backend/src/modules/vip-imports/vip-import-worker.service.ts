@@ -282,18 +282,14 @@ export class VipImportWorkerService {
     const existing = await this.findExistingGuest(tx, importRecord.concertId, guestInput);
 
     if (existing && existing.importId !== importRecord.id) {
-      counters.duplicateRows += 1;
-      await this.createImportError(tx, importRecord.id, {
-        type: ImportErrorType.DUPLICATE,
-        rowNumber: row.rowNumber,
-        code: 'DUPLICATE_EXISTING_GUEST',
-        message: 'Guest identity already exists for this concert and sponsor source',
-        rawRow: row.rawRow,
-        metadata: {
-          duplicateGuestId: existing.id,
-          duplicateKey,
-        },
-      });
+      await this.recordExistingGuestDuplicate(
+        tx,
+        importRecord,
+        row,
+        existing.id,
+        duplicateKey,
+        counters,
+      );
       return;
     }
 
@@ -303,16 +299,71 @@ export class VipImportWorkerService {
         data: this.toGuestUpdateData(guestInput),
       });
     } else {
-      await tx.vipGuest.create({
-        data: {
-          importId: importRecord.id,
-          concertId: importRecord.concertId,
-          ...this.toGuestCreateData(guestInput),
-        },
-      });
+      try {
+        await tx.vipGuest.create({
+          data: {
+            importId: importRecord.id,
+            concertId: importRecord.concertId,
+            ...this.toGuestCreateData(guestInput),
+          },
+        });
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) {
+          throw error;
+        }
+
+        const concurrentGuest = await this.findExistingGuest(
+          tx,
+          importRecord.concertId,
+          guestInput,
+        );
+
+        if (!concurrentGuest) {
+          throw error;
+        }
+
+        if (concurrentGuest.importId !== importRecord.id) {
+          await this.recordExistingGuestDuplicate(
+            tx,
+            importRecord,
+            row,
+            concurrentGuest.id,
+            duplicateKey,
+            counters,
+          );
+          return;
+        }
+
+        await tx.vipGuest.update({
+          where: { id: concurrentGuest.id },
+          data: this.toGuestUpdateData(guestInput),
+        });
+      }
     }
 
     counters.acceptedRows += 1;
+  }
+
+  private async recordExistingGuestDuplicate(
+    tx: Prisma.TransactionClient,
+    importRecord: ImportRecord,
+    row: ReturnType<typeof parseCsv>['rows'][number],
+    duplicateGuestId: string,
+    duplicateKey: string,
+    counters: RowCounters,
+  ): Promise<void> {
+    counters.duplicateRows += 1;
+    await this.createImportError(tx, importRecord.id, {
+      type: ImportErrorType.DUPLICATE,
+      rowNumber: row.rowNumber,
+      code: 'DUPLICATE_EXISTING_GUEST',
+      message: 'Guest identity already exists for this concert and sponsor source',
+      rawRow: row.rawRow,
+      metadata: {
+        duplicateGuestId,
+        duplicateKey,
+      },
+    });
   }
 
   private validateRow(row: ReturnType<typeof parseCsv>['rows'][number]): PendingImportError[] {
@@ -610,4 +661,8 @@ export class VipImportWorkerService {
       duplicateRows: importRecord.duplicateRows,
     };
   }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
