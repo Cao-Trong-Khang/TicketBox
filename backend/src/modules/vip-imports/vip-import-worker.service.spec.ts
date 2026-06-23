@@ -85,6 +85,10 @@ type TestState = {
   concurrentGuestCreateConflict?: Partial<TestGuest>;
 };
 
+type TransactionContext = {
+  aborted: boolean;
+};
+
 type FindManyImportArgs = {
   where?: {
     status?: {
@@ -109,6 +113,7 @@ type VipGuestWhere = {
   sponsorSource?: string | { in: string[] };
   externalGuestKey?: string | null;
   normalizedIdentityKey?: string | null;
+  qrHash?: string | null;
   status?: VipGuestStatus | { in: VipGuestStatus[] };
 };
 
@@ -535,7 +540,7 @@ test('worker refreshes existing VIP guests from newer sponsor snapshots', async 
   });
 });
 
-test('worker refreshes concurrently created VIP guests for snapshot imports', async () => {
+test('worker refreshes concurrently created VIP guests for snapshot imports by externalGuestKey', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(
       sourcePath,
@@ -563,6 +568,94 @@ test('worker refreshes concurrently created VIP guests for snapshot imports', as
     assert.ok(
       state.auditLogs.some((entry) => entry.action === 'vip_import.guest_snapshot_updated'),
     );
+  });
+});
+
+test('worker refreshes concurrently created VIP guests for snapshot imports by normalized identity', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,Race Guest,race@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.concurrentGuestCreateConflict = {
+      id: 'guest-created-by-other-import',
+      importId: 'other-import',
+      externalGuestKey: null,
+    };
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.acceptedRows, 1);
+    assert.equal(result.duplicateRows, 0);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].externalGuestKey, null);
+    assert.equal(state.guests[0].importId, 'import-1');
+    assert.equal(state.errors.length, 0);
+  });
+});
+
+test('worker handles concurrent unique conflict without marking the import retryable failed', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-RACE-002,Race Guest,race@example.test,+84900000002',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.concurrentGuestCreateConflict = {
+      id: 'guest-created-by-other-import',
+      importId: 'other-import',
+    };
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(state.imports[0].status, ImportStatus.COMPLETED);
+    assert.equal(state.imports[0].failureCode, null);
+    assert.equal(state.imports[0].failureMessage, null);
+    assert.equal(state.errors.length, 0);
+  });
+});
+
+test('worker preserves CHECKED_IN state when concurrent snapshot update resolves a unique conflict', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone,sponsor_company,invited_by,guest_type,allowed_gate,notes',
+        'Demo Concert,LOCAL_DEMO,VIP-RACE-CHECKIN,Updated Guest,new@example.test,+84900000009,Updated Sponsor,Updated Host,Updated Type,Gate B,Updated notes',
+      ]),
+      'utf8',
+    );
+    const checkedInAt = new Date('2026-06-16T10:00:00.000Z');
+    const state = createState(sourcePath);
+    state.concurrentGuestCreateConflict = {
+      id: 'guest-created-by-other-import',
+      importId: 'other-import',
+      status: VipGuestStatus.CHECKED_IN,
+      checkedInAt,
+    };
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].status, VipGuestStatus.CHECKED_IN);
+    assert.equal(state.guests[0].checkedInAt, checkedInAt);
+    assert.equal(state.guests[0].fullName, 'Updated Guest');
+    assert.equal(state.guests[0].importId, 'import-1');
   });
 });
 
@@ -794,160 +887,187 @@ function createState(sourcePath: string): TestState {
 }
 
 function createPrismaMock(state: TestState) {
-  const tx = {
-    vipGuestImport: {
-      findMany: async ({ where, take }: FindManyImportArgs = {}) => {
-        const statuses = where?.status?.in;
-        const imports = statuses
-          ? state.imports.filter((importRecord) => statuses.includes(importRecord.status))
-          : state.imports;
+  const createTransactionClient = (context: TransactionContext) => {
+    const ensureActive = () => {
+      assert.equal(context.aborted, false, 'transaction client was used after it was aborted');
+    };
 
-        return typeof take === 'number' ? imports.slice(0, take) : imports;
+    return {
+      vipGuestImport: {
+        findMany: async ({ where, take }: FindManyImportArgs = {}) => {
+          ensureActive();
+          const statuses = where?.status?.in;
+          const imports = statuses
+            ? state.imports.filter((importRecord) => statuses.includes(importRecord.status))
+            : state.imports;
+
+          return typeof take === 'number' ? imports.slice(0, take) : imports;
+        },
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          ensureActive();
+          return state.imports.find((importRecord) => importRecord.id === where.id) ?? null;
+        },
+        updateMany: async ({ where, data }: UpdateManyImportArgs) => {
+          ensureActive();
+          const importRecord = state.imports.find(
+            (candidate) => !where.id || candidate.id === where.id,
+          );
+
+          if (!importRecord) {
+            return { count: 0 };
+          }
+
+          if (state.claimConflictStatus && data.status === ImportStatus.PROCESSING) {
+            Object.assign(importRecord, {
+              status: state.claimConflictStatus,
+              updatedAt: new Date(),
+            });
+            state.claimConflictStatus = undefined;
+
+            return { count: 0 };
+          }
+
+          if (where.status?.in && !where.status.in.includes(importRecord.status)) {
+            return { count: 0 };
+          }
+
+          Object.assign(importRecord, data, { updatedAt: new Date() });
+
+          return { count: 1 };
+        },
+        update: async ({ where, data }: { where: { id: string }; data: Partial<TestImport> }) => {
+          ensureActive();
+          const importRecord = state.imports.find((candidate) => candidate.id === where.id);
+          assert.ok(importRecord);
+          Object.assign(importRecord, data, { updatedAt: new Date() });
+          return importRecord;
+        },
       },
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        state.imports.find((importRecord) => importRecord.id === where.id) ?? null,
-      updateMany: async ({ where, data }: UpdateManyImportArgs) => {
-        const importRecord = state.imports.find(
-          (candidate) => !where.id || candidate.id === where.id,
-        );
-
-        if (!importRecord) {
+      vipGuestImportError: {
+        deleteMany: async ({ where }: { where: { importId: string } }) => {
+          ensureActive();
+          state.errors = state.errors.filter((error) => error.importId !== where.importId);
           return { count: 0 };
-        }
+        },
+        create: async ({ data }: { data: Partial<TestError> }) => {
+          ensureActive();
+          const error: TestError = {
+            id: `error-${state.errors.length + 1}`,
+            importId: data.importId ?? 'import-1',
+            type: data.type ?? ImportErrorType.ROW,
+            rowNumber: data.rowNumber ?? null,
+            field: data.field ?? null,
+            code: data.code ?? 'ERROR',
+            message: data.message ?? 'Error',
+            rawRow: data.rawRow,
+            metadata: data.metadata,
+            createdAt: new Date(),
+          };
 
-        if (state.claimConflictStatus && data.status === ImportStatus.PROCESSING) {
-          Object.assign(importRecord, {
-            status: state.claimConflictStatus,
-            updatedAt: new Date(),
-          });
-          state.claimConflictStatus = undefined;
-
-          return { count: 0 };
-        }
-
-        if (where.status?.in && !where.status.in.includes(importRecord.status)) {
-          return { count: 0 };
-        }
-
-        Object.assign(importRecord, data, { updatedAt: new Date() });
-
-        return { count: 1 };
+          state.errors.push(error);
+          return error;
+        },
       },
-      update: async ({ where, data }: { where: { id: string }; data: Partial<TestImport> }) => {
-        const importRecord = state.imports.find((candidate) => candidate.id === where.id);
-        assert.ok(importRecord);
-        Object.assign(importRecord, data, { updatedAt: new Date() });
-        return importRecord;
-      },
-    },
-    vipGuestImportError: {
-      deleteMany: async ({ where }: { where: { importId: string } }) => {
-        state.errors = state.errors.filter((error) => error.importId !== where.importId);
-        return { count: 0 };
-      },
-      create: async ({ data }: { data: Partial<TestError> }) => {
-        const error: TestError = {
-          id: `error-${state.errors.length + 1}`,
-          importId: data.importId ?? 'import-1',
-          type: data.type ?? ImportErrorType.ROW,
-          rowNumber: data.rowNumber ?? null,
-          field: data.field ?? null,
-          code: data.code ?? 'ERROR',
-          message: data.message ?? 'Error',
-          rawRow: data.rawRow,
-          metadata: data.metadata,
-          createdAt: new Date(),
-        };
+      vipGuest: {
+        findFirst: async ({
+          where,
+        }: {
+          where: VipGuestWhere;
+        }) => {
+          ensureActive();
+          return state.guests.find((guest) => matchesGuestWhere(guest, where)) ?? null;
+        },
+        findMany: async ({ where }: { where: VipGuestWhere }) => {
+          ensureActive();
+          return state.guests.filter((guest) => matchesGuestWhere(guest, where));
+        },
+        create: async ({ data }: { data: Partial<TestGuest> }) => {
+          ensureActive();
+          state.guestCreateAttempts += 1;
 
-        state.errors.push(error);
-        return error;
-      },
-    },
-    vipGuest: {
-      findFirst: async ({
-        where,
-      }: {
-        where: VipGuestWhere;
-      }) =>
-        state.guests.find((guest) => matchesGuestWhere(guest, where)) ?? null,
-      findMany: async ({ where }: { where: VipGuestWhere }) =>
-        state.guests.filter((guest) => matchesGuestWhere(guest, where)),
-      create: async ({ data }: { data: Partial<TestGuest> }) => {
-        state.guestCreateAttempts += 1;
+          if (state.failOnGuestCreateAttempt === state.guestCreateAttempts) {
+            throw new Error('Simulated database write failure');
+          }
 
-        if (state.failOnGuestCreateAttempt === state.guestCreateAttempts) {
-          throw new Error('Simulated database write failure');
-        }
+          if (state.concurrentGuestCreateConflict) {
+            const guest = createGuest({
+              ...data,
+              ...state.concurrentGuestCreateConflict,
+              id:
+                state.concurrentGuestCreateConflict.id ??
+                `guest-${state.guests.length + 1}`,
+            });
 
-        if (state.concurrentGuestCreateConflict) {
+            state.guests.push(guest);
+            state.concurrentGuestCreateConflict = undefined;
+            context.aborted = true;
+
+            throw new Prisma.PrismaClientKnownRequestError(
+              'Unique constraint failed on VIP guest identity',
+              {
+                code: 'P2002',
+                clientVersion: 'test',
+                meta: {
+                  target: ['concertId', 'sponsorSource', 'externalGuestKey'],
+                },
+              },
+            );
+          }
+
           const guest = createGuest({
             ...data,
-            ...state.concurrentGuestCreateConflict,
-            id:
-              state.concurrentGuestCreateConflict.id ??
-              `guest-${state.guests.length + 1}`,
+            id: `guest-${state.guests.length + 1}`,
           });
 
           state.guests.push(guest);
-          state.concurrentGuestCreateConflict = undefined;
-
-          throw new Prisma.PrismaClientKnownRequestError(
-            'Unique constraint failed on VIP guest identity',
-            {
-              code: 'P2002',
-              clientVersion: 'test',
-              meta: {
-                target: ['concertId', 'sponsorSource', 'externalGuestKey'],
-              },
-            },
-          );
-        }
-
-        const guest = createGuest({
-          ...data,
-          id: `guest-${state.guests.length + 1}`,
-        });
-
-        state.guests.push(guest);
-        return guest;
-      },
-      update: async ({ where, data }: { where: { id: string }; data: Partial<TestGuest> }) => {
-        const guest = state.guests.find((candidate) => candidate.id === where.id);
-        assert.ok(guest);
-        Object.assign(guest, data, { updatedAt: new Date() });
-        return guest;
-      },
-      updateMany: async ({ where, data }: { where: VipGuestWhere; data: Partial<TestGuest> }) => {
-        const guests = state.guests.filter((guest) => matchesGuestWhere(guest, where));
-
-        for (const guest of guests) {
+          return guest;
+        },
+        update: async ({ where, data }: { where: { id: string }; data: Partial<TestGuest> }) => {
+          ensureActive();
+          const guest = state.guests.find((candidate) => candidate.id === where.id);
+          assert.ok(guest);
           Object.assign(guest, data, { updatedAt: new Date() });
-        }
+          return guest;
+        },
+        updateMany: async ({ where, data }: { where: VipGuestWhere; data: Partial<TestGuest> }) => {
+          ensureActive();
+          const guests = state.guests.filter((guest) => matchesGuestWhere(guest, where));
 
-        return { count: guests.length };
+          for (const guest of guests) {
+            Object.assign(guest, data, { updatedAt: new Date() });
+          }
+
+          return { count: guests.length };
+        },
       },
-    },
-    auditLog: {
-      create: async ({
-        data,
-      }: {
-        data: {
-          action: string;
-          importId: string | null;
-          entityType: string;
-          entityId: string;
-          metadata: unknown;
-        };
-      }) => {
-        state.auditLogs.push(data);
-        return data;
+      auditLog: {
+        create: async ({
+          data,
+        }: {
+          data: {
+            action: string;
+            importId: string | null;
+            entityType: string;
+            entityId: string;
+            metadata: unknown;
+          };
+        }) => {
+          ensureActive();
+          state.auditLogs.push(data);
+          return data;
+        },
       },
-    },
+    };
   };
+
+  const tx = createTransactionClient({ aborted: false });
 
   return {
     ...tx,
-    $transaction: async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
+    $transaction: async (callback: (transaction: ReturnType<typeof createTransactionClient>) => Promise<unknown>) => {
+      const transaction = createTransactionClient({ aborted: false });
+      return callback(transaction);
+    },
   };
 }
 
@@ -975,6 +1095,10 @@ function matchesGuestWhere(guest: TestGuest, where: VipGuestWhere): boolean {
     where.normalizedIdentityKey !== undefined &&
     guest.normalizedIdentityKey !== where.normalizedIdentityKey
   ) {
+    return false;
+  }
+
+  if (where.qrHash !== undefined && guest.qrHash !== where.qrHash) {
     return false;
   }
 
