@@ -35,6 +35,15 @@ TicketBox SHALL provide an offline-capable gate check-in workflow for Check-in S
 - **THEN** the token payload includes ticket ID, concert ID, issuer, expiration, nonce, and version
 - **THEN** unsigned bearer hashes, invalid signatures, expired tokens, or token/ticket nonce mismatches are rejected as invalid QR payloads
 
+#### Scenario: Backend uses server time for authoritative check-in decisions
+- **GIVEN** a staff device synchronizes online or offline scan records
+- **WHEN** the Backend API receives each scan
+- **THEN** the Backend API stores `clientScannedAt`, `serverReceivedAt`, and `serverCheckedInAt` separately
+- **THEN** successful ticket and VIP guest check-ins use `serverCheckedInAt` for authoritative state updates
+- **THEN** client scan time is used only as offline context and is rejected when it exceeds allowed clock skew
+- **THEN** offline scans are accepted after event end only when the client scan time was before event end and the server receives the scan within the offline grace window
+- **THEN** scans received outside the offline grace window are rejected without changing ticket or VIP guest status
+
 #### Scenario: VIP scan at the wrong assigned gate is rejected by backend
 - **GIVEN** a VIP guest is assigned to a specific allowed gate
 - **AND** Check-in Staff synchronizes that VIP scan from a different assigned gate or device
@@ -321,6 +330,7 @@ Protected actions require the Check-in Staff role and check-in permissions for t
 - If Redis rate limiting returns `429` for sync, the app SHALL keep local logs pending and retry after the indicated delay.
 - If the authenticated user lacks the Check-in Staff role, required permission, or assignment for the target concert or gate, the Backend API SHALL deny preload and sync requests.
 - If a QR payload is malformed, unsigned, unknown, cancelled, expired, or not part of the assigned event snapshot, the app SHALL record the scan attempt and show an invalid local result.
+- If a client scan timestamp is outside allowed clock skew or the offline grace window, the backend SHALL record an invalid sync outcome and SHALL NOT update ticket or VIP guest check-in state.
 - If two devices scan the same valid ticket or VIP guest offline, the backend SHALL accept only the first valid synchronized scan and mark later synchronized scans as duplicate or conflict outcomes.
 - If the same device uploads the same local scan more than once because of retry, the backend SHALL return the original outcome idempotently.
 - If Kafka is unavailable, the sync API SHALL still accept or reject scans based on PostgreSQL; asynchronous analytics or projections may be delayed.
@@ -333,6 +343,7 @@ Protected actions require the Check-in Staff role and check-in permissions for t
 - Each successful ticket check-in MUST be unique per `ticket_id`.
 - Each successful VIP guest check-in MUST be unique per `vip_guest_id`.
 - Scan synchronization MUST be idempotent by mobile-generated local scan ID and source device ID.
+- Backend check-in status updates MUST use server time as the authority and MUST store client scan time separately for offline audit context.
 - The mobile app MUST write a scan log to durable local storage before presenting a local scan result.
 - Preload data MUST be scoped to the authenticated staff user's assigned concerts or gates and MUST avoid exposing payment, order, or organizer-only details.
 - Sync APIs MUST enforce authentication, Check-in Staff role, check-in permission, and concert or gate assignment at the API boundary and in domain logic.
@@ -372,6 +383,13 @@ Protected actions require the Check-in Staff role and check-in permissions for t
 - **THEN** accepted scans are persisted in PostgreSQL `check_ins`
 - **THEN** the API returns one outcome per local scan
 - **THEN** the app stores those outcomes and marks accepted or rejected logs as synchronized
+
+#### Scenario: Server time is authoritative during sync
+- **GIVEN** the app synchronizes scans with device-generated scan timestamps
+- **WHEN** the Backend API processes those scans
+- **THEN** the Backend API records client scan time separately from server receive and server check-in time
+- **THEN** successful ticket and VIP status changes are timestamped with server check-in time
+- **THEN** scans outside allowed clock skew or offline grace are rejected without changing authoritative ticket or VIP state
 
 #### Scenario: Cross-device offline conflict is resolved by backend
 - **GIVEN** two assigned devices scanned the same valid ticket while offline

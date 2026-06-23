@@ -15,7 +15,7 @@ import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { CheckInEventsPublisher } from './check-in-events.publisher';
 import { createTicketQrToken } from './check-in-qr-token';
 import { CheckInService } from './check-in.service';
-import { CheckInScanEntityType } from './dto/sync-check-in.dto';
+import { CheckInClientMode, CheckInScanEntityType } from './dto/sync-check-in.dto';
 
 process.env.CHECK_IN_QR_HMAC_SECRET = 'test-check-in-qr-hmac-secret';
 
@@ -152,6 +152,7 @@ test('preload rejects Check-in Staff without an active assignment for the concer
 test('sync accepts a valid assigned ticket scan and updates authoritative ticket state', async () => {
   const { service, state } = createHarness();
   const qrHash = signedTicketQr(state.tickets[0]);
+  const serverNow = new Date('2026-08-20T12:00:05.000Z');
 
   const response = await service.syncEvent(
     { id: 'staff-1', email: 'staff@example.test' },
@@ -171,10 +172,16 @@ test('sync accepts a valid assigned ticket scan and updates authoritative ticket
   );
 
   assert.equal(response.outcomes[0].resultCode, 'accepted');
+  assert.equal(response.outcomes[0].serverCheckInAt, serverNow.toISOString());
   assert.equal(response.outcomes[0].idempotent, false);
   assert.equal(state.tickets[0].status, TicketStatus.USED);
+  assert.deepEqual(state.tickets[0].checkedInAt, serverNow);
   assert.equal(state.checkIns.length, 1);
   assert.equal(state.checkIns[0].status, CheckInStatus.SUCCESS);
+  assert.deepEqual(state.checkIns[0].clientScannedAt, new Date('2026-08-20T12:00:00.000Z'));
+  assert.deepEqual(state.checkIns[0].serverReceivedAt, serverNow);
+  assert.deepEqual(state.checkIns[0].serverCheckedInAt, serverNow);
+  assert.deepEqual(state.checkIns[0].scannedAt, serverNow);
 });
 
 test('sync rejects unsigned ticket QR bearer hashes', async () => {
@@ -202,6 +209,32 @@ test('sync rejects unsigned ticket QR bearer hashes', async () => {
   assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
 });
 
+test('sync rejects client scan timestamps outside future clock skew', async () => {
+  const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0]);
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'future-skew',
+          qrHash,
+          entityType: CheckInScanEntityType.ticket,
+          scannedAt: '2026-08-20T12:06:00.000Z',
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
+  assert.equal(state.checkIns[0].note, 'Client scannedAt is outside allowed clock skew');
+  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
+});
+
 test('sync rejects expired signed ticket QR tokens before ticket lookup acceptance', async () => {
   const { service, state } = createHarness();
   const qrHash = signedTicketQr(state.tickets[0], new Date('2026-01-01T00:00:00.000Z'));
@@ -225,6 +258,62 @@ test('sync rejects expired signed ticket QR tokens before ticket lookup acceptan
   assert.equal(response.outcomes[0].resultCode, 'invalid');
   assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
   assert.equal(state.checkIns[0].note, 'Ticket QR token is expired');
+  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
+});
+
+test('sync accepts offline scans after event end only within grace window', async () => {
+  const { service, state } = createHarness({
+    now: new Date('2026-08-21T12:00:00.000Z'),
+  });
+  const qrHash = signedTicketQr(state.tickets[0]);
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'offline-before-end',
+          qrHash,
+          entityType: CheckInScanEntityType.ticket,
+          scannedAt: '2026-08-20T15:29:00.000Z',
+          mode: CheckInClientMode.offline,
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'accepted');
+  assert.equal(state.checkIns[0].status, CheckInStatus.SUCCESS);
+});
+
+test('sync expires offline scans received after the grace window', async () => {
+  const { service, state } = createHarness({
+    now: new Date('2026-08-21T16:00:01.000Z'),
+  });
+  const qrHash = signedTicketQr(state.tickets[0]);
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'offline-outside-grace',
+          qrHash,
+          entityType: CheckInScanEntityType.ticket,
+          scannedAt: '2026-08-20T15:29:00.000Z',
+          mode: CheckInClientMode.offline,
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
+  assert.equal(state.checkIns[0].note, 'Offline scan is outside allowed grace window');
   assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
 });
 
@@ -397,8 +486,10 @@ function createHarness(
     userPermissions?: TestState['userPermissions'];
     redisCount?: number;
     publisherThrows?: boolean;
+    now?: Date;
   } = {},
 ): { service: CheckInService; state: TestState } {
+  const serverNow = overrides.now ?? new Date('2026-08-20T12:00:05.000Z');
   const state: TestState = {
     userRoles: overrides.userRoles ?? [
       {
@@ -502,6 +593,7 @@ function createHarness(
       permissionService as never,
       redisCache as never,
       publisher,
+      () => serverNow,
     ),
     state,
   };
@@ -654,6 +746,9 @@ function createPrismaMock(state: TestState) {
           status: data.status ?? CheckInStatus.INVALID_QR,
           syncStatus: data.syncStatus ?? CheckInSyncStatus.SYNCED,
           scannedAt: data.scannedAt ?? new Date(),
+          clientScannedAt: data.clientScannedAt ?? null,
+          serverReceivedAt: data.serverReceivedAt ?? data.scannedAt ?? new Date(),
+          serverCheckedInAt: data.serverCheckedInAt ?? null,
           syncedAt: data.syncedAt ?? new Date(),
           note: data.note ?? null,
           createdAt: new Date(),

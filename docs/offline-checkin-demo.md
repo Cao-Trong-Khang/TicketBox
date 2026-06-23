@@ -34,6 +34,8 @@ Expected result: the first scan is persisted as a pending local accepted log bef
 
 Expected result: pending logs are posted to `POST /check-in/events/:concertId/sync`; the backend returns one outcome per local scan, and Room stores accepted or duplicate backend outcomes without deleting local records.
 
+Backend sync records device scan time as `clientScannedAt`, receipt time as `serverReceivedAt`, and successful authoritative check-in time as `serverCheckedInAt`. Ticket and VIP status updates use server check-in time. Device time is accepted only within `CHECK_IN_MAX_CLOCK_SKEW_SECONDS`, and offline records must arrive within `CHECK_IN_OFFLINE_GRACE_SECONDS`.
+
 ## Cross-device Conflict Fixture
 
 Backend unit coverage in `backend/src/modules/check-in/check-in.service.spec.ts` includes a fixture where:
