@@ -1,6 +1,25 @@
 import { createHash } from 'node:crypto';
 
 export const VIP_IMPORT_REQUIRED_COLUMNS = ['full_name'] as const;
+export const VIP_IMPORT_CSV_DELIMITER = ',';
+export const VIP_IMPORT_UNSUPPORTED_DELIMITER_CODE = 'UNSUPPORTED_DELIMITER';
+
+type AlternateCsvDelimiter = {
+  delimiter: string;
+  name: string;
+};
+
+type UnsupportedCsvDelimiterMetadata = {
+  detectedDelimiter: string;
+  detectedDelimiterName: string;
+  supportedDelimiter: string;
+};
+
+const ALTERNATE_CSV_DELIMITERS: AlternateCsvDelimiter[] = [
+  { delimiter: ';', name: 'semicolon (;)' },
+  { delimiter: '\t', name: 'tab (\\t)' },
+  { delimiter: '|', name: 'pipe (|)' },
+];
 
 export type ParsedCsvRow = {
   rowNumber: number;
@@ -15,7 +34,22 @@ export type ParsedCsv = {
   rows: ParsedCsvRow[];
 };
 
+export class UnsupportedCsvDelimiterError extends Error {
+  readonly code = VIP_IMPORT_UNSUPPORTED_DELIMITER_CODE;
+  readonly metadata: UnsupportedCsvDelimiterMetadata;
+
+  constructor(metadata: UnsupportedCsvDelimiterMetadata) {
+    super(
+      `VIP CSV imports only support comma-delimited CSV; detected ${metadata.detectedDelimiterName} delimiter`,
+    );
+    this.name = 'UnsupportedCsvDelimiterError';
+    this.metadata = metadata;
+  }
+}
+
 export function parseCsv(content: string): ParsedCsv {
+  assertSupportedCsvDelimiter(content);
+
   const records = parseCsvRecords(content);
 
   if (records.length === 0) {
@@ -48,6 +82,20 @@ export function parseCsv(content: string): ParsedCsv {
   });
 
   return { headers, rows };
+}
+
+export function assertSupportedCsvDelimiter(content: string): void {
+  const unsupportedDelimiter = detectUnsupportedCsvDelimiter(content);
+
+  if (!unsupportedDelimiter) {
+    return;
+  }
+
+  throw new UnsupportedCsvDelimiterError({
+    detectedDelimiter: unsupportedDelimiter.delimiter,
+    detectedDelimiterName: unsupportedDelimiter.name,
+    supportedDelimiter: VIP_IMPORT_CSV_DELIMITER,
+  });
 }
 
 export function normalizeHeader(value: string): string {
@@ -121,7 +169,73 @@ export function buildVipQrHash(input: {
   );
 }
 
-function parseCsvRecords(content: string): string[][] {
+function detectUnsupportedCsvDelimiter(content: string): AlternateCsvDelimiter | null {
+  const headerRecord = getFirstCsvRecord(content);
+
+  if (!headerRecord.trim()) {
+    return null;
+  }
+
+  const delimiterCounts = countUnquotedDelimiters(headerRecord);
+  const alternateDelimiter = ALTERNATE_CSV_DELIMITERS.map((candidate) => ({
+    ...candidate,
+    count: delimiterCounts.get(candidate.delimiter) ?? 0,
+  }))
+    .filter((candidate) => candidate.count > 0)
+    .sort((left, right) => right.count - left.count)[0];
+
+  return alternateDelimiter ?? null;
+}
+
+function getFirstCsvRecord(content: string): string {
+  let inQuotes = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+
+    if (character === '"') {
+      if (inQuotes && content[index + 1] === '"') {
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if ((character === '\n' || character === '\r') && !inQuotes) {
+      return content.slice(0, index);
+    }
+  }
+
+  return content;
+}
+
+function countUnquotedDelimiters(record: string): Map<string, number> {
+  const delimiters = [VIP_IMPORT_CSV_DELIMITER, ...ALTERNATE_CSV_DELIMITERS.map((candidate) => candidate.delimiter)];
+  const counts = new Map(delimiters.map((delimiter) => [delimiter, 0]));
+  let inQuotes = false;
+
+  for (let index = 0; index < record.length; index += 1) {
+    const character = record[index];
+
+    if (character === '"') {
+      if (inQuotes && record[index + 1] === '"') {
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && counts.has(character)) {
+      counts.set(character, (counts.get(character) ?? 0) + 1);
+    }
+  }
+
+  return counts;
+}
+
+function parseCsvRecords(content: string, delimiter = VIP_IMPORT_CSV_DELIMITER): string[][] {
   const records: string[][] = [];
   let record: string[] = [];
   let field = '';
@@ -140,7 +254,7 @@ function parseCsvRecords(content: string): string[][] {
       continue;
     }
 
-    if (character === ',' && !inQuotes) {
+    if (character === delimiter && !inQuotes) {
       record.push(field);
       field = '';
       continue;

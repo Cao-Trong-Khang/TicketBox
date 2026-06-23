@@ -11,6 +11,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   VIP_IMPORT_REQUIRED_COLUMNS,
+  UnsupportedCsvDelimiterError,
   buildIdentityKey,
   buildVipQrHash,
   getCsvValue,
@@ -317,7 +318,22 @@ export class VipImportWorkerService {
       };
     }
 
-    const parsed = parseCsv(content);
+    let parsed: ReturnType<typeof parseCsv>;
+
+    try {
+      parsed = parseCsv(content);
+    } catch (error) {
+      if (error instanceof UnsupportedCsvDelimiterError) {
+        return {
+          type: ImportErrorType.FILE,
+          code: error.code,
+          message: error.message,
+          metadata: { ...error.metadata },
+        };
+      }
+
+      throw error;
+    }
 
     if (parsed.headers.length === 0) {
       return {

@@ -201,6 +201,31 @@ test('scheduler skips CSV files that exceed the configured max row count', async
   });
 });
 
+test('scheduler skips alternate-delimited CSV files instead of queueing a misparsed import', async () => {
+  await withTempCsvDir(async (sourceDir) => {
+    const state = createState();
+    const publishedJobs: string[] = [];
+    const scheduler = createScheduler(state, {
+      publishImportRequested: async (job) => {
+        publishedJobs.push(job.importId);
+      },
+    });
+
+    await writeRawCsv(sourceDir, 'semicolon.csv', [
+      'concert_title;sponsor_source;external_guest_key;full_name;email;phone',
+      'Demo Concert;LOCAL_DEMO;VIP-001;Demo Guest;demo@example.test;+84900000001',
+    ]);
+
+    const result = await scheduler.scanScheduledImports(sourceDir);
+
+    assert.equal(result.detected, 0);
+    assert.equal(result.queued, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(state.imports.length, 0);
+    assert.equal(publishedJobs.length, 0);
+  });
+});
+
 function createState(): TestState {
   return {
     concerts: [{ id: '00000000-0000-4000-8000-000000000001', title: 'Demo Concert' }],
@@ -333,6 +358,10 @@ async function writeVipCsv(
     ].join('\n'),
     'utf8',
   );
+}
+
+async function writeRawCsv(sourceDir: string, fileName: string, rows: string[]): Promise<void> {
+  await writeFile(join(sourceDir, fileName), rows.join('\n'), 'utf8');
 }
 
 async function withEnv(name: string, value: string, callback: () => Promise<void>): Promise<void> {

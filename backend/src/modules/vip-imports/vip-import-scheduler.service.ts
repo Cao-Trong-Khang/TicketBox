@@ -3,7 +3,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import { ImportStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { getCsvValue, parseCsv, sha256 } from './vip-csv';
+import { UnsupportedCsvDelimiterError, getCsvValue, parseCsv, sha256 } from './vip-csv';
 import { VipImportLimitError, inspectVipImportFile } from './vip-import-limits';
 import { VipImportJobsPublisher } from './vip-import-jobs.publisher';
 import { VipImportScanResult } from './vip-imports.types';
@@ -62,7 +62,19 @@ export class VipImportSchedulerService {
       }
 
       const buffer = await readFile(sourcePath);
-      const metadata = await this.resolveCsvMetadata(buffer.toString('utf8'));
+      let metadata: ResolvedCsvMetadata | null;
+
+      try {
+        metadata = await this.resolveCsvMetadata(buffer.toString('utf8'));
+      } catch (error) {
+        if (!(error instanceof UnsupportedCsvDelimiterError)) {
+          throw error;
+        }
+
+        this.logger.warn(`Skipping ${entry}: ${error.message}`);
+        result.skipped += 1;
+        continue;
+      }
 
       if (!metadata) {
         this.logger.warn(`Skipping ${entry}: no concert_id or concert_title metadata`);
