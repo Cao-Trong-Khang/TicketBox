@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { ImportStatus } from '@prisma/client';
+import { ImportStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VipImportJobsPublisher } from './vip-import-jobs.publisher';
 import { VipImportSchedulerService } from './vip-import-scheduler.service';
@@ -25,6 +25,10 @@ type TestState = {
     updatedAt: Date;
   }[];
   auditLogs: { action: string; importId: string | null }[];
+};
+
+type PrismaMockOptions = {
+  beforeImportCreate?: (data: Partial<TestState['imports'][0]>) => Promise<void> | void;
 };
 
 test('scheduler detects a new sponsor CSV and queues one import job', async () => {
@@ -71,6 +75,60 @@ test('scheduler repeated detection is idempotent by concert, source, and fingerp
   });
 });
 
+test('scheduler reuses a concurrently created import when create hits a unique constraint', async () => {
+  await withTempCsvDir(async (sourceDir) => {
+    const state = createState();
+    const concurrentImportId = '00000000-0000-4000-8000-000000000099';
+    const publishedJobs: string[] = [];
+    let insertedConcurrentImport = false;
+    const scheduler = createScheduler(
+      state,
+      {
+        publishImportRequested: async (job) => {
+          publishedJobs.push(job.importId);
+        },
+      },
+      {
+        beforeImportCreate: (data) => {
+          if (insertedConcurrentImport) {
+            return;
+          }
+
+          insertedConcurrentImport = true;
+          const now = new Date();
+          state.imports.push({
+            id: concurrentImportId,
+            concertId: data.concertId ?? state.concerts[0].id,
+            sourceName: data.sourceName ?? 'SPONSOR_CSV',
+            fileName: data.fileName ?? 'vip.csv',
+            sourcePath: data.sourcePath ?? null,
+            sourceFingerprint: data.sourceFingerprint ?? 'fingerprint',
+            status: ImportStatus.DETECTED,
+            failureCode: null,
+            failureMessage: null,
+            queuedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          });
+        },
+      },
+    );
+
+    await writeVipCsv(sourceDir, 'valid.csv');
+
+    const result = await scheduler.scanScheduledImports(sourceDir);
+
+    assert.equal(result.detected, 1);
+    assert.equal(result.queued, 1);
+    assert.equal(state.imports.length, 1);
+    assert.deepEqual(publishedJobs, [concurrentImportId]);
+    assert.deepEqual(
+      state.auditLogs.map((entry) => entry.action),
+      ['vip_import.queued'],
+    );
+  });
+});
+
 test('scheduler preserves retry eligibility when Kafka publish is unavailable', async () => {
   await withTempCsvDir(async (sourceDir) => {
     const state = createState();
@@ -105,14 +163,15 @@ function createScheduler(
   publisher: Partial<VipImportJobsPublisher> = {
     publishImportRequested: async () => undefined,
   },
+  options?: PrismaMockOptions,
 ): VipImportSchedulerService {
   return new VipImportSchedulerService(
-    createPrismaMock(state) as unknown as PrismaService,
+    createPrismaMock(state, options) as unknown as PrismaService,
     publisher as VipImportJobsPublisher,
   );
 }
 
-function createPrismaMock(state: TestState) {
+function createPrismaMock(state: TestState, options?: PrismaMockOptions) {
   return {
     concert: {
       findUnique: async ({ where }: { where: { id?: string } }) =>
@@ -124,7 +183,11 @@ function createPrismaMock(state: TestState) {
       findFirst: async ({
         where,
       }: {
-        where: { concertId: string; sourceName: string; sourceFingerprint: string };
+        where: {
+          concertId: string;
+          sourceName: string;
+          sourceFingerprint: string;
+        };
       }) =>
         state.imports.find(
           (importRecord) =>
@@ -133,6 +196,28 @@ function createPrismaMock(state: TestState) {
             importRecord.sourceFingerprint === where.sourceFingerprint,
         ) ?? null,
       create: async ({ data }: { data: Partial<TestState['imports'][0]> }) => {
+        await options?.beforeImportCreate?.(data);
+
+        if (
+          state.imports.some(
+            (importRecord) =>
+              importRecord.concertId === data.concertId &&
+              importRecord.sourceName === data.sourceName &&
+              importRecord.sourceFingerprint === data.sourceFingerprint,
+          )
+        ) {
+          throw new Prisma.PrismaClientKnownRequestError(
+            'Unique constraint failed on import identity',
+            {
+              code: 'P2002',
+              clientVersion: 'test',
+              meta: {
+                target: ['concertId', 'sourceName', 'sourceFingerprint'],
+              },
+            },
+          );
+        }
+
         const now = new Date();
         const importRecord = {
           id: `00000000-0000-4000-8000-00000000000${state.imports.length + 1}`,
