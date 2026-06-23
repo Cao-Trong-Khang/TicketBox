@@ -54,8 +54,7 @@ type AcceptedGuestInput = {
   notes: string | null;
 };
 
-const PROCESSABLE_IMPORT_STATUSES = [
-  ImportStatus.PENDING,
+const CLAIMABLE_IMPORT_STATUSES = [
   ImportStatus.QUEUED,
   ImportStatus.RETRYABLE_FAILED,
 ];
@@ -71,7 +70,7 @@ export class VipImportWorkerService {
     const imports = await this.prisma.vipGuestImport.findMany({
       where: {
         status: {
-          in: PROCESSABLE_IMPORT_STATUSES,
+          in: CLAIMABLE_IMPORT_STATUSES,
         },
       },
       orderBy: [{ queuedAt: 'asc' }, { createdAt: 'asc' }],
@@ -96,7 +95,19 @@ export class VipImportWorkerService {
       throw new NotFoundException('VIP guest import not found');
     }
 
-    await this.markProcessing(importRecord);
+    const claimed = await this.markProcessing(importRecord);
+
+    if (!claimed) {
+      const currentImport = await this.prisma.vipGuestImport.findUnique({
+        where: { id: importId },
+      });
+
+      if (!currentImport) {
+        throw new NotFoundException('VIP guest import not found');
+      }
+
+      return this.toProcessResult(currentImport);
+    }
 
     try {
       const sourcePath = this.resolveSourcePath(importRecord);
@@ -471,9 +482,14 @@ export class VipImportWorkerService {
     };
   }
 
-  private async markProcessing(importRecord: ImportRecord): Promise<void> {
-    await this.prisma.vipGuestImport.update({
-      where: { id: importRecord.id },
+  private async markProcessing(importRecord: ImportRecord): Promise<boolean> {
+    const claimed = await this.prisma.vipGuestImport.updateMany({
+      where: {
+        id: importRecord.id,
+        status: {
+          in: CLAIMABLE_IMPORT_STATUSES,
+        },
+      },
       data: {
         status: ImportStatus.PROCESSING,
         startedAt: new Date(),
@@ -482,10 +498,16 @@ export class VipImportWorkerService {
       },
     });
 
+    if (claimed.count !== 1) {
+      return false;
+    }
+
     await this.auditImport(importRecord.id, 'vip_import.processing', {
       fileName: importRecord.fileName,
       sourceName: importRecord.sourceName,
     });
+
+    return true;
   }
 
   private async markFileFailure(

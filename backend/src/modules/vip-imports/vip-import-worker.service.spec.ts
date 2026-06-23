@@ -75,6 +75,26 @@ type TestState = {
   auditLogs: { action: string; importId: string | null; metadata: unknown }[];
   guestCreateAttempts: number;
   failOnGuestCreateAttempt?: number;
+  claimConflictStatus?: ImportStatus;
+};
+
+type FindManyImportArgs = {
+  where?: {
+    status?: {
+      in?: ImportStatus[];
+    };
+  };
+  take?: number;
+};
+
+type UpdateManyImportArgs = {
+  where: {
+    id?: string;
+    status?: {
+      in?: ImportStatus[];
+    };
+  };
+  data: Partial<TestImport>;
 };
 
 test('worker imports valid unique VIP guests and marks the import completed', async () => {
@@ -214,6 +234,41 @@ test('worker retry is idempotent for an already processed import', async () => {
   });
 });
 
+test('worker skips processing when another worker already claimed the import', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest One,one@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.claimConflictStatus = ImportStatus.PROCESSING;
+    state.errors.push({
+      id: 'existing-error',
+      importId: 'import-1',
+      type: ImportErrorType.ROW,
+      rowNumber: 2,
+      field: 'email',
+      code: 'EXISTING_ERROR',
+      message: 'Existing error',
+      rawRow: null,
+      metadata: null,
+      createdAt: new Date('2026-06-15T12:00:00.000Z'),
+    });
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.PROCESSING);
+    assert.equal(state.guests.length, 0);
+    assert.equal(state.errors.length, 1);
+    assert.deepEqual(state.auditLogs, []);
+  });
+});
+
 test('worker marks partial failures retryable and recovers without duplicate guests', async () => {
   const previousBatchSize = process.env.VIP_IMPORT_BATCH_SIZE;
   process.env.VIP_IMPORT_BATCH_SIZE = '1';
@@ -293,18 +348,43 @@ function createState(sourcePath: string): TestState {
 function createPrismaMock(state: TestState) {
   const tx = {
     vipGuestImport: {
-      findMany: async () =>
-        state.imports.filter((importRecord) => {
-          const processableStatuses: ImportStatus[] = [
-            ImportStatus.PENDING,
-            ImportStatus.QUEUED,
-            ImportStatus.RETRYABLE_FAILED,
-          ];
+      findMany: async ({ where, take }: FindManyImportArgs = {}) => {
+        const statuses = where?.status?.in;
+        const imports = statuses
+          ? state.imports.filter((importRecord) => statuses.includes(importRecord.status))
+          : state.imports;
 
-          return processableStatuses.includes(importRecord.status);
-        }),
+        return typeof take === 'number' ? imports.slice(0, take) : imports;
+      },
       findUnique: async ({ where }: { where: { id: string } }) =>
         state.imports.find((importRecord) => importRecord.id === where.id) ?? null,
+      updateMany: async ({ where, data }: UpdateManyImportArgs) => {
+        const importRecord = state.imports.find(
+          (candidate) => !where.id || candidate.id === where.id,
+        );
+
+        if (!importRecord) {
+          return { count: 0 };
+        }
+
+        if (state.claimConflictStatus && data.status === ImportStatus.PROCESSING) {
+          Object.assign(importRecord, {
+            status: state.claimConflictStatus,
+            updatedAt: new Date(),
+          });
+          state.claimConflictStatus = undefined;
+
+          return { count: 0 };
+        }
+
+        if (where.status?.in && !where.status.in.includes(importRecord.status)) {
+          return { count: 0 };
+        }
+
+        Object.assign(importRecord, data, { updatedAt: new Date() });
+
+        return { count: 1 };
+      },
       update: async ({ where, data }: { where: { id: string }; data: Partial<TestImport> }) => {
         const importRecord = state.imports.find((candidate) => candidate.id === where.id);
         assert.ok(importRecord);
