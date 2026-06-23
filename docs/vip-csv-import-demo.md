@@ -6,10 +6,10 @@ This demo uses the local Sponsor CSV Files directory at `backend/prisma/demo-spo
 
 VIP CSV imports use `REPLACE_SNAPSHOT` semantics per concert and sponsor source. When a newer sponsor file includes an existing natural guest key (`external_guest_key` when present, otherwise the normalized identity fallback), the worker refreshes that guest's display metadata, allowed gate, guest type, contact fields, and notes while preserving check-in state. When a successful snapshot omits an active guest from the previous completed import, the worker marks that guest `CANCELLED` without hard deleting it; checked-in guests and failed or partial-error snapshots do not trigger cleanup.
 
-1. Start the local infrastructure and backend:
+1. Start the local infrastructure:
 
 ```bash
-docker-compose up --build -d postgres redis kafka backend
+docker-compose up --build -d postgres redis kafka
 ```
 
 2. Apply migrations and seed the demo organizer, concert, check-in staff, assignments, and sample VIP data:
@@ -20,19 +20,27 @@ npm run prisma:deploy
 npm run prisma:seed
 ```
 
-3. Detect sponsor CSV files and enqueue imports:
+3. Start the backend API and VIP import worker daemon:
+
+```bash
+docker-compose up --build -d backend vip-import-worker
+```
+
+The `vip-import-worker` service scans `VIP_CSV_SOURCE_DIR`, enqueues database-backed jobs, claims them, and processes them. The worker polls every `VIP_IMPORT_SCAN_INTERVAL_MS` for files and every `VIP_IMPORT_WORKER_POLL_INTERVAL_MS` for queued jobs.
+
+For a one-shot local run without the daemon:
+
+```bash
+npm run vip-imports:worker:once -- --source-dir=./prisma/demo-sponsor-csv
+```
+
+To only enqueue files without processing them, use:
 
 ```bash
 npm run vip-imports:scan -- ./prisma/demo-sponsor-csv
 ```
 
-4. Process queued imports:
-
-```bash
-npm run vip-imports:worker
-```
-
-5. Review organizer report output:
+4. Review organizer report output:
 
 ```bash
 curl -H "Authorization: Bearer <organizer-jwt>" http://localhost:3000/admin/concerts/<concert-id>/vip-imports
@@ -44,12 +52,12 @@ curl -H "Authorization: Bearer <organizer-jwt>" http://localhost:3000/admin/conc
 - `missing-column-vip-guests.csv` records a file-level `MISSING_REQUIRED_COLUMNS` failure.
 - `malformed-vip-guests.csv` imports valid rows and records row-level validation errors.
 - `duplicate-vip-guests.csv` imports unique rows and records duplicate decisions.
-- To simulate Kafka enqueue failure without stopping the rest of the backend:
+- To simulate database-backed queue enqueue failure without stopping the rest of the backend:
 
 ```bash
 cd backend
-$env:VIP_IMPORT_KAFKA_FAIL='1'
+$env:VIP_IMPORT_QUEUE_FAIL='1'
 npm run vip-imports:scan -- ./prisma/demo-sponsor-csv
 ```
 
-The scheduler records affected imports as `FAILED_TO_ENQUEUE`; public concert, checkout, payment, and check-in request paths do not depend on this scan command.
+The scheduler records affected imports as `FAILED_TO_ENQUEUE`; public concert, checkout, payment, and check-in request paths do not depend on this scan command. Do not rely on `QUEUED` imports being processed unless the `vip-import-worker` daemon or `npm run vip-imports:worker:once` is running.

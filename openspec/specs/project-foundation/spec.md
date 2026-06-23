@@ -116,7 +116,7 @@ The system SHALL provide Docker files that run the TicketBox local prototype wit
 
 - If a service port is already occupied, Docker Compose MUST surface the conflict through normal Compose errors.
 - If an infrastructure container is unhealthy or unavailable, dependent application behavior MUST make the failure visible through logs or health checks.
-- If Kafka is unavailable, the setup MUST still make clear that async workflows are unavailable and MUST NOT claim that notification, CSV import, AI bio, or analytics workers are functional.
+- If Kafka is unavailable, the setup MUST still make clear that Kafka-backed async workflows are unavailable and MUST NOT claim that notification, AI bio, or analytics workers are functional through Kafka.
 
 ## Constraints
 

@@ -9,12 +9,12 @@ export class VipImportJobsPublisher {
   private readonly logger = new Logger(VipImportJobsPublisher.name);
 
   async publishImportRequested(job: VipGuestImportRequestedJob): Promise<void> {
-    if (process.env.VIP_IMPORT_KAFKA_FAIL === '1') {
-      throw new Error('Simulated Kafka outage for VIP import jobs');
+    if (process.env.VIP_IMPORT_QUEUE_FAIL === '1' || process.env.VIP_IMPORT_KAFKA_FAIL === '1') {
+      throw new Error('Simulated VIP import queue outage');
     }
 
     this.logger.log(
-      `Published ${VIP_GUEST_IMPORT_REQUESTED_TOPIC} for import ${job.importId} (${job.fileName})`,
+      `Enqueued ${VIP_GUEST_IMPORT_REQUESTED_TOPIC} in the database-backed VIP import queue for import ${job.importId} (${job.fileName})`,
     );
   }
 }

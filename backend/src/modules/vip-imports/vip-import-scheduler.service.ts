@@ -110,12 +110,12 @@ export class VipImportSchedulerService {
           status: queued.status,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown Kafka publish error';
+        const message = error instanceof Error ? error.message : 'Unknown VIP import queue error';
         const failed = await this.prisma.vipGuestImport.update({
           where: { id: importRecord.id },
           data: {
             status: ImportStatus.FAILED_TO_ENQUEUE,
-            failureCode: 'KAFKA_ENQUEUE_FAILED',
+            failureCode: 'QUEUE_ENQUEUE_FAILED',
             failureMessage: message,
           },
         });

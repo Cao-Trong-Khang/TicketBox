@@ -4,14 +4,21 @@
 Define the scheduled one-way sponsor VIP CSV import workflow, reporting, and check-in availability rules.
 ## Requirements
 ### Requirement: Scheduled sponsor VIP CSV files are imported asynchronously
-TicketBox SHALL import sponsor VIP guest lists from scheduled CSV files through the Backend API, Kafka, Background Workers, and PostgreSQL without requiring a sponsor API or manual upload flow.
+TicketBox SHALL import sponsor VIP guest lists from scheduled CSV files through the Backend API, a PostgreSQL-backed import queue, a long-running Background Worker daemon, and PostgreSQL storage without requiring a sponsor API or manual upload flow.
 VIP CSV imports SHALL use `REPLACE_SNAPSHOT` semantics for each `concertId` and `sponsorSource`: a newer accepted row with the same natural guest key refreshes the existing VIP guest record instead of being treated as an append-only duplicate. The natural guest key is `external_guest_key` when present, otherwise the normalized identity fallback derived from the row identity fields.
 
 #### Scenario: Scheduled import completes without blocking live APIs
 - **GIVEN** a scheduled sponsor CSV file exists for a concert
-- **WHEN** the scheduler enqueues the import and the worker processes the file
+- **WHEN** the worker daemon scans the source directory, enqueues the import, claims it, and processes the file
 - **THEN** valid unique VIP guests are stored in PostgreSQL
 - **THEN** public browsing, checkout, payment, and check-in APIs remain available
+
+#### Scenario: Queued imports have a real consumer
+- **GIVEN** a sponsor CSV file is detected by the import scheduler
+- **WHEN** the import is marked `QUEUED`
+- **THEN** the long-running worker daemon polls the PostgreSQL import queue
+- **THEN** the worker claims queued or retryable imports atomically before processing
+- **THEN** local Docker Compose starts a `vip-import-worker` service for that daemon
 
 #### Scenario: New sponsor snapshot refreshes an existing VIP guest
 - **GIVEN** a previous sponsor CSV import created a VIP guest for a concert and sponsor source

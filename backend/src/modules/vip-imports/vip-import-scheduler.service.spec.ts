@@ -129,12 +129,12 @@ test('scheduler reuses a concurrently created import when create hits a unique c
   });
 });
 
-test('scheduler preserves retry eligibility when Kafka publish is unavailable', async () => {
+test('scheduler preserves retry eligibility when queue enqueue is unavailable', async () => {
   await withTempCsvDir(async (sourceDir) => {
     const state = createState();
     const scheduler = createScheduler(state, {
       publishImportRequested: async () => {
-        throw new Error('Kafka unavailable');
+        throw new Error('VIP import queue unavailable');
       },
     });
 
@@ -146,7 +146,7 @@ test('scheduler preserves retry eligibility when Kafka publish is unavailable', 
     assert.equal(result.queued, 0);
     assert.equal(result.failedToEnqueue, 1);
     assert.equal(state.imports[0].status, ImportStatus.FAILED_TO_ENQUEUE);
-    assert.equal(state.imports[0].failureCode, 'KAFKA_ENQUEUE_FAILED');
+    assert.equal(state.imports[0].failureCode, 'QUEUE_ENQUEUE_FAILED');
   });
 });
 
