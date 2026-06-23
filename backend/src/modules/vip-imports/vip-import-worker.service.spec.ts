@@ -72,7 +72,13 @@ type TestState = {
   imports: TestImport[];
   guests: TestGuest[];
   errors: TestError[];
-  auditLogs: { action: string; importId: string | null; metadata: unknown }[];
+  auditLogs: {
+    action: string;
+    importId: string | null;
+    entityType: string;
+    entityId: string;
+    metadata: unknown;
+  }[];
   guestCreateAttempts: number;
   failOnGuestCreateAttempt?: number;
   claimConflictStatus?: ImportStatus;
@@ -212,7 +218,76 @@ test('worker deduplicates by external key first and normalized identity fallback
   });
 });
 
-test('worker records concurrent guest create conflicts as duplicate existing guests', async () => {
+test('worker refreshes existing VIP guests from newer sponsor snapshots', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone,sponsor_company,invited_by,guest_type,allowed_gate,notes',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Updated Guest,new@example.test,+84900000099,Updated Sponsor,Updated Host,Updated Type,Gate B,Updated notes',
+      ]),
+      'utf8',
+    );
+    const checkedInAt = new Date('2026-06-16T10:00:00.000Z');
+    const state = createState(sourcePath);
+    state.guests.push(
+      createGuest({
+        id: 'existing-vip',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-001',
+        fullName: 'Old Guest',
+        email: 'old@example.test',
+        phone: '+84900000001',
+        sponsorCompany: 'Old Sponsor',
+        invitedBy: 'Old Host',
+        guestType: 'Old Type',
+        allowedGate: 'Gate A',
+        notes: 'Old notes',
+        status: VipGuestStatus.CHECKED_IN,
+        checkedInAt,
+      }),
+    );
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.acceptedRows, 1);
+    assert.equal(result.duplicateRows, 0);
+    assert.equal(state.errors.length, 0);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].importId, 'import-1');
+    assert.equal(state.guests[0].fullName, 'Updated Guest');
+    assert.equal(state.guests[0].email, 'new@example.test');
+    assert.equal(state.guests[0].phone, '+84900000099');
+    assert.equal(state.guests[0].guestType, 'Updated Type');
+    assert.equal(state.guests[0].allowedGate, 'Gate B');
+    assert.equal(state.guests[0].status, VipGuestStatus.CHECKED_IN);
+    assert.equal(state.guests[0].checkedInAt, checkedInAt);
+
+    const updateAudit = state.auditLogs.find(
+      (entry) => entry.action === 'vip_import.guest_snapshot_updated',
+    );
+    assert.ok(updateAudit);
+    assert.equal(updateAudit.entityType, 'vip_guest');
+    assert.equal(updateAudit.entityId, 'existing-vip');
+    assert.deepEqual(
+      (updateAudit.metadata as { changedFields: string[] }).changedFields.sort(),
+      [
+        'allowedGate',
+        'email',
+        'fullName',
+        'guestType',
+        'invitedBy',
+        'notes',
+        'phone',
+        'sponsorCompany',
+      ].sort(),
+    );
+  });
+});
+
+test('worker refreshes concurrently created VIP guests for snapshot imports', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(
       sourcePath,
@@ -232,12 +307,14 @@ test('worker records concurrent guest create conflicts as duplicate existing gue
     const result = await worker.processImport('import-1');
 
     assert.equal(result.status, ImportStatus.COMPLETED);
-    assert.equal(result.acceptedRows, 0);
-    assert.equal(result.duplicateRows, 1);
+    assert.equal(result.acceptedRows, 1);
+    assert.equal(result.duplicateRows, 0);
     assert.equal(state.guests.length, 1);
-    assert.equal(state.guests[0].importId, 'other-import');
-    assert.equal(state.errors.length, 1);
-    assert.equal(state.errors[0].code, 'DUPLICATE_EXISTING_GUEST');
+    assert.equal(state.guests[0].importId, 'import-1');
+    assert.equal(state.errors.length, 0);
+    assert.ok(
+      state.auditLogs.some((entry) => entry.action === 'vip_import.guest_snapshot_updated'),
+    );
   });
 });
 
@@ -511,7 +588,17 @@ function createPrismaMock(state: TestState) {
       },
     },
     auditLog: {
-      create: async ({ data }: { data: { action: string; importId: string | null; metadata: unknown } }) => {
+      create: async ({
+        data,
+      }: {
+        data: {
+          action: string;
+          importId: string | null;
+          entityType: string;
+          entityId: string;
+          metadata: unknown;
+        };
+      }) => {
         state.auditLogs.push(data);
         return data;
       },

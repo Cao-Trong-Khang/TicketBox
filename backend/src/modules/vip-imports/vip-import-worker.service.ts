@@ -54,9 +54,43 @@ type AcceptedGuestInput = {
   notes: string | null;
 };
 
+type ExistingGuestRecord = {
+  id: string;
+  importId: string;
+  fullName: string;
+  email: string | null;
+  phone: string | null;
+  sponsorCompany: string | null;
+  invitedBy: string | null;
+  guestType: string | null;
+  allowedGate: string | null;
+  notes: string | null;
+};
+
+type SnapshotUpdateField =
+  | 'fullName'
+  | 'email'
+  | 'phone'
+  | 'sponsorCompany'
+  | 'invitedBy'
+  | 'guestType'
+  | 'allowedGate'
+  | 'notes';
+
 const CLAIMABLE_IMPORT_STATUSES = [
   ImportStatus.QUEUED,
   ImportStatus.RETRYABLE_FAILED,
+];
+const VIP_IMPORT_MODE = 'REPLACE_SNAPSHOT';
+const SNAPSHOT_UPDATE_FIELDS: SnapshotUpdateField[] = [
+  'fullName',
+  'email',
+  'phone',
+  'sponsorCompany',
+  'invitedBy',
+  'guestType',
+  'allowedGate',
+  'notes',
 ];
 
 @Injectable()
@@ -165,7 +199,10 @@ export class VipImportWorkerService {
         },
       });
 
-      await this.auditImport(importRecord.id, 'vip_import.completed', counters);
+      await this.auditImport(importRecord.id, 'vip_import.completed', {
+        ...counters,
+        importMode: VIP_IMPORT_MODE,
+      });
 
       return this.toProcessResult(completed);
     } catch (error) {
@@ -281,89 +318,98 @@ export class VipImportWorkerService {
 
     const existing = await this.findExistingGuest(tx, importRecord.concertId, guestInput);
 
-    if (existing && existing.importId !== importRecord.id) {
-      await this.recordExistingGuestDuplicate(
+    if (existing) {
+      await this.refreshExistingGuestFromSnapshot(
         tx,
         importRecord,
-        row,
-        existing.id,
+        existing,
+        guestInput,
         duplicateKey,
-        counters,
       );
+      counters.acceptedRows += 1;
       return;
     }
 
-    if (existing) {
-      await tx.vipGuest.update({
-        where: { id: existing.id },
-        data: this.toGuestUpdateData(guestInput),
+    try {
+      await tx.vipGuest.create({
+        data: {
+          importId: importRecord.id,
+          concertId: importRecord.concertId,
+          ...this.toGuestCreateData(guestInput),
+        },
       });
-    } else {
-      try {
-        await tx.vipGuest.create({
-          data: {
-            importId: importRecord.id,
-            concertId: importRecord.concertId,
-            ...this.toGuestCreateData(guestInput),
-          },
-        });
-      } catch (error) {
-        if (!isUniqueConstraintError(error)) {
-          throw error;
-        }
-
-        const concurrentGuest = await this.findExistingGuest(
-          tx,
-          importRecord.concertId,
-          guestInput,
-        );
-
-        if (!concurrentGuest) {
-          throw error;
-        }
-
-        if (concurrentGuest.importId !== importRecord.id) {
-          await this.recordExistingGuestDuplicate(
-            tx,
-            importRecord,
-            row,
-            concurrentGuest.id,
-            duplicateKey,
-            counters,
-          );
-          return;
-        }
-
-        await tx.vipGuest.update({
-          where: { id: concurrentGuest.id },
-          data: this.toGuestUpdateData(guestInput),
-        });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
       }
+
+      const concurrentGuest = await this.findExistingGuest(
+        tx,
+        importRecord.concertId,
+        guestInput,
+      );
+
+      if (!concurrentGuest) {
+        throw error;
+      }
+
+      await this.refreshExistingGuestFromSnapshot(
+        tx,
+        importRecord,
+        concurrentGuest,
+        guestInput,
+        duplicateKey,
+      );
     }
 
     counters.acceptedRows += 1;
   }
 
-  private async recordExistingGuestDuplicate(
+  private async refreshExistingGuestFromSnapshot(
     tx: Prisma.TransactionClient,
     importRecord: ImportRecord,
-    row: ReturnType<typeof parseCsv>['rows'][number],
-    duplicateGuestId: string,
+    existing: ExistingGuestRecord,
+    guestInput: AcceptedGuestInput,
     duplicateKey: string,
-    counters: RowCounters,
   ): Promise<void> {
-    counters.duplicateRows += 1;
-    await this.createImportError(tx, importRecord.id, {
-      type: ImportErrorType.DUPLICATE,
-      rowNumber: row.rowNumber,
-      code: 'DUPLICATE_EXISTING_GUEST',
-      message: 'Guest identity already exists for this concert and sponsor source',
-      rawRow: row.rawRow,
-      metadata: {
-        duplicateGuestId,
-        duplicateKey,
+    const changedFields = this.getSnapshotChangedFields(existing, guestInput);
+    const previousImportId = existing.importId;
+
+    await tx.vipGuest.update({
+      where: { id: existing.id },
+      data: {
+        importId: importRecord.id,
+        ...this.toGuestUpdateData(guestInput),
       },
     });
+
+    if (previousImportId !== importRecord.id || changedFields.length > 0) {
+      await this.auditGuestSnapshotUpdate(tx, importRecord.id, existing.id, {
+        importMode: VIP_IMPORT_MODE,
+        previousImportId,
+        currentImportId: importRecord.id,
+        duplicateKey,
+        changedFields,
+      });
+    }
+  }
+
+  private getSnapshotChangedFields(
+    existing: ExistingGuestRecord,
+    guestInput: AcceptedGuestInput,
+  ): SnapshotUpdateField[] {
+    const nextValues: Record<SnapshotUpdateField, string | null> = {
+      fullName: guestInput.fullName,
+      email: guestInput.email,
+      phone: guestInput.phone,
+      sponsorCompany: guestInput.sponsorCompany,
+      invitedBy: guestInput.invitedBy,
+      guestType: guestInput.guestType,
+      allowedGate: guestInput.allowedGate,
+      notes: guestInput.notes,
+    };
+
+    return SNAPSHOT_UPDATE_FIELDS.filter((field) => existing[field] !== nextValues[field]);
   }
 
   private validateRow(row: ReturnType<typeof parseCsv>['rows'][number]): PendingImportError[] {
@@ -469,7 +515,20 @@ export class VipImportWorkerService {
     tx: Prisma.TransactionClient,
     concertId: string,
     guestInput: AcceptedGuestInput,
-  ) {
+  ): Promise<ExistingGuestRecord | null> {
+    const select = {
+      id: true,
+      importId: true,
+      fullName: true,
+      email: true,
+      phone: true,
+      sponsorCompany: true,
+      invitedBy: true,
+      guestType: true,
+      allowedGate: true,
+      notes: true,
+    } as const;
+
     if (guestInput.externalGuestKey) {
       return tx.vipGuest.findFirst({
         where: {
@@ -477,7 +536,7 @@ export class VipImportWorkerService {
           sponsorSource: guestInput.sponsorSource,
           externalGuestKey: guestInput.externalGuestKey,
         },
-        select: { id: true, importId: true },
+        select,
       });
     }
 
@@ -487,7 +546,7 @@ export class VipImportWorkerService {
         sponsorSource: guestInput.sponsorSource,
         normalizedIdentityKey: guestInput.normalizedIdentityKey,
       },
-      select: { id: true, importId: true },
+      select,
     });
   }
 
@@ -556,6 +615,7 @@ export class VipImportWorkerService {
     await this.auditImport(importRecord.id, 'vip_import.processing', {
       fileName: importRecord.fileName,
       sourceName: importRecord.sourceName,
+      importMode: VIP_IMPORT_MODE,
     });
 
     return true;
@@ -608,6 +668,23 @@ export class VipImportWorkerService {
         message: error.message,
         rawRow: error.rawRow,
         metadata: error.metadata,
+      },
+    });
+  }
+
+  private async auditGuestSnapshotUpdate(
+    tx: Prisma.TransactionClient,
+    importId: string,
+    guestId: string,
+    metadata: Prisma.InputJsonValue,
+  ): Promise<void> {
+    await tx.auditLog.create({
+      data: {
+        importId,
+        entityType: 'vip_guest',
+        entityId: guestId,
+        action: 'vip_import.guest_snapshot_updated',
+        metadata,
       },
     });
   }

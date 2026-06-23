@@ -4,6 +4,8 @@ This demo uses the local Sponsor CSV Files directory at `backend/prisma/demo-spo
 
 ## Valid Import
 
+VIP CSV imports use `REPLACE_SNAPSHOT` semantics per concert and sponsor source. When a newer sponsor file includes an existing natural guest key (`external_guest_key` when present, otherwise the normalized identity fallback), the worker refreshes that guest's display metadata, allowed gate, guest type, contact fields, and notes while preserving check-in state.
+
 1. Start the local infrastructure and backend:
 
 ```bash

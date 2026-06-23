@@ -5,12 +5,20 @@ Define the scheduled one-way sponsor VIP CSV import workflow, reporting, and che
 ## Requirements
 ### Requirement: Scheduled sponsor VIP CSV files are imported asynchronously
 TicketBox SHALL import sponsor VIP guest lists from scheduled CSV files through the Backend API, Kafka, Background Workers, and PostgreSQL without requiring a sponsor API or manual upload flow.
+VIP CSV imports SHALL use `REPLACE_SNAPSHOT` semantics for each `concertId` and `sponsorSource`: a newer accepted row with the same natural guest key refreshes the existing VIP guest record instead of being treated as an append-only duplicate. The natural guest key is `external_guest_key` when present, otherwise the normalized identity fallback derived from the row identity fields.
 
 #### Scenario: Scheduled import completes without blocking live APIs
 - **GIVEN** a scheduled sponsor CSV file exists for a concert
 - **WHEN** the scheduler enqueues the import and the worker processes the file
 - **THEN** valid unique VIP guests are stored in PostgreSQL
 - **THEN** public browsing, checkout, payment, and check-in APIs remain available
+
+#### Scenario: New sponsor snapshot refreshes an existing VIP guest
+- **GIVEN** a previous sponsor CSV import created a VIP guest for a concert and sponsor source
+- **WHEN** a newer sponsor CSV file contains the same natural guest key with updated name, email, phone, allowed gate, or guest type
+- **THEN** the worker updates the existing VIP guest record with the newer snapshot metadata
+- **THEN** the worker preserves the guest check-in state
+- **THEN** the worker records an audit entry for the snapshot refresh
 
 ### Requirement: Mobile VIP guest dashboard uses imported CSV guests
 The Check-in Mobile App SHALL provide a VIP Guest List dashboard for Check-in Staff using accepted VIP guests imported from scheduled CSV files and delivered through assignment-scoped preload data.
