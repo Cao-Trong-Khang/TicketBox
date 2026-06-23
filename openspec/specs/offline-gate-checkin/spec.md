@@ -28,6 +28,13 @@ TicketBox SHALL provide an offline-capable gate check-in workflow for Check-in S
 - **THEN** the API returns one outcome per local scan
 - **THEN** the app stores those outcomes and marks accepted or rejected logs as synchronized
 
+#### Scenario: Backend verifies signed ticket QR tokens
+- **GIVEN** a staff device synchronizes a ticket scan
+- **WHEN** the Backend API receives the ticket QR payload
+- **THEN** the Backend API verifies an HMAC-signed token before looking up the ticket
+- **THEN** the token payload includes ticket ID, concert ID, issuer, expiration, nonce, and version
+- **THEN** unsigned bearer hashes, invalid signatures, expired tokens, or token/ticket nonce mismatches are rejected as invalid QR payloads
+
 #### Scenario: VIP scan at the wrong assigned gate is rejected by backend
 - **GIVEN** a VIP guest is assigned to a specific allowed gate
 - **AND** Check-in Staff synchronizes that VIP scan from a different assigned gate or device

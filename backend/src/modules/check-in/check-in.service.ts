@@ -22,6 +22,7 @@ import { PermissionService } from '../rbac/permission.service';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { CheckInEventsPublisher } from './check-in-events.publisher';
+import { createTicketQrToken, verifyTicketQrToken } from './check-in-qr-token';
 import {
   CheckInAssignmentDto,
   CheckInPreloadDto,
@@ -39,6 +40,8 @@ import {
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const PRELOAD_RATE_LIMIT = 120;
 const SYNC_RATE_LIMIT = 300;
+const DEFAULT_TICKET_QR_EXPIRATION_GRACE_SECONDS = 7 * 24 * 60 * 60;
+const DEFAULT_TICKET_QR_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 type AssignmentAccess = {
   id: string;
@@ -218,7 +221,12 @@ export class CheckInService {
       tickets: tickets.map((ticket) => ({
         id: ticket.id,
         ticketCode: ticket.ticketCode,
-        qrHash: ticket.qrHash,
+        qrHash: createTicketQrToken({
+          ticketId: ticket.id,
+          concertId,
+          nonce: ticket.qrHash,
+          expiresAt: this.resolveTicketQrExpiresAt(concert.endsAt, generatedAt),
+        }),
         status: ticket.status,
         issuedAt: ticket.issuedAt.toISOString(),
         checkedInAt: ticket.checkedInAt?.toISOString() ?? null,
@@ -364,8 +372,17 @@ export class CheckInService {
     scan: CheckInSyncScanDto,
   ): Promise<CheckIn> {
     const scannedAt = new Date(scan.scannedAt);
+    const verifiedTicketQr = verifyTicketQrToken(scan.qrHash);
+
+    if (!verifiedTicketQr.valid) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+        status: CheckInStatus.INVALID_QR,
+        note: verifiedTicketQr.reason,
+      });
+    }
+
     const ticket = await tx.ticket.findUnique({
-      where: { qrHash: scan.qrHash },
+      where: { id: verifiedTicketQr.payload.ticketId },
       include: {
         concert: {
           select: {
@@ -379,6 +396,17 @@ export class CheckInService {
       return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
         status: CheckInStatus.INVALID_QR,
         note: 'QR hash was not found for any issued ticket',
+      });
+    }
+
+    if (
+      ticket.qrHash !== verifiedTicketQr.payload.nonce ||
+      ticket.concertId !== verifiedTicketQr.payload.concertId
+    ) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+        ticketId: ticket.id,
+        status: CheckInStatus.INVALID_QR,
+        note: 'Ticket QR token does not match the issued ticket',
       });
     }
 
@@ -576,10 +604,7 @@ export class CheckInService {
     const [ticket, vipGuest] =
       scan.entityType === CheckInScanEntityType.ticket
         ? [
-            await this.prisma.ticket.findUnique({
-              where: { qrHash: scan.qrHash },
-              select: { id: true },
-            }),
+            await this.findTicketFromSignedQrForConflict(scan.qrHash),
             null,
           ]
         : [
@@ -608,6 +633,33 @@ export class CheckInService {
         note: 'A successful check-in for this payload was recorded by another device first',
       },
     });
+  }
+
+  private async findTicketFromSignedQrForConflict(qrHash: string): Promise<{ id: string } | null> {
+    const verifiedTicketQr = verifyTicketQrToken(qrHash);
+
+    if (!verifiedTicketQr.valid) {
+      return null;
+    }
+
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: verifiedTicketQr.payload.ticketId },
+      select: {
+        id: true,
+        concertId: true,
+        qrHash: true,
+      },
+    });
+
+    if (
+      !ticket ||
+      ticket.qrHash !== verifiedTicketQr.payload.nonce ||
+      ticket.concertId !== verifiedTicketQr.payload.concertId
+    ) {
+      return null;
+    }
+
+    return { id: ticket.id };
   }
 
   private async findIdempotentCheckIn(
@@ -711,6 +763,34 @@ export class CheckInService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
+  }
+
+  private resolveTicketQrExpiresAt(concertEndsAt: Date | null, generatedAt: Date): Date {
+    if (concertEndsAt) {
+      return new Date(
+        concertEndsAt.getTime() +
+          this.readPositiveIntegerEnv(
+            'CHECK_IN_QR_EXPIRATION_GRACE_SECONDS',
+            DEFAULT_TICKET_QR_EXPIRATION_GRACE_SECONDS,
+          ) *
+            1000,
+      );
+    }
+
+    return new Date(
+      generatedAt.getTime() +
+        this.readPositiveIntegerEnv(
+          'CHECK_IN_QR_TOKEN_TTL_SECONDS',
+          DEFAULT_TICKET_QR_TOKEN_TTL_SECONDS,
+        ) *
+          1000,
+    );
+  }
+
+  private readPositiveIntegerEnv(name: string, fallback: number): number {
+    const value = Number(process.env[name]);
+
+    return Number.isInteger(value) && value > 0 ? value : fallback;
   }
 
   private async publishSafely(checkIn: CheckIn): Promise<void> {

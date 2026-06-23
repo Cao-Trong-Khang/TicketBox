@@ -31,7 +31,7 @@ export class CheckInSyncScanDto {
 
   @IsString()
   @IsNotEmpty()
-  @MaxLength(240)
+  @MaxLength(1024)
   qrHash!: string;
 
   @IsEnum(CheckInScanEntityType)

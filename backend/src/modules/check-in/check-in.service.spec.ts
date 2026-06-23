@@ -13,8 +13,11 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { CheckInEventsPublisher } from './check-in-events.publisher';
+import { createTicketQrToken } from './check-in-qr-token';
 import { CheckInService } from './check-in.service';
 import { CheckInScanEntityType } from './dto/sync-check-in.dto';
+
+process.env.CHECK_IN_QR_HMAC_SECRET = 'test-check-in-qr-hmac-secret';
 
 type TestState = {
   userRoles: { userId: string; role: { code: string } }[];
@@ -148,6 +151,7 @@ test('preload rejects Check-in Staff without an active assignment for the concer
 
 test('sync accepts a valid assigned ticket scan and updates authoritative ticket state', async () => {
   const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0]);
 
   const response = await service.syncEvent(
     { id: 'staff-1', email: 'staff@example.test' },
@@ -157,7 +161,7 @@ test('sync accepts a valid assigned ticket scan and updates authoritative ticket
       scans: [
         {
           localScanId: 'local-1',
-          qrHash: 'ticket-qr-1',
+          qrHash,
           entityType: CheckInScanEntityType.ticket,
           scannedAt: '2026-08-20T12:00:00.000Z',
           localResult: 'accepted',
@@ -171,6 +175,57 @@ test('sync accepts a valid assigned ticket scan and updates authoritative ticket
   assert.equal(state.tickets[0].status, TicketStatus.USED);
   assert.equal(state.checkIns.length, 1);
   assert.equal(state.checkIns[0].status, CheckInStatus.SUCCESS);
+});
+
+test('sync rejects unsigned ticket QR bearer hashes', async () => {
+  const { service, state } = createHarness();
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'unsigned-ticket',
+          qrHash: 'ticket-qr-1',
+          entityType: CheckInScanEntityType.ticket,
+          scannedAt: '2026-08-20T12:00:00.000Z',
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
+  assert.equal(state.checkIns[0].note, 'Ticket QR token is not signed');
+  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
+});
+
+test('sync rejects expired signed ticket QR tokens before ticket lookup acceptance', async () => {
+  const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0], new Date('2026-01-01T00:00:00.000Z'));
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'expired-ticket',
+          qrHash,
+          entityType: CheckInScanEntityType.ticket,
+          scannedAt: '2026-08-20T12:00:00.000Z',
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
+  assert.equal(state.checkIns[0].note, 'Ticket QR token is expired');
+  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
 });
 
 test('sync accepts a VIP guest only at an assigned gate', async () => {
@@ -228,12 +283,13 @@ test('sync rejects VIP guest scans at the wrong assignment gate', async () => {
 
 test('sync retry with the same device and local scan ID returns the original outcome', async () => {
   const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0]);
   const dto = {
     sourceDeviceId: 'device-a',
     scans: [
       {
         localScanId: 'local-retry',
-        qrHash: 'ticket-qr-1',
+        qrHash,
         entityType: CheckInScanEntityType.ticket,
         scannedAt: '2026-08-20T12:00:00.000Z',
       },
@@ -250,6 +306,7 @@ test('sync retry with the same device and local scan ID returns the original out
 
 test('cross-device offline scans resolve to first successful sync and later duplicate outcome', async () => {
   const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0]);
 
   const first = await service.syncEvent(
     { id: 'staff-1', email: 'staff@example.test' },
@@ -259,7 +316,7 @@ test('cross-device offline scans resolve to first successful sync and later dupl
       scans: [
         {
           localScanId: 'device-a-local',
-          qrHash: 'ticket-qr-1',
+          qrHash,
           entityType: CheckInScanEntityType.ticket,
           scannedAt: '2026-08-20T12:00:00.000Z',
         },
@@ -274,7 +331,7 @@ test('cross-device offline scans resolve to first successful sync and later dupl
       scans: [
         {
           localScanId: 'device-b-local',
-          qrHash: 'ticket-qr-1',
+          qrHash,
           entityType: CheckInScanEntityType.ticket,
           scannedAt: '2026-08-20T12:01:00.000Z',
         },
@@ -289,6 +346,7 @@ test('cross-device offline scans resolve to first successful sync and later dupl
 
 test('Redis rate limiting returns a retryable 429 before changing scan state', async () => {
   const { service, state } = createHarness({ redisCount: 301 });
+  const qrHash = signedTicketQr(state.tickets[0]);
 
   await assert.rejects(
     () =>
@@ -297,7 +355,7 @@ test('Redis rate limiting returns a retryable 429 before changing scan state', a
         scans: [
           {
             localScanId: 'rate-limited',
-            qrHash: 'ticket-qr-1',
+            qrHash,
             entityType: CheckInScanEntityType.ticket,
             scannedAt: '2026-08-20T12:00:00.000Z',
           },
@@ -311,7 +369,8 @@ test('Redis rate limiting returns a retryable 429 before changing scan state', a
 });
 
 test('Kafka publish failures do not change the authoritative sync response', async () => {
-  const { service } = createHarness({ publisherThrows: true });
+  const { service, state } = createHarness({ publisherThrows: true });
+  const qrHash = signedTicketQr(state.tickets[0]);
 
   const response = await service.syncEvent(
     { id: 'staff-1', email: 'staff@example.test' },
@@ -321,7 +380,7 @@ test('Kafka publish failures do not change the authoritative sync response', asy
       scans: [
         {
           localScanId: 'kafka-down',
-          qrHash: 'ticket-qr-1',
+          qrHash,
           entityType: CheckInScanEntityType.ticket,
           scannedAt: '2026-08-20T12:00:00.000Z',
         },
@@ -492,8 +551,12 @@ function createPrismaMock(state: TestState) {
     ticket: {
       findMany: async ({ where }: { where: { concertId: string } }) =>
         state.tickets.filter((ticket) => ticket.concertId === where.concertId),
-      findUnique: async ({ where }: { where: { qrHash: string } }) => {
-        const ticket = state.tickets.find((candidate) => candidate.qrHash === where.qrHash);
+      findUnique: async ({ where }: { where: { id?: string; qrHash?: string } }) => {
+        const ticket = state.tickets.find(
+          (candidate) =>
+            (where.id !== undefined && candidate.id === where.id) ||
+            (where.qrHash !== undefined && candidate.qrHash === where.qrHash),
+        );
         const concert = ticket
           ? state.concerts.find((candidate) => candidate.id === ticket.concertId)
           : null;
@@ -606,4 +669,16 @@ function createPrismaMock(state: TestState) {
     ...tx,
     $transaction: async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
   };
+}
+
+function signedTicketQr(
+  ticket: TestState['tickets'][number],
+  expiresAt = new Date('2026-08-27T15:30:00.000Z'),
+): string {
+  return createTicketQrToken({
+    ticketId: ticket.id,
+    concertId: ticket.concertId,
+    nonce: ticket.qrHash,
+    expiresAt,
+  });
 }
