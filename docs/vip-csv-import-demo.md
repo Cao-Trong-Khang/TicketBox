@@ -28,6 +28,8 @@ docker-compose up --build -d backend vip-import-worker
 
 The `vip-import-worker` service scans `VIP_CSV_SOURCE_DIR`, enqueues database-backed jobs, claims them, and processes them. The worker polls every `VIP_IMPORT_SCAN_INTERVAL_MS` for files and every `VIP_IMPORT_WORKER_POLL_INTERVAL_MS` for queued jobs.
 
+CSV files are preflighted before being read into memory. By default, `VIP_IMPORT_MAX_FILE_SIZE_BYTES=10485760` and `VIP_IMPORT_MAX_ROWS=10000`; adjust these values in the backend and worker environments for larger sponsor feeds.
+
 For a one-shot local run without the daemon:
 
 ```bash
@@ -52,6 +54,7 @@ curl -H "Authorization: Bearer <organizer-jwt>" http://localhost:3000/admin/conc
 - `missing-column-vip-guests.csv` records a file-level `MISSING_REQUIRED_COLUMNS` failure.
 - `malformed-vip-guests.csv` imports valid rows and records row-level validation errors.
 - `duplicate-vip-guests.csv` imports unique rows and records duplicate decisions.
+- Files exceeding `VIP_IMPORT_MAX_FILE_SIZE_BYTES` are skipped by the scheduler or recorded by the worker as `VIP_IMPORT_FILE_TOO_LARGE`; files exceeding `VIP_IMPORT_MAX_ROWS` are skipped or failed as `VIP_IMPORT_TOO_MANY_ROWS`.
 - To simulate database-backed queue enqueue failure without stopping the rest of the backend:
 
 ```bash

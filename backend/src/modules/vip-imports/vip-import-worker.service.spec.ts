@@ -170,6 +170,57 @@ test('worker stores file-level errors without deleting existing accepted VIP gue
   });
 });
 
+test('worker fails oversized CSV files before parsing rows', async () => {
+  await withEnv('VIP_IMPORT_MAX_FILE_SIZE_BYTES', '32', async () => {
+    await withTempCsv(async (sourcePath) => {
+      await writeFile(
+        sourcePath,
+        csv([
+          'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+          'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest,demo@example.test,+84900000001',
+        ]),
+        'utf8',
+      );
+      const state = createState(sourcePath);
+      const worker = createWorker(state);
+
+      const result = await worker.processImport('import-1');
+
+      assert.equal(result.status, ImportStatus.FAILED);
+      assert.equal(state.imports[0].failureCode, 'VIP_IMPORT_FILE_TOO_LARGE');
+      assert.equal(state.errors.length, 1);
+      assert.equal(state.errors[0].type, ImportErrorType.FILE);
+      assert.equal(state.guests.length, 0);
+    });
+  });
+});
+
+test('worker fails CSV files that exceed the configured max row count', async () => {
+  await withEnv('VIP_IMPORT_MAX_ROWS', '1', async () => {
+    await withTempCsv(async (sourcePath) => {
+      await writeFile(
+        sourcePath,
+        csv([
+          'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+          'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest One,one@example.test,+84900000001',
+          'Demo Concert,LOCAL_DEMO,VIP-002,Demo Guest Two,two@example.test,+84900000002',
+        ]),
+        'utf8',
+      );
+      const state = createState(sourcePath);
+      const worker = createWorker(state);
+
+      const result = await worker.processImport('import-1');
+
+      assert.equal(result.status, ImportStatus.FAILED);
+      assert.equal(state.imports[0].failureCode, 'VIP_IMPORT_TOO_MANY_ROWS');
+      assert.equal(state.errors.length, 1);
+      assert.equal(state.errors[0].type, ImportErrorType.FILE);
+      assert.equal(state.guests.length, 0);
+    });
+  });
+});
+
 test('worker records malformed rows while importing valid rows', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(
@@ -793,4 +844,19 @@ async function withTempCsv(callback: (sourcePath: string) => Promise<void>): Pro
 
 function csv(lines: string[]): string {
   return lines.join('\n');
+}
+
+async function withEnv(name: string, value: string, callback: () => Promise<void>): Promise<void> {
+  const previous = process.env[name];
+  process.env[name] = value;
+
+  try {
+    await callback();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = previous;
+    }
+  }
 }

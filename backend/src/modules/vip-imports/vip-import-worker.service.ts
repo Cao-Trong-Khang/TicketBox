@@ -20,6 +20,7 @@ import {
   normalizePhone,
   parseCsv,
 } from './vip-csv';
+import { VipImportLimitError, inspectVipImportFile } from './vip-import-limits';
 import { VipImportProcessResult } from './vip-imports.types';
 
 type ImportRecord = VipGuestImport;
@@ -279,6 +280,26 @@ export class VipImportWorkerService {
         type: ImportErrorType.FILE,
         code: 'UNSUPPORTED_FORMAT',
         message: 'VIP guest import source must be a .csv file',
+        metadata: { sourcePath },
+      };
+    }
+
+    try {
+      await inspectVipImportFile(sourcePath);
+    } catch (error) {
+      if (error instanceof VipImportLimitError) {
+        return {
+          type: ImportErrorType.FILE,
+          code: error.code,
+          message: error.message,
+          metadata: { ...error.metadata },
+        };
+      }
+
+      return {
+        type: ImportErrorType.FILE,
+        code: 'UNREADABLE_FILE',
+        message: error instanceof Error ? error.message : 'CSV file could not be read',
         metadata: { sourcePath },
       };
     }

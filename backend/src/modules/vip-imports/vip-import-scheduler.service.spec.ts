@@ -150,6 +150,57 @@ test('scheduler preserves retry eligibility when queue enqueue is unavailable', 
   });
 });
 
+test('scheduler skips CSV files that exceed the configured max file size', async () => {
+  await withEnv('VIP_IMPORT_MAX_FILE_SIZE_BYTES', '32', async () => {
+    await withTempCsvDir(async (sourceDir) => {
+      const state = createState();
+      const publishedJobs: string[] = [];
+      const scheduler = createScheduler(state, {
+        publishImportRequested: async (job) => {
+          publishedJobs.push(job.importId);
+        },
+      });
+
+      await writeVipCsv(sourceDir, 'oversized.csv');
+
+      const result = await scheduler.scanScheduledImports(sourceDir);
+
+      assert.equal(result.detected, 0);
+      assert.equal(result.queued, 0);
+      assert.equal(result.skipped, 1);
+      assert.equal(state.imports.length, 0);
+      assert.equal(publishedJobs.length, 0);
+    });
+  });
+});
+
+test('scheduler skips CSV files that exceed the configured max row count', async () => {
+  await withEnv('VIP_IMPORT_MAX_ROWS', '1', async () => {
+    await withTempCsvDir(async (sourceDir) => {
+      const state = createState();
+      const publishedJobs: string[] = [];
+      const scheduler = createScheduler(state, {
+        publishImportRequested: async (job) => {
+          publishedJobs.push(job.importId);
+        },
+      });
+
+      await writeVipCsv(sourceDir, 'too-many-rows.csv', [
+        'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest One,one@example.test,+84900000001',
+        'Demo Concert,LOCAL_DEMO,VIP-002,Demo Guest Two,two@example.test,+84900000002',
+      ]);
+
+      const result = await scheduler.scanScheduledImports(sourceDir);
+
+      assert.equal(result.detected, 0);
+      assert.equal(result.queued, 0);
+      assert.equal(result.skipped, 1);
+      assert.equal(state.imports.length, 0);
+      assert.equal(publishedJobs.length, 0);
+    });
+  });
+});
+
 function createState(): TestState {
   return {
     concerts: [{ id: '00000000-0000-4000-8000-000000000001', title: 'Demo Concert' }],
@@ -269,13 +320,32 @@ async function withTempCsvDir(callback: (sourceDir: string) => Promise<void>): P
   }
 }
 
-async function writeVipCsv(sourceDir: string, fileName: string): Promise<void> {
+async function writeVipCsv(
+  sourceDir: string,
+  fileName: string,
+  rows = ['Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest,demo@example.test,+84900000001'],
+): Promise<void> {
   await writeFile(
     join(sourceDir, fileName),
     [
       'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
-      'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest,demo@example.test,+84900000001',
+      ...rows,
     ].join('\n'),
     'utf8',
   );
+}
+
+async function withEnv(name: string, value: string, callback: () => Promise<void>): Promise<void> {
+  const previous = process.env[name];
+  process.env[name] = value;
+
+  try {
+    await callback();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = previous;
+    }
+  }
 }

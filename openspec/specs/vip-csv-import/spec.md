@@ -20,6 +20,13 @@ VIP CSV imports SHALL use `REPLACE_SNAPSHOT` semantics for each `concertId` and 
 - **THEN** the worker claims queued or retryable imports atomically before processing
 - **THEN** local Docker Compose starts a `vip-import-worker` service for that daemon
 
+#### Scenario: Oversized sponsor files are rejected before full parsing
+- **GIVEN** a scheduled sponsor CSV file exceeds `VIP_IMPORT_MAX_FILE_SIZE_BYTES` or contains more than `VIP_IMPORT_MAX_ROWS` data rows
+- **WHEN** the scheduler scans the source directory
+- **THEN** the scheduler skips the file without marking it `QUEUED`
+- **WHEN** an already queued import references a file that exceeds either limit
+- **THEN** the worker records a file-level failure without reading the entire import into row processing
+
 #### Scenario: New sponsor snapshot refreshes an existing VIP guest
 - **GIVEN** a previous sponsor CSV import created a VIP guest for a concert and sponsor source
 - **WHEN** a newer sponsor CSV file contains the same natural guest key with updated name, email, phone, allowed gate, or guest type
