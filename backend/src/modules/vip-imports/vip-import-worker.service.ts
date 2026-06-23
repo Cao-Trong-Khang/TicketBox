@@ -10,10 +10,12 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  InvalidCsvEncodingError,
   VIP_IMPORT_REQUIRED_COLUMNS,
   UnsupportedCsvDelimiterError,
   buildIdentityKey,
   buildVipQrHash,
+  decodeVipCsvContent,
   getCsvValue,
   isValidEmail,
   normalizeEmail,
@@ -174,7 +176,20 @@ export class VipImportWorkerService {
         return this.markFileFailure(importRecord.id, fileFailure);
       }
 
-      const parsed = parseCsv(await readFile(sourcePath, 'utf8'));
+      let parsed: ReturnType<typeof parseCsv>;
+
+      try {
+        parsed = parseCsv(decodeVipCsvContent(await readFile(sourcePath)));
+      } catch (error) {
+        const csvContentFailure = this.toCsvContentFailure(error);
+
+        if (csvContentFailure) {
+          return this.markFileFailure(importRecord.id, csvContentFailure);
+        }
+
+        throw error;
+      }
+
       const counters: RowCounters = {
         totalRows: parsed.rows.length,
         acceptedRows: 0,
@@ -305,10 +320,10 @@ export class VipImportWorkerService {
       };
     }
 
-    let content: string;
+    let buffer: Buffer;
 
     try {
-      content = await readFile(sourcePath, 'utf8');
+      buffer = await readFile(sourcePath);
     } catch (error) {
       return {
         type: ImportErrorType.FILE,
@@ -318,18 +333,29 @@ export class VipImportWorkerService {
       };
     }
 
+    let content: string;
+
+    try {
+      content = decodeVipCsvContent(buffer);
+    } catch (error) {
+      const csvContentFailure = this.toCsvContentFailure(error);
+
+      if (csvContentFailure) {
+        return csvContentFailure;
+      }
+
+      throw error;
+    }
+
     let parsed: ReturnType<typeof parseCsv>;
 
     try {
       parsed = parseCsv(content);
     } catch (error) {
-      if (error instanceof UnsupportedCsvDelimiterError) {
-        return {
-          type: ImportErrorType.FILE,
-          code: error.code,
-          message: error.message,
-          metadata: { ...error.metadata },
-        };
+      const csvContentFailure = this.toCsvContentFailure(error);
+
+      if (csvContentFailure) {
+        return csvContentFailure;
       }
 
       throw error;
@@ -354,6 +380,22 @@ export class VipImportWorkerService {
         code: 'MISSING_REQUIRED_COLUMNS',
         message: `CSV file is missing required columns: ${missingColumns.join(', ')}`,
         metadata: { missingColumns },
+      };
+    }
+
+    return null;
+  }
+
+  private toCsvContentFailure(error: unknown): PendingImportError | null {
+    if (
+      error instanceof InvalidCsvEncodingError ||
+      error instanceof UnsupportedCsvDelimiterError
+    ) {
+      return {
+        type: ImportErrorType.FILE,
+        code: error.code,
+        message: error.message,
+        metadata: { ...error.metadata },
       };
     }
 

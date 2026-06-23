@@ -1,10 +1,50 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  InvalidCsvEncodingError,
   UnsupportedCsvDelimiterError,
+  VIP_IMPORT_INVALID_ENCODING_CODE,
   VIP_IMPORT_UNSUPPORTED_DELIMITER_CODE,
+  decodeVipCsvContent,
   parseCsv,
 } from './vip-csv';
+
+test('decodeVipCsvContent accepts valid UTF-8 CSV content', () => {
+  const content = decodeVipCsvContent(
+    Buffer.from(
+      [
+        'concert_title,sponsor_source,external_guest_key,full_name,email',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Nguyen Van A,nguyen@example.test',
+        'Demo Concert,LOCAL_DEMO,VIP-002,Nguyen Thi B,nguyenb@example.test',
+      ].join('\n'),
+      'utf8',
+    ),
+  );
+
+  assert.match(content, /Nguyen Van A/);
+});
+
+test('decodeVipCsvContent rejects invalid UTF-8 bytes', () => {
+  const invalidWindows1258LikeBytes = Buffer.concat([
+    Buffer.from(
+      [
+        'concert_title,sponsor_source,external_guest_key,full_name,email',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Nguy',
+      ].join('\n'),
+      'utf8',
+    ),
+    Buffer.from([0xea]),
+    Buffer.from('n Van A,nguyen@example.test', 'utf8'),
+  ]);
+
+  assert.throws(
+    () => decodeVipCsvContent(invalidWindows1258LikeBytes),
+    (error) =>
+      error instanceof InvalidCsvEncodingError &&
+      error.code === VIP_IMPORT_INVALID_ENCODING_CODE &&
+      error.metadata.requiredEncoding === 'UTF-8',
+  );
+});
 
 test('parseCsv accepts comma-delimited VIP CSV content', () => {
   const parsed = parseCsv(

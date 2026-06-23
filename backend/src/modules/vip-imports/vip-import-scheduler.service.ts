@@ -3,7 +3,14 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import { ImportStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UnsupportedCsvDelimiterError, getCsvValue, parseCsv, sha256 } from './vip-csv';
+import {
+  InvalidCsvEncodingError,
+  UnsupportedCsvDelimiterError,
+  decodeVipCsvContent,
+  getCsvValue,
+  parseCsv,
+  sha256,
+} from './vip-csv';
 import { VipImportLimitError, inspectVipImportFile } from './vip-import-limits';
 import { VipImportJobsPublisher } from './vip-import-jobs.publisher';
 import { VipImportScanResult } from './vip-imports.types';
@@ -65,9 +72,12 @@ export class VipImportSchedulerService {
       let metadata: ResolvedCsvMetadata | null;
 
       try {
-        metadata = await this.resolveCsvMetadata(buffer.toString('utf8'));
+        metadata = await this.resolveCsvMetadata(decodeVipCsvContent(buffer));
       } catch (error) {
-        if (!(error instanceof UnsupportedCsvDelimiterError)) {
+        if (
+          !(error instanceof UnsupportedCsvDelimiterError) &&
+          !(error instanceof InvalidCsvEncodingError)
+        ) {
           throw error;
         }
 

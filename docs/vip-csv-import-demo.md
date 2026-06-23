@@ -6,7 +6,7 @@ This demo uses the local Sponsor CSV Files directory at `backend/prisma/demo-spo
 
 VIP CSV imports use `REPLACE_SNAPSHOT` semantics per concert and sponsor source. When a newer sponsor file includes an existing natural guest key (`external_guest_key` when present, otherwise the normalized identity fallback), the worker refreshes that guest's display metadata, allowed gate, guest type, contact fields, and notes while preserving check-in state. When a successful snapshot omits an active guest from the previous completed import, the worker marks that guest `CANCELLED` without hard deleting it; checked-in guests and failed or partial-error snapshots do not trigger cleanup.
 
-Sponsor files must be comma-delimited CSV. Semicolon, tab, and pipe-delimited files are rejected with `UNSUPPORTED_DELIMITER` instead of being parsed with the wrong columns.
+Sponsor files must be UTF-8 encoded comma-delimited CSV. Semicolon, tab, and pipe-delimited files are rejected with `UNSUPPORTED_DELIMITER` instead of being parsed with the wrong columns; invalid UTF-8 files are rejected with `INVALID_ENCODING`.
 
 1. Start the local infrastructure:
 
@@ -58,6 +58,7 @@ curl -H "Authorization: Bearer <organizer-jwt>" http://localhost:3000/admin/conc
 - `duplicate-vip-guests.csv` imports unique rows and records duplicate decisions.
 - Files exceeding `VIP_IMPORT_MAX_FILE_SIZE_BYTES` are skipped by the scheduler or recorded by the worker as `VIP_IMPORT_FILE_TOO_LARGE`; files exceeding `VIP_IMPORT_MAX_ROWS` are skipped or failed as `VIP_IMPORT_TOO_MANY_ROWS`.
 - Files using `;`, tab, or `|` as delimiters are skipped by the scheduler or failed by the worker as `UNSUPPORTED_DELIMITER`.
+- Files that are not valid UTF-8 are skipped by the scheduler or failed by the worker as `INVALID_ENCODING`.
 - To simulate database-backed queue enqueue failure without stopping the rest of the backend:
 
 ```bash

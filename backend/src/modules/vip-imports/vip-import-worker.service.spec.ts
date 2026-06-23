@@ -251,6 +251,27 @@ test('worker records unsupported delimiter as a file-level import error', async 
   });
 });
 
+test('worker records invalid UTF-8 as a file-level import error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(sourcePath, invalidUtf8VipCsv());
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'INVALID_ENCODING');
+    assert.match(state.imports[0].failureMessage ?? '', /valid UTF-8/);
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.equal(state.errors[0].code, 'INVALID_ENCODING');
+    assert.deepEqual(state.errors[0].metadata, {
+      requiredEncoding: 'UTF-8',
+    });
+    assert.equal(state.guests.length, 0);
+  });
+});
+
 test('worker records malformed rows while importing valid rows', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(
@@ -874,6 +895,20 @@ async function withTempCsv(callback: (sourcePath: string) => Promise<void>): Pro
 
 function csv(lines: string[]): string {
   return lines.join('\n');
+}
+
+function invalidUtf8VipCsv(): Buffer {
+  return Buffer.concat([
+    Buffer.from(
+      [
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Nguy',
+      ].join('\n'),
+      'utf8',
+    ),
+    Buffer.from([0xea]),
+    Buffer.from('n Van A,nguyen@example.test,+84900000001', 'utf8'),
+  ]);
 }
 
 async function withEnv(name: string, value: string, callback: () => Promise<void>): Promise<void> {

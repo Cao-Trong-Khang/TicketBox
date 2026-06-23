@@ -226,6 +226,28 @@ test('scheduler skips alternate-delimited CSV files instead of queueing a mispar
   });
 });
 
+test('scheduler skips CSV files that are not valid UTF-8', async () => {
+  await withTempCsvDir(async (sourceDir) => {
+    const state = createState();
+    const publishedJobs: string[] = [];
+    const scheduler = createScheduler(state, {
+      publishImportRequested: async (job) => {
+        publishedJobs.push(job.importId);
+      },
+    });
+
+    await writeRawBytes(sourceDir, 'invalid-encoding.csv', invalidUtf8VipCsv());
+
+    const result = await scheduler.scanScheduledImports(sourceDir);
+
+    assert.equal(result.detected, 0);
+    assert.equal(result.queued, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(state.imports.length, 0);
+    assert.equal(publishedJobs.length, 0);
+  });
+});
+
 function createState(): TestState {
   return {
     concerts: [{ id: '00000000-0000-4000-8000-000000000001', title: 'Demo Concert' }],
@@ -362,6 +384,28 @@ async function writeVipCsv(
 
 async function writeRawCsv(sourceDir: string, fileName: string, rows: string[]): Promise<void> {
   await writeFile(join(sourceDir, fileName), rows.join('\n'), 'utf8');
+}
+
+async function writeRawBytes(
+  sourceDir: string,
+  fileName: string,
+  content: Buffer,
+): Promise<void> {
+  await writeFile(join(sourceDir, fileName), content);
+}
+
+function invalidUtf8VipCsv(): Buffer {
+  return Buffer.concat([
+    Buffer.from(
+      [
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Nguy',
+      ].join('\n'),
+      'utf8',
+    ),
+    Buffer.from([0xea]),
+    Buffer.from('n Van A,nguyen@example.test,+84900000001', 'utf8'),
+  ]);
 }
 
 async function withEnv(name: string, value: string, callback: () => Promise<void>): Promise<void> {

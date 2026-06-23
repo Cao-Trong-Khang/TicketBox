@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
+import { TextDecoder } from 'node:util';
 
 export const VIP_IMPORT_REQUIRED_COLUMNS = ['full_name'] as const;
 export const VIP_IMPORT_CSV_DELIMITER = ',';
 export const VIP_IMPORT_UNSUPPORTED_DELIMITER_CODE = 'UNSUPPORTED_DELIMITER';
+export const VIP_IMPORT_INVALID_ENCODING_CODE = 'INVALID_ENCODING';
+export const VIP_IMPORT_REQUIRED_ENCODING = 'UTF-8';
 
 type AlternateCsvDelimiter = {
   delimiter: string;
@@ -15,11 +18,16 @@ type UnsupportedCsvDelimiterMetadata = {
   supportedDelimiter: string;
 };
 
+type InvalidCsvEncodingMetadata = {
+  requiredEncoding: string;
+};
+
 const ALTERNATE_CSV_DELIMITERS: AlternateCsvDelimiter[] = [
   { delimiter: ';', name: 'semicolon (;)' },
   { delimiter: '\t', name: 'tab (\\t)' },
   { delimiter: '|', name: 'pipe (|)' },
 ];
+const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 
 export type ParsedCsvRow = {
   rowNumber: number;
@@ -44,6 +52,26 @@ export class UnsupportedCsvDelimiterError extends Error {
     );
     this.name = 'UnsupportedCsvDelimiterError';
     this.metadata = metadata;
+  }
+}
+
+export class InvalidCsvEncodingError extends Error {
+  readonly code = VIP_IMPORT_INVALID_ENCODING_CODE;
+  readonly metadata: InvalidCsvEncodingMetadata = {
+    requiredEncoding: VIP_IMPORT_REQUIRED_ENCODING,
+  };
+
+  constructor() {
+    super(`VIP CSV imports must be encoded as valid ${VIP_IMPORT_REQUIRED_ENCODING}`);
+    this.name = 'InvalidCsvEncodingError';
+  }
+}
+
+export function decodeVipCsvContent(buffer: Buffer): string {
+  try {
+    return UTF8_DECODER.decode(buffer);
+  } catch {
+    throw new InvalidCsvEncodingError();
   }
 }
 
