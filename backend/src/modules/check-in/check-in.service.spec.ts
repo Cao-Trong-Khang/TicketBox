@@ -393,9 +393,10 @@ test('sync retry with the same device and local scan ID returns the original out
   assert.equal(state.checkIns.length, 1);
 });
 
-test('cross-device offline scans resolve to first successful sync and later duplicate outcome', async () => {
+test('cross-device offline ticket scans resolve to first successful sync and later conflict outcome', async () => {
   const { service, state } = createHarness();
   const qrHash = signedTicketQr(state.tickets[0]);
+  const winningServerCheckInAt = new Date('2026-08-20T12:00:05.000Z');
 
   const first = await service.syncEvent(
     { id: 'staff-1', email: 'staff@example.test' },
@@ -429,8 +430,79 @@ test('cross-device offline scans resolve to first successful sync and later dupl
   );
 
   assert.equal(first.outcomes[0].resultCode, 'accepted');
-  assert.equal(second.outcomes[0].resultCode, 'duplicate');
-  assert.equal(state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.SUCCESS).length, 1);
+  assert.equal(second.outcomes[0].resultCode, 'conflict');
+  assert.equal(second.outcomes[0].status, CheckInStatus.CONFLICT);
+  assert.equal(
+    second.outcomes[0].message,
+    'Ticket or guest was already checked in on another device',
+  );
+  assert.equal(second.outcomes[0].serverCheckInAt, winningServerCheckInAt.toISOString());
+  assert.equal(
+    state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.SUCCESS).length,
+    1,
+  );
+  assert.equal(
+    state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.CONFLICT).length,
+    1,
+  );
+  assert.deepEqual(state.checkIns[1].serverCheckedInAt, winningServerCheckInAt);
+  assert.equal(state.tickets[0].status, TicketStatus.USED);
+});
+
+test('cross-device offline VIP scans resolve to conflict with winning check-in metadata', async () => {
+  const { service, state } = createHarness();
+  const winningServerCheckInAt = new Date('2026-08-20T12:00:05.000Z');
+  state.vipGuests[0].allowedGate = null;
+
+  const first = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'vip-device-a-local',
+          qrHash: 'vip-qr-1',
+          entityType: CheckInScanEntityType.vipGuest,
+          scannedAt: '2026-08-20T12:00:00.000Z',
+        },
+      ],
+    },
+  );
+  const second = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-b',
+      scans: [
+        {
+          localScanId: 'vip-device-b-local',
+          qrHash: 'vip-qr-1',
+          entityType: CheckInScanEntityType.vipGuest,
+          scannedAt: '2026-08-20T12:01:00.000Z',
+        },
+      ],
+    },
+  );
+
+  assert.equal(first.outcomes[0].resultCode, 'accepted');
+  assert.equal(second.outcomes[0].resultCode, 'conflict');
+  assert.equal(second.outcomes[0].status, CheckInStatus.CONFLICT);
+  assert.equal(
+    second.outcomes[0].message,
+    'Ticket or guest was already checked in on another device',
+  );
+  assert.equal(second.outcomes[0].serverCheckInAt, winningServerCheckInAt.toISOString());
+  assert.equal(
+    state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.SUCCESS).length,
+    1,
+  );
+  assert.equal(
+    state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.CONFLICT).length,
+    1,
+  );
+  assert.deepEqual(state.checkIns[1].serverCheckedInAt, winningServerCheckInAt);
+  assert.equal(state.vipGuests[0].status, VipGuestStatus.CHECKED_IN);
 });
 
 test('Redis rate limiting returns a retryable 429 before changing scan state', async () => {

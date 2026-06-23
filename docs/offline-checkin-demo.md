@@ -32,7 +32,7 @@ Expected result: the first scan is persisted as a pending local accepted log bef
 1. Re-enable network.
 2. Tap Sync or let WorkManager run.
 
-Expected result: pending logs are posted to `POST /check-in/events/:concertId/sync`; the backend returns one outcome per local scan, and Room stores accepted or duplicate backend outcomes without deleting local records.
+Expected result: pending logs are posted to `POST /check-in/events/:concertId/sync`; the backend returns one outcome per local scan, and Room stores accepted, duplicate, or conflict backend outcomes without deleting local records.
 
 Backend sync records device scan time as `clientScannedAt`, receipt time as `serverReceivedAt`, and successful authoritative check-in time as `serverCheckedInAt`. Ticket and VIP status updates use server check-in time. Device time is accepted only within `CHECK_IN_MAX_CLOCK_SKEW_SECONDS`, and offline records must arrive within `CHECK_IN_OFFLINE_GRACE_SECONDS`.
 
@@ -42,7 +42,7 @@ Backend unit coverage in `backend/src/modules/check-in/check-in.service.spec.ts`
 
 1. `device-a` syncs a signed ticket QR token first and receives `accepted`.
 2. `device-b` syncs the same ticket later with a different `localScanId`.
-3. PostgreSQL success-only uniqueness allows only one successful check-in; the later scan receives `duplicate`.
+3. PostgreSQL success-only uniqueness allows only one successful check-in; the later scan receives `conflict` with the winning server check-in time when available.
 
 The same scenario can be repeated manually with seeded devices `demo-device-a` and `demo-device-b` scanning the same signed ticket QR payload for `DEMO-CHECKIN-TICKET-002` offline before either device reconnects.
 

@@ -56,6 +56,11 @@ type ScanTiming = {
   serverReceivedAt: Date;
 };
 
+type WinningCheckIn = Pick<
+  CheckIn,
+  'id' | 'sourceDeviceId' | 'serverCheckedInAt' | 'scannedAt'
+>;
+
 @Injectable()
 export class CheckInService {
   private readonly logger = new Logger(CheckInService.name);
@@ -467,8 +472,30 @@ export class CheckInService {
         ticketId: ticket.id,
         status: CheckInStatus.SUCCESS,
       },
-      select: { id: true },
+      orderBy: [{ serverCheckedInAt: 'asc' }, { scannedAt: 'asc' }],
+      select: {
+        id: true,
+        sourceDeviceId: true,
+        serverCheckedInAt: true,
+        scannedAt: true,
+      },
     });
+
+    if (this.isCrossDeviceWinner(existingSuccess, sourceDeviceId)) {
+      return this.createWinnerConflictCheckIn(
+        tx,
+        staffUserId,
+        concertId,
+        sourceDeviceId,
+        scan,
+        timing,
+        {
+          ticketId: ticket.id,
+          winningCheckIn: existingSuccess,
+          note: 'Ticket was already checked in on another device',
+        },
+      );
+    }
 
     if (existingSuccess || ticket.status === TicketStatus.USED || ticket.checkedInAt) {
       return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
@@ -564,8 +591,30 @@ export class CheckInService {
         vipGuestId: guest.id,
         status: CheckInStatus.SUCCESS,
       },
-      select: { id: true },
+      orderBy: [{ serverCheckedInAt: 'asc' }, { scannedAt: 'asc' }],
+      select: {
+        id: true,
+        sourceDeviceId: true,
+        serverCheckedInAt: true,
+        scannedAt: true,
+      },
     });
+
+    if (this.isCrossDeviceWinner(existingSuccess, sourceDeviceId)) {
+      return this.createWinnerConflictCheckIn(
+        tx,
+        staffUserId,
+        concertId,
+        sourceDeviceId,
+        scan,
+        timing,
+        {
+          vipGuestId: guest.id,
+          winningCheckIn: existingSuccess,
+          note: 'VIP guest was already checked in on another device',
+        },
+      );
+    }
 
     if (existingSuccess || guest.status === VipGuestStatus.CHECKED_IN || guest.checkedInAt) {
       return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
@@ -603,6 +652,7 @@ export class CheckInService {
       ticketId?: string;
       vipGuestId?: string;
       status: CheckInStatus;
+      serverCheckedInAt?: Date | null;
       note?: string | null;
     },
   ): Promise<CheckIn> {
@@ -620,12 +670,36 @@ export class CheckInService {
       clientScannedAt: timing.clientScannedAt,
       serverReceivedAt: timing.serverReceivedAt,
       serverCheckedInAt:
-        input.status === CheckInStatus.SUCCESS ? timing.serverReceivedAt : null,
+        input.serverCheckedInAt ??
+        (input.status === CheckInStatus.SUCCESS ? timing.serverReceivedAt : null),
       syncedAt: timing.serverReceivedAt,
       note: input.note,
     };
 
     return tx.checkIn.create({ data });
+  }
+
+  private createWinnerConflictCheckIn(
+    tx: Prisma.TransactionClient,
+    staffUserId: string,
+    concertId: string,
+    sourceDeviceId: string,
+    scan: CheckInSyncScanDto,
+    timing: ScanTiming,
+    input: {
+      ticketId?: string;
+      vipGuestId?: string;
+      winningCheckIn: WinningCheckIn;
+      note: string;
+    },
+  ): Promise<CheckIn> {
+    return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+      ticketId: input.ticketId,
+      vipGuestId: input.vipGuestId,
+      status: CheckInStatus.CONFLICT,
+      serverCheckedInAt: this.getWinningServerCheckInAt(input.winningCheckIn),
+      note: input.note,
+    });
   }
 
   private async recordConflictAfterUniqueFailure(
@@ -665,7 +739,12 @@ export class CheckInService {
         scannedAt: timing.serverReceivedAt,
         clientScannedAt: timing.clientScannedAt,
         serverReceivedAt: timing.serverReceivedAt,
-        serverCheckedInAt: null,
+        serverCheckedInAt:
+          ticket !== null
+            ? await this.findWinningServerCheckInAt({ ticketId: ticket.id })
+            : vipGuest !== null
+              ? await this.findWinningServerCheckInAt({ vipGuestId: vipGuest.id })
+              : null,
         syncedAt: timing.serverReceivedAt,
         note: 'A successful check-in for this payload was recorded by another device first',
       },
@@ -709,6 +788,36 @@ export class CheckInService {
         localScanId,
       },
     });
+  }
+
+  private isCrossDeviceWinner(
+    winningCheckIn: WinningCheckIn | null,
+    sourceDeviceId: string,
+  ): winningCheckIn is WinningCheckIn {
+    return winningCheckIn !== null && winningCheckIn.sourceDeviceId !== sourceDeviceId;
+  }
+
+  private getWinningServerCheckInAt(winningCheckIn: WinningCheckIn): Date {
+    return winningCheckIn.serverCheckedInAt ?? winningCheckIn.scannedAt;
+  }
+
+  private async findWinningServerCheckInAt(where: {
+    ticketId?: string;
+    vipGuestId?: string;
+  }): Promise<Date | null> {
+    const winningCheckIn = await this.prisma.checkIn.findFirst({
+      where: {
+        ...where,
+        status: CheckInStatus.SUCCESS,
+      },
+      orderBy: [{ serverCheckedInAt: 'asc' }, { scannedAt: 'asc' }],
+      select: {
+        serverCheckedInAt: true,
+        scannedAt: true,
+      },
+    });
+
+    return winningCheckIn?.serverCheckedInAt ?? winningCheckIn?.scannedAt ?? null;
   }
 
   private resolveScanTiming(
@@ -949,7 +1058,7 @@ export class CheckInService {
       case CheckInStatus.WRONG_CONCERT:
         return 'Scan is not authorized for this event';
       case CheckInStatus.CONFLICT:
-        return 'Another device synchronized a successful scan first';
+        return 'Ticket or guest was already checked in on another device';
       case CheckInStatus.CANCELLED_TICKET:
         return 'Ticket or guest entry is cancelled';
       case CheckInStatus.INVALID_QR:

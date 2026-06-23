@@ -232,8 +232,8 @@ The Check-in Mobile App SHALL provide a Sync Queue screen for offline records an
 - **THEN** retryable records remain Pending or Failed with retry information
 
 #### Scenario: Server conflict opens conflict warning
-- **GIVEN** a locally accepted offline scan synchronizes after another device already checked in the same ticket
-- **WHEN** the Backend API returns a duplicate or conflict outcome from PostgreSQL
+- **GIVEN** a locally accepted offline scan synchronizes after another device already checked in the same ticket or VIP guest
+- **WHEN** the Backend API returns a conflict outcome from PostgreSQL
 - **THEN** the app marks the local record as Conflict
 - **THEN** the app shows a Sync Conflict screen with a clear conflict warning
 - **THEN** the screen displays local check-in time and server check-in time when available
@@ -331,7 +331,7 @@ Protected actions require the Check-in Staff role and check-in permissions for t
 - If the authenticated user lacks the Check-in Staff role, required permission, or assignment for the target concert or gate, the Backend API SHALL deny preload and sync requests.
 - If a QR payload is malformed, unsigned, unknown, cancelled, expired, or not part of the assigned event snapshot, the app SHALL record the scan attempt and show an invalid local result.
 - If a client scan timestamp is outside allowed clock skew or the offline grace window, the backend SHALL record an invalid sync outcome and SHALL NOT update ticket or VIP guest check-in state.
-- If two devices scan the same valid ticket or VIP guest offline, the backend SHALL accept only the first valid synchronized scan and mark later synchronized scans as duplicate or conflict outcomes.
+- If two devices scan the same valid ticket or VIP guest offline, the backend SHALL accept only the first valid synchronized scan and mark later synchronized scans as conflict outcomes with the winning server check-in time when available.
 - If the same device uploads the same local scan more than once because of retry, the backend SHALL return the original outcome idempotently.
 - If Kafka is unavailable, the sync API SHALL still accept or reject scans based on PostgreSQL; asynchronous analytics or projections may be delayed.
 - If the preload snapshot is stale, the mobile app MAY show a local result from the snapshot, but final sync outcome from PostgreSQL SHALL override the local result.
@@ -392,10 +392,10 @@ Protected actions require the Check-in Staff role and check-in permissions for t
 - **THEN** scans outside allowed clock skew or offline grace are rejected without changing authoritative ticket or VIP state
 
 #### Scenario: Cross-device offline conflict is resolved by backend
-- **GIVEN** two assigned devices scanned the same valid ticket while offline
+- **GIVEN** two assigned devices scanned the same valid ticket or VIP guest while offline
 - **WHEN** both devices later synchronize their scan logs
-- **THEN** PostgreSQL allows only one successful check-in for the ticket
-- **THEN** the later scan receives a duplicate or conflict outcome
+- **THEN** PostgreSQL allows only one successful check-in for the ticket or VIP guest
+- **THEN** the later scan receives a conflict outcome with the winning server check-in time when available
 
 #### Scenario: Sync retry is idempotent
 - **GIVEN** a device synchronized a local scan but did not receive the response because the network failed
