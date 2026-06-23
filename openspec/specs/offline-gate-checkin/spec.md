@@ -35,6 +35,15 @@ TicketBox SHALL provide an offline-capable gate check-in workflow for Check-in S
 - **THEN** the token payload includes ticket ID, concert ID, issuer, expiration, nonce, and version
 - **THEN** unsigned bearer hashes, invalid signatures, expired tokens, or token/ticket nonce mismatches are rejected as invalid QR payloads
 
+#### Scenario: Backend validates paid ticket issuance before check-in
+- **GIVEN** a staff device synchronizes a ticket scan
+- **WHEN** the Backend API finds the ticket for the QR token
+- **THEN** the Backend API verifies the ticket has been issued by the server
+- **THEN** the Backend API verifies the ticket order is paid
+- **THEN** the Backend API verifies successful payment amount covers the order total
+- **THEN** tickets from cancelled or refunded orders are rejected
+- **THEN** no ticket or check-in state is changed for unpaid, underpaid, unissued, cancelled, or refunded tickets
+
 #### Scenario: Backend uses server time for authoritative check-in decisions
 - **GIVEN** a staff device synchronizes online or offline scan records
 - **WHEN** the Backend API receives each scan
@@ -331,6 +340,7 @@ Protected actions require the Check-in Staff role and check-in permissions for t
 - If the authenticated user lacks the Check-in Staff role, required permission, or assignment for the target concert or gate, the Backend API SHALL deny preload and sync requests.
 - If a QR payload is malformed, unsigned, unknown, cancelled, expired, or not part of the assigned event snapshot, the app SHALL record the scan attempt and show an invalid local result.
 - If a client scan timestamp is outside allowed clock skew or the offline grace window, the backend SHALL record an invalid sync outcome and SHALL NOT update ticket or VIP guest check-in state.
+- If a ticket order is unpaid, lacks successful payment coverage, is cancelled, is refunded, or the ticket was not issued by the server, the backend SHALL reject the check-in and SHALL NOT update ticket state.
 - If two devices scan the same valid ticket or VIP guest offline, the backend SHALL accept only the first valid synchronized scan and mark later synchronized scans as conflict outcomes with the winning server check-in time when available.
 - If the same device uploads the same local scan more than once because of retry, the backend SHALL return the original outcome idempotently.
 - If Kafka is unavailable, the sync API SHALL still accept or reject scans based on PostgreSQL; asynchronous analytics or projections may be delayed.
@@ -340,6 +350,7 @@ Protected actions require the Check-in Staff role and check-in permissions for t
 
 - PostgreSQL MUST remain the source of truth for ticket ownership, VIP guest validity, and final check-in status.
 - Redis MUST only be used for endpoint protection or temporary coordination, not as authoritative check-in state.
+- Ticket check-in MUST validate paid order state, successful payment coverage, cancellation/refund state, and server issuance before accepting a scan.
 - Each successful ticket check-in MUST be unique per `ticket_id`.
 - Each successful VIP guest check-in MUST be unique per `vip_guest_id`.
 - Scan synchronization MUST be idempotent by mobile-generated local scan ID and source device ID.
@@ -390,6 +401,13 @@ Protected actions require the Check-in Staff role and check-in permissions for t
 - **THEN** the Backend API records client scan time separately from server receive and server check-in time
 - **THEN** successful ticket and VIP status changes are timestamped with server check-in time
 - **THEN** scans outside allowed clock skew or offline grace are rejected without changing authoritative ticket or VIP state
+
+#### Scenario: Unpaid or refunded ticket sync is rejected
+- **GIVEN** the app synchronizes a ticket scan whose ticket status still appears active in a stale snapshot
+- **WHEN** the Backend API finds that the ticket order is unpaid, underpaid, cancelled, refunded, or not server-issued
+- **THEN** the Backend API returns an invalid or cancelled-ticket outcome
+- **THEN** no successful check-in is created
+- **THEN** the ticket remains not checked in
 
 #### Scenario: Cross-device offline conflict is resolved by backend
 - **GIVEN** two assigned devices scanned the same valid ticket or VIP guest while offline

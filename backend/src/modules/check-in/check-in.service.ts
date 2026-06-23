@@ -12,6 +12,8 @@ import {
   CheckInStatus,
   CheckInSyncStatus,
   ImportStatus,
+  OrderStatus,
+  PaymentStatus,
   Prisma,
   TicketStatus,
   VipGuestStatus,
@@ -60,6 +62,19 @@ type WinningCheckIn = Pick<
   CheckIn,
   'id' | 'sourceDeviceId' | 'serverCheckedInAt' | 'scannedAt'
 >;
+
+type TicketPurchaseContext = {
+  issuedAt: Date;
+  order: {
+    status: OrderStatus;
+    paidAt: Date | null;
+    totalAmountVnd: number;
+    payments: {
+      status: PaymentStatus;
+      amountVnd: number;
+    }[];
+  };
+};
 
 @Injectable()
 export class CheckInService {
@@ -422,6 +437,19 @@ export class CheckInService {
             endsAt: true,
           },
         },
+        order: {
+          select: {
+            status: true,
+            paidAt: true,
+            totalAmountVnd: true,
+            payments: {
+              select: {
+                status: true,
+                amountVnd: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -456,6 +484,16 @@ export class CheckInService {
         ticketId: ticket.id,
         status: CheckInStatus.CANCELLED_TICKET,
         note: 'Ticket is cancelled',
+      });
+    }
+
+    const purchaseError = this.validateTicketPurchaseContext(ticket, timing);
+
+    if (purchaseError) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        ticketId: ticket.id,
+        status: purchaseError.status,
+        note: purchaseError.note,
       });
     }
 
@@ -799,6 +837,45 @@ export class CheckInService {
 
   private getWinningServerCheckInAt(winningCheckIn: WinningCheckIn): Date {
     return winningCheckIn.serverCheckedInAt ?? winningCheckIn.scannedAt;
+  }
+
+  private validateTicketPurchaseContext(
+    ticket: TicketPurchaseContext,
+    timing: ScanTiming,
+  ): { status: CheckInStatus; note: string } | null {
+    if (ticket.issuedAt.getTime() > timing.serverReceivedAt.getTime()) {
+      return {
+        status: CheckInStatus.INVALID_QR,
+        note: 'Ticket has not been issued by the server',
+      };
+    }
+
+    if (ticket.order.status === OrderStatus.CANCELLED) {
+      return {
+        status: CheckInStatus.CANCELLED_TICKET,
+        note: 'Ticket order is cancelled or refunded',
+      };
+    }
+
+    if (ticket.order.status !== OrderStatus.PAID || ticket.order.paidAt === null) {
+      return {
+        status: CheckInStatus.INVALID_QR,
+        note: 'Ticket order has not been paid',
+      };
+    }
+
+    const successfulPaymentAmount = ticket.order.payments
+      .filter((payment) => payment.status === PaymentStatus.SUCCESS)
+      .reduce((total, payment) => total + payment.amountVnd, 0);
+
+    if (ticket.order.totalAmountVnd > 0 && successfulPaymentAmount < ticket.order.totalAmountVnd) {
+      return {
+        status: CheckInStatus.INVALID_QR,
+        note: 'Ticket order does not have a successful payment',
+      };
+    }
+
+    return null;
   }
 
   private async findWinningServerCheckInAt(where: {

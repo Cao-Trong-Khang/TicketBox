@@ -398,6 +398,7 @@ async function seedCheckInDemo(concert) {
     where: { orderCode: 'DEMO-CHECKIN-ORDER-001' },
     update: {
       status: 'PAID',
+      totalAmountVnd: ticketType.priceVnd * 2,
       paidAt: new Date('2026-06-15T12:00:00.000Z'),
     },
     create: {
@@ -409,6 +410,28 @@ async function seedCheckInDemo(concert) {
       expiresAt: new Date('2026-06-15T13:00:00.000Z'),
       paidAt: new Date('2026-06-15T12:00:00.000Z'),
       idempotencyKey: 'demo-checkin-order-001',
+    },
+  });
+
+  await prisma.paymentTransaction.upsert({
+    where: { idempotencyKey: 'demo-checkin-payment-001' },
+    update: {
+      orderId: order.id,
+      provider: 'VNPAY',
+      providerTransactionId: 'demo-checkin-vnpay-001',
+      status: 'SUCCESS',
+      amountVnd: ticketType.priceVnd * 2,
+      confirmedAt: new Date('2026-06-15T12:00:00.000Z'),
+    },
+    create: {
+      orderId: order.id,
+      provider: 'VNPAY',
+      providerTransactionId: 'demo-checkin-vnpay-001',
+      idempotencyKey: 'demo-checkin-payment-001',
+      status: 'SUCCESS',
+      amountVnd: ticketType.priceVnd * 2,
+      requestedAt: new Date('2026-06-15T11:59:00.000Z'),
+      confirmedAt: new Date('2026-06-15T12:00:00.000Z'),
     },
   });
 

@@ -7,6 +7,8 @@ import {
   CheckInStatus,
   CheckInSyncStatus,
   ImportStatus,
+  OrderStatus,
+  PaymentStatus,
   TicketStatus,
   VipGuestStatus,
 } from '@prisma/client';
@@ -49,6 +51,15 @@ type TestState = {
     ticketType: {
       code: string;
       name: string;
+    };
+    order: {
+      status: OrderStatus;
+      paidAt: Date | null;
+      totalAmountVnd: number;
+      payments: {
+        status: PaymentStatus;
+        amountVnd: number;
+      }[];
     };
   }[];
   vipGuests: {
@@ -206,6 +217,94 @@ test('sync rejects unsigned ticket QR bearer hashes', async () => {
   assert.equal(response.outcomes[0].resultCode, 'invalid');
   assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
   assert.equal(state.checkIns[0].note, 'Ticket QR token is not signed');
+  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
+});
+
+test('sync rejects active tickets whose order is not paid', async () => {
+  const { service, state } = createHarness();
+  state.tickets[0].order.status = OrderStatus.PENDING;
+  state.tickets[0].order.paidAt = null;
+  state.tickets[0].order.payments = [];
+  const qrHash = signedTicketQr(state.tickets[0]);
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'unpaid-order',
+          qrHash,
+          entityType: CheckInScanEntityType.ticket,
+          scannedAt: '2026-08-20T12:00:00.000Z',
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
+  assert.equal(state.checkIns[0].note, 'Ticket order has not been paid');
+  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
+});
+
+test('sync rejects paid ticket orders without enough successful payment amount', async () => {
+  const { service, state } = createHarness();
+  state.tickets[0].order.payments = [
+    {
+      status: PaymentStatus.FAILED,
+      amountVnd: 100_000,
+    },
+  ];
+  const qrHash = signedTicketQr(state.tickets[0]);
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'missing-success-payment',
+          qrHash,
+          entityType: CheckInScanEntityType.ticket,
+          scannedAt: '2026-08-20T12:00:00.000Z',
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
+  assert.equal(state.checkIns[0].note, 'Ticket order does not have a successful payment');
+  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
+});
+
+test('sync rejects active tickets from cancelled or refunded orders', async () => {
+  const { service, state } = createHarness();
+  state.tickets[0].order.status = OrderStatus.CANCELLED;
+  const qrHash = signedTicketQr(state.tickets[0]);
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'cancelled-order',
+          qrHash,
+          entityType: CheckInScanEntityType.ticket,
+          scannedAt: '2026-08-20T12:00:00.000Z',
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].status, CheckInStatus.CANCELLED_TICKET);
+  assert.equal(state.checkIns[0].note, 'Ticket order is cancelled or refunded');
   assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
 });
 
@@ -617,6 +716,17 @@ function createHarness(
           code: 'GA',
           name: 'General Admission',
         },
+        order: {
+          status: OrderStatus.PAID,
+          paidAt: new Date('2026-06-15T12:00:00.000Z'),
+          totalAmountVnd: 100_000,
+          payments: [
+            {
+              status: PaymentStatus.SUCCESS,
+              amountVnd: 100_000,
+            },
+          ],
+        },
       },
     ],
     vipGuests: [
@@ -725,7 +835,9 @@ function createPrismaMock(state: TestState) {
           ? state.concerts.find((candidate) => candidate.id === ticket.concertId)
           : null;
 
-        return ticket && concert ? { ...ticket, concert: { endsAt: concert.endsAt } } : null;
+        return ticket && concert
+          ? { ...ticket, concert: { endsAt: concert.endsAt }, order: ticket.order }
+          : null;
       },
       update: async ({ where, data }: { where: { id: string }; data: Partial<TestState['tickets'][0]> }) => {
         const ticket = state.tickets.find((candidate) => candidate.id === where.id);
