@@ -248,6 +248,31 @@ test('scheduler skips CSV files that are not valid UTF-8', async () => {
   });
 });
 
+test('scheduler skips structurally malformed CSV files instead of queueing them', async () => {
+  await withTempCsvDir(async (sourceDir) => {
+    const state = createState();
+    const publishedJobs: string[] = [];
+    const scheduler = createScheduler(state, {
+      publishImportRequested: async (job) => {
+        publishedJobs.push(job.importId);
+      },
+    });
+
+    await writeRawCsv(sourceDir, 'malformed.csv', [
+      'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+      'Demo Concert,LOCAL_DEMO,VIP-001,"Broken Guest,demo@example.test,+84900000001',
+    ]);
+
+    const result = await scheduler.scanScheduledImports(sourceDir);
+
+    assert.equal(result.detected, 0);
+    assert.equal(result.queued, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(state.imports.length, 0);
+    assert.equal(publishedJobs.length, 0);
+  });
+});
+
 function createState(): TestState {
   return {
     concerts: [{ id: '00000000-0000-4000-8000-000000000001', title: 'Demo Concert' }],

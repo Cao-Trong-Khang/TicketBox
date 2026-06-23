@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   InvalidCsvEncodingError,
+  MalformedCsvError,
   UnsupportedCsvDelimiterError,
   VIP_IMPORT_INVALID_ENCODING_CODE,
+  VIP_IMPORT_MALFORMED_CSV_CODE,
   VIP_IMPORT_UNSUPPORTED_DELIMITER_CODE,
   decodeVipCsvContent,
   parseCsv,
@@ -63,6 +65,70 @@ test('parseCsv accepts comma-delimited VIP CSV content', () => {
   ]);
   assert.equal(parsed.rows.length, 1);
   assert.equal(parsed.rows[0].columns.full_name, 'Demo Guest');
+});
+
+test('parseCsv supports quoted commas, escaped quotes, and newlines in quoted fields', () => {
+  const parsed = parseCsv(
+    [
+      'full_name,email,notes',
+      '"Demo ""VIP"" Guest",demo@example.test,"Line 1',
+      'Line 2, still same field"',
+    ].join('\n'),
+  );
+
+  assert.equal(parsed.rows.length, 1);
+  assert.equal(parsed.rows[0].columns.full_name, 'Demo "VIP" Guest');
+  assert.equal(parsed.rows[0].columns.notes, 'Line 1\nLine 2, still same field');
+});
+
+test('parseCsv rejects unclosed quoted fields', () => {
+  assert.throws(
+    () =>
+      parseCsv(
+        [
+          'full_name,email',
+          '"Broken Guest,broken@example.test',
+        ].join('\n'),
+      ),
+    (error) =>
+      error instanceof MalformedCsvError &&
+      error.code === VIP_IMPORT_MALFORMED_CSV_CODE &&
+      error.metadata.rowNumber === 2 &&
+      error.metadata.columnNumber === 1 &&
+      error.metadata.reason === 'Unclosed quoted field',
+  );
+});
+
+test('parseCsv rejects quotes inside unquoted fields', () => {
+  assert.throws(
+    () =>
+      parseCsv(
+        [
+          'full_name,email',
+          'Demo "Guest",demo@example.test',
+        ].join('\n'),
+      ),
+    (error) =>
+      error instanceof MalformedCsvError &&
+      error.code === VIP_IMPORT_MALFORMED_CSV_CODE &&
+      error.metadata.reason === 'Unexpected quote in unquoted field',
+  );
+});
+
+test('parseCsv rejects non-delimiter content after a closing quote', () => {
+  assert.throws(
+    () =>
+      parseCsv(
+        [
+          'full_name,email',
+          '"Demo"Guest,demo@example.test',
+        ].join('\n'),
+      ),
+    (error) =>
+      error instanceof MalformedCsvError &&
+      error.code === VIP_IMPORT_MALFORMED_CSV_CODE &&
+      error.metadata.reason === 'Unexpected character after closing quote',
+  );
 });
 
 test('parseCsv rejects alternate delimiters instead of parsing them silently', () => {

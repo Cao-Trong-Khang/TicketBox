@@ -272,6 +272,36 @@ test('worker records invalid UTF-8 as a file-level import error', async () => {
   });
 });
 
+test('worker records malformed CSV syntax as a file-level import error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,"Broken Guest,demo@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'MALFORMED_CSV');
+    assert.match(state.imports[0].failureMessage ?? '', /Unclosed quoted field/);
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.equal(state.errors[0].code, 'MALFORMED_CSV');
+    assert.equal((state.errors[0].metadata as { rowNumber: number }).rowNumber, 2);
+    assert.equal(
+      (state.errors[0].metadata as { reason: string }).reason,
+      'Unclosed quoted field',
+    );
+    assert.equal(state.guests.length, 0);
+  });
+});
+
 test('worker records malformed rows while importing valid rows', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(

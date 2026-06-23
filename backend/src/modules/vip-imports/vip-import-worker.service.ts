@@ -11,6 +11,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   InvalidCsvEncodingError,
+  MalformedCsvError,
   VIP_IMPORT_REQUIRED_COLUMNS,
   UnsupportedCsvDelimiterError,
   buildIdentityKey,
@@ -389,6 +390,7 @@ export class VipImportWorkerService {
   private toCsvContentFailure(error: unknown): PendingImportError | null {
     if (
       error instanceof InvalidCsvEncodingError ||
+      error instanceof MalformedCsvError ||
       error instanceof UnsupportedCsvDelimiterError
     ) {
       return {

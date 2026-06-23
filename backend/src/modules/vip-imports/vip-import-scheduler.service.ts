@@ -5,6 +5,7 @@ import { ImportStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   InvalidCsvEncodingError,
+  MalformedCsvError,
   UnsupportedCsvDelimiterError,
   decodeVipCsvContent,
   getCsvValue,
@@ -76,7 +77,8 @@ export class VipImportSchedulerService {
       } catch (error) {
         if (
           !(error instanceof UnsupportedCsvDelimiterError) &&
-          !(error instanceof InvalidCsvEncodingError)
+          !(error instanceof InvalidCsvEncodingError) &&
+          !(error instanceof MalformedCsvError)
         ) {
           throw error;
         }

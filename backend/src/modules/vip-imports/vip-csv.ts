@@ -5,6 +5,7 @@ export const VIP_IMPORT_REQUIRED_COLUMNS = ['full_name'] as const;
 export const VIP_IMPORT_CSV_DELIMITER = ',';
 export const VIP_IMPORT_UNSUPPORTED_DELIMITER_CODE = 'UNSUPPORTED_DELIMITER';
 export const VIP_IMPORT_INVALID_ENCODING_CODE = 'INVALID_ENCODING';
+export const VIP_IMPORT_MALFORMED_CSV_CODE = 'MALFORMED_CSV';
 export const VIP_IMPORT_REQUIRED_ENCODING = 'UTF-8';
 
 type AlternateCsvDelimiter = {
@@ -20,6 +21,12 @@ type UnsupportedCsvDelimiterMetadata = {
 
 type InvalidCsvEncodingMetadata = {
   requiredEncoding: string;
+};
+
+type MalformedCsvMetadata = {
+  rowNumber: number;
+  columnNumber: number;
+  reason: string;
 };
 
 const ALTERNATE_CSV_DELIMITERS: AlternateCsvDelimiter[] = [
@@ -64,6 +71,19 @@ export class InvalidCsvEncodingError extends Error {
   constructor() {
     super(`VIP CSV imports must be encoded as valid ${VIP_IMPORT_REQUIRED_ENCODING}`);
     this.name = 'InvalidCsvEncodingError';
+  }
+}
+
+export class MalformedCsvError extends Error {
+  readonly code = VIP_IMPORT_MALFORMED_CSV_CODE;
+  readonly metadata: MalformedCsvMetadata;
+
+  constructor(metadata: MalformedCsvMetadata) {
+    super(
+      `Malformed VIP CSV at row ${metadata.rowNumber}, column ${metadata.columnNumber}: ${metadata.reason}`,
+    );
+    this.name = 'MalformedCsvError';
+    this.metadata = metadata;
   }
 }
 
@@ -268,45 +288,144 @@ function parseCsvRecords(content: string, delimiter = VIP_IMPORT_CSV_DELIMITER):
   let record: string[] = [];
   let field = '';
   let inQuotes = false;
+  let afterClosingQuote = false;
+  let quotedFieldStartIndex: number | null = null;
+
+  const pushField = () => {
+    record.push(field);
+    field = '';
+    inQuotes = false;
+    afterClosingQuote = false;
+    quotedFieldStartIndex = null;
+  };
+
+  const pushRecord = () => {
+    pushField();
+    records.push(record);
+    record = [];
+  };
 
   for (let index = 0; index < content.length; index += 1) {
     const character = content[index];
 
-    if (character === '"') {
-      if (inQuotes && content[index + 1] === '"') {
-        field += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
+    if (inQuotes) {
+      if (character === '"') {
+        if (content[index + 1] === '"') {
+          field += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+          afterClosingQuote = true;
+        }
+        continue;
       }
+
+      field += character;
       continue;
     }
 
-    if (character === delimiter && !inQuotes) {
-      record.push(field);
-      field = '';
+    if (afterClosingQuote) {
+      if (character === delimiter) {
+        pushField();
+        continue;
+      }
+
+      if ((character === '\n' || character === '\r')) {
+        if (character === '\r' && content[index + 1] === '\n') {
+          index += 1;
+        }
+
+        pushRecord();
+        continue;
+      }
+
+      if (character === ' ' || character === '\t') {
+        continue;
+      }
+
+      throwMalformedCsvError(content, index, 'Unexpected character after closing quote');
+    }
+
+    if (character === '"') {
+      if (field.length > 0) {
+        throwMalformedCsvError(content, index, 'Unexpected quote in unquoted field');
+      }
+
+      inQuotes = true;
+      quotedFieldStartIndex = index;
       continue;
     }
 
-    if ((character === '\n' || character === '\r') && !inQuotes) {
+    if (character === delimiter) {
+      pushField();
+      continue;
+    }
+
+    if ((character === '\n' || character === '\r')) {
       if (character === '\r' && content[index + 1] === '\n') {
         index += 1;
       }
-
-      record.push(field);
-      records.push(record);
-      record = [];
-      field = '';
+      pushRecord();
       continue;
     }
 
     field += character;
   }
 
-  if (field.length > 0 || record.length > 0) {
-    record.push(field);
+  if (inQuotes) {
+    throwMalformedCsvError(
+      content,
+      quotedFieldStartIndex ?? content.length,
+      'Unclosed quoted field',
+    );
+  }
+
+  if (afterClosingQuote || field.length > 0 || record.length > 0) {
+    pushField();
     records.push(record);
   }
 
   return records;
+}
+
+function throwMalformedCsvError(content: string, index: number, reason: string): never {
+  const position = getCsvPosition(content, index);
+
+  throw new MalformedCsvError({
+    rowNumber: position.rowNumber,
+    columnNumber: position.columnNumber,
+    reason,
+  });
+}
+
+function getCsvPosition(content: string, targetIndex: number): {
+  rowNumber: number;
+  columnNumber: number;
+} {
+  let rowNumber = 1;
+  let columnNumber = 1;
+
+  for (let index = 0; index < targetIndex; index += 1) {
+    const character = content[index];
+
+    if (character === '\r') {
+      if (content[index + 1] === '\n') {
+        index += 1;
+      }
+
+      rowNumber += 1;
+      columnNumber = 1;
+      continue;
+    }
+
+    if (character === '\n') {
+      rowNumber += 1;
+      columnNumber = 1;
+      continue;
+    }
+
+    columnNumber += 1;
+  }
+
+  return { rowNumber, columnNumber };
 }

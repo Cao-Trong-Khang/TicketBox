@@ -41,6 +41,13 @@ VIP CSV imports SHALL use `REPLACE_SNAPSHOT` semantics for each `concertId` and 
 - **WHEN** an already queued import references that file
 - **THEN** the worker records a file-level `INVALID_ENCODING` failure
 
+#### Scenario: Malformed sponsor CSV syntax is rejected clearly
+- **GIVEN** a scheduled sponsor CSV file contains malformed syntax such as an unclosed quote or unexpected content after a closing quote
+- **WHEN** the scheduler scans the source directory
+- **THEN** the scheduler skips the file instead of parsing shifted columns
+- **WHEN** an already queued import references that file
+- **THEN** the worker records a file-level `MALFORMED_CSV` failure
+
 #### Scenario: New sponsor snapshot refreshes an existing VIP guest
 - **GIVEN** a previous sponsor CSV import created a VIP guest for a concert and sponsor source
 - **WHEN** a newer sponsor CSV file contains the same natural guest key with updated name, email, phone, allowed gate, or guest type
