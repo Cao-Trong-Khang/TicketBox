@@ -259,7 +259,7 @@ export class CheckInService {
     concertId: string,
     dto: SyncCheckInDto,
   ): Promise<CheckInSyncResponseDto> {
-    await this.assertAssignedCheckInStaff(user.id, concertId, [
+    const assignments = await this.assertAssignedCheckInStaff(user.id, concertId, [
       PERMISSION_CODES.checkinScan,
       PERMISSION_CODES.checkinSync,
     ], dto.sourceDeviceId);
@@ -273,7 +273,9 @@ export class CheckInService {
     const outcomes: CheckInSyncOutcomeDto[] = [];
 
     for (const scan of dto.scans) {
-      outcomes.push(await this.syncOneScan(user.id, concertId, dto.sourceDeviceId, scan));
+      outcomes.push(
+        await this.syncOneScan(user.id, concertId, dto.sourceDeviceId, assignments, scan),
+      );
     }
 
     return {
@@ -288,6 +290,7 @@ export class CheckInService {
     staffUserId: string,
     concertId: string,
     sourceDeviceId: string,
+    assignments: AssignmentAccess[],
     scan: CheckInSyncScanDto,
   ): Promise<CheckInSyncOutcomeDto> {
     const existing = await this.findIdempotentCheckIn(sourceDeviceId, scan.localScanId);
@@ -298,7 +301,7 @@ export class CheckInService {
 
     try {
       const checkIn = await this.prisma.$transaction((tx) =>
-        this.processNewScan(tx, staffUserId, concertId, sourceDeviceId, scan),
+        this.processNewScan(tx, staffUserId, concertId, sourceDeviceId, assignments, scan),
       );
 
       await this.publishSafely(checkIn);
@@ -336,10 +339,18 @@ export class CheckInService {
     staffUserId: string,
     concertId: string,
     sourceDeviceId: string,
+    assignments: AssignmentAccess[],
     scan: CheckInSyncScanDto,
   ): Promise<CheckIn> {
     if (scan.entityType === CheckInScanEntityType.vipGuest) {
-      return this.processVipGuestScan(tx, staffUserId, concertId, sourceDeviceId, scan);
+      return this.processVipGuestScan(
+        tx,
+        staffUserId,
+        concertId,
+        sourceDeviceId,
+        assignments,
+        scan,
+      );
     }
 
     return this.processTicketScan(tx, staffUserId, concertId, sourceDeviceId, scan);
@@ -433,6 +444,7 @@ export class CheckInService {
     staffUserId: string,
     concertId: string,
     sourceDeviceId: string,
+    assignments: AssignmentAccess[],
     scan: CheckInSyncScanDto,
   ): Promise<CheckIn> {
     const scannedAt = new Date(scan.scannedAt);
@@ -464,6 +476,14 @@ export class CheckInService {
         vipGuestId: guest.id,
         status: CheckInStatus.UNAUTHORIZED,
         note: 'VIP guest belongs to a different concert',
+      });
+    }
+
+    if (!this.isVipGuestAllowedAtAssignedGate(guest.allowedGate, assignments)) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+        vipGuestId: guest.id,
+        status: CheckInStatus.UNAUTHORIZED,
+        note: `VIP guest is assigned to ${guest.allowedGate}`,
       });
     }
 
@@ -633,6 +653,27 @@ export class CheckInService {
     }
 
     return assignments;
+  }
+
+  private isVipGuestAllowedAtAssignedGate(
+    allowedGate: string | null,
+    assignments: AssignmentAccess[],
+  ): boolean {
+    if (!allowedGate) {
+      return true;
+    }
+
+    const normalizedAllowedGate = this.normalizeGateName(allowedGate);
+
+    return assignments.some(
+      (assignment) =>
+        assignment.gateName !== null &&
+        this.normalizeGateName(assignment.gateName) === normalizedAllowedGate,
+    );
+  }
+
+  private normalizeGateName(gateName: string): string {
+    return gateName.trim().toLowerCase();
   }
 
   private async assertCheckInStaffWithPermissions(

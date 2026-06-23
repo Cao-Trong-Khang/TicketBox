@@ -28,6 +28,13 @@ TicketBox SHALL provide an offline-capable gate check-in workflow for Check-in S
 - **THEN** the API returns one outcome per local scan
 - **THEN** the app stores those outcomes and marks accepted or rejected logs as synchronized
 
+#### Scenario: VIP scan at the wrong assigned gate is rejected by backend
+- **GIVEN** a VIP guest is assigned to a specific allowed gate
+- **AND** Check-in Staff synchronizes that VIP scan from a different assigned gate or device
+- **WHEN** the Backend API validates the scan
+- **THEN** the Backend API rejects the VIP check-in as unauthorized
+- **THEN** no successful VIP check-in is created
+
 ### Requirement: Staff mobile authentication and assigned event selection
 The Check-in Mobile App SHALL require Check-in Staff to log in with email or phone and password, show distinct invalid-login and non-staff permission errors, and require staff to select one assigned event before check-in actions are available.
 

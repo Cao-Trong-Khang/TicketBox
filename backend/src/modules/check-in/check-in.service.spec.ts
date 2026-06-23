@@ -173,6 +173,59 @@ test('sync accepts a valid assigned ticket scan and updates authoritative ticket
   assert.equal(state.checkIns[0].status, CheckInStatus.SUCCESS);
 });
 
+test('sync accepts a VIP guest only at an assigned gate', async () => {
+  const { service, state } = createHarness();
+  state.vipGuests[0].allowedGate = ' gate a ';
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'vip-local-1',
+          qrHash: 'vip-qr-1',
+          entityType: CheckInScanEntityType.vipGuest,
+          scannedAt: '2026-08-20T12:00:00.000Z',
+          localResult: 'accepted',
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'accepted');
+  assert.equal(state.checkIns[0].status, CheckInStatus.SUCCESS);
+  assert.equal(state.vipGuests[0].status, VipGuestStatus.CHECKED_IN);
+});
+
+test('sync rejects VIP guest scans at the wrong assignment gate', async () => {
+  const { service, state } = createHarness();
+
+  const response = await service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    {
+      sourceDeviceId: 'device-a',
+      scans: [
+        {
+          localScanId: 'vip-wrong-gate',
+          qrHash: 'vip-qr-1',
+          entityType: CheckInScanEntityType.vipGuest,
+          scannedAt: '2026-08-20T12:00:00.000Z',
+          localResult: 'accepted',
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.outcomes[0].resultCode, 'unauthorized');
+  assert.equal(state.checkIns[0].status, CheckInStatus.UNAUTHORIZED);
+  assert.equal(state.checkIns[0].note, 'VIP guest is assigned to VIP Gate');
+  assert.equal(state.vipGuests[0].status, VipGuestStatus.ACTIVE);
+  assert.equal(state.vipGuests[0].checkedInAt, null);
+});
+
 test('sync retry with the same device and local scan ID returns the original outcome', async () => {
   const { service, state } = createHarness();
   const dto = {
