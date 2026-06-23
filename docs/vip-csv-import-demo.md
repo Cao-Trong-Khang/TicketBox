@@ -8,6 +8,8 @@ VIP CSV imports use `REPLACE_SNAPSHOT` semantics per concert and sponsor source.
 
 Sponsor files must be UTF-8 encoded comma-delimited CSV. Semicolon, tab, and pipe-delimited files are rejected with `UNSUPPORTED_DELIMITER` instead of being parsed with the wrong columns; invalid UTF-8 files are rejected with `INVALID_ENCODING`.
 Malformed CSV syntax, including unclosed quotes or non-delimiter characters after a closing quote, is rejected with `MALFORMED_CSV`.
+Headers are schema-checked after normalization. Supported headers are `concert_id`, `concert_title`, `sponsor_source`, `external_guest_key`, `full_name`, `email`, `phone`, `sponsor_company`, `company`, `invited_by`, `guest_type`, `allowed_gate`, and `notes`. `full_name` is required, and each file must include at least one identity column: `external_guest_key`, `email`, or `phone`.
+Rows reject invalid phone numbers, invalid external guest keys, and overlong field values before creating or updating VIP guests.
 
 1. Start the local infrastructure:
 
@@ -61,6 +63,7 @@ curl -H "Authorization: Bearer <organizer-jwt>" http://localhost:3000/admin/conc
 - Files using `;`, tab, or `|` as delimiters are skipped by the scheduler or failed by the worker as `UNSUPPORTED_DELIMITER`.
 - Files that are not valid UTF-8 are skipped by the scheduler or failed by the worker as `INVALID_ENCODING`.
 - Files with malformed CSV syntax are skipped by the scheduler or failed by the worker as `MALFORMED_CSV`.
+- Files with duplicate, unknown, or identity-less headers fail as `DUPLICATE_HEADERS`, `UNSUPPORTED_COLUMNS`, or `MISSING_IDENTITY_COLUMNS`; rows with invalid phone, invalid external key, or overlong fields are rejected with row-level errors.
 - To simulate database-backed queue enqueue failure without stopping the rest of the backend:
 
 ```bash

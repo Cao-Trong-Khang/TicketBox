@@ -48,6 +48,18 @@ VIP CSV imports SHALL use `REPLACE_SNAPSHOT` semantics for each `concertId` and 
 - **WHEN** an already queued import references that file
 - **THEN** the worker records a file-level `MALFORMED_CSV` failure
 
+#### Scenario: Sponsor CSV headers match the supported schema
+- **GIVEN** a scheduled sponsor CSV file contains duplicate headers, unsupported headers, or no identity column
+- **WHEN** the worker validates the file before row processing
+- **THEN** the worker records a file-level failure and does not create or update VIP guests
+- **AND** valid files require `full_name` and at least one of `external_guest_key`, `email`, or `phone`
+
+#### Scenario: Sponsor CSV rows enforce identity and field constraints
+- **GIVEN** a scheduled sponsor CSV file contains rows with invalid phone numbers, invalid external guest keys, or overlong fields
+- **WHEN** the worker processes the file
+- **THEN** each invalid row is rejected with a row-level error
+- **THEN** valid rows in the same syntactically valid file can still be imported
+
 #### Scenario: New sponsor snapshot refreshes an existing VIP guest
 - **GIVEN** a previous sponsor CSV import created a VIP guest for a concert and sponsor source
 - **WHEN** a newer sponsor CSV file contains the same natural guest key with updated name, email, phone, allowed gate, or guest type

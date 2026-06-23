@@ -2,11 +2,44 @@ import { createHash } from 'node:crypto';
 import { TextDecoder } from 'node:util';
 
 export const VIP_IMPORT_REQUIRED_COLUMNS = ['full_name'] as const;
+export const VIP_IMPORT_IDENTITY_COLUMNS = ['external_guest_key', 'email', 'phone'] as const;
+export const VIP_IMPORT_SUPPORTED_COLUMNS = [
+  'concert_id',
+  'concert_title',
+  'sponsor_source',
+  'external_guest_key',
+  'full_name',
+  'email',
+  'phone',
+  'sponsor_company',
+  'company',
+  'invited_by',
+  'guest_type',
+  'allowed_gate',
+  'notes',
+] as const;
+export type VipImportSupportedColumn = (typeof VIP_IMPORT_SUPPORTED_COLUMNS)[number];
+
 export const VIP_IMPORT_CSV_DELIMITER = ',';
 export const VIP_IMPORT_UNSUPPORTED_DELIMITER_CODE = 'UNSUPPORTED_DELIMITER';
 export const VIP_IMPORT_INVALID_ENCODING_CODE = 'INVALID_ENCODING';
 export const VIP_IMPORT_MALFORMED_CSV_CODE = 'MALFORMED_CSV';
 export const VIP_IMPORT_REQUIRED_ENCODING = 'UTF-8';
+export const VIP_IMPORT_FIELD_LIMITS: Partial<Record<VipImportSupportedColumn, number>> = {
+  concert_id: 64,
+  concert_title: 256,
+  sponsor_source: 64,
+  external_guest_key: 64,
+  full_name: 128,
+  email: 254,
+  phone: 32,
+  sponsor_company: 128,
+  company: 128,
+  invited_by: 128,
+  guest_type: 64,
+  allowed_gate: 64,
+  notes: 1000,
+};
 
 type AlternateCsvDelimiter = {
   delimiter: string;
@@ -178,13 +211,23 @@ export function normalizePhone(value: string | null): string | null {
     return null;
   }
 
-  const normalized = value.replace(/[^0-9+]/g, '');
+  const normalized = value.trim().replace(/[\s().-]/g, '');
 
   return normalized ? normalized : null;
 }
 
 export function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+export function isValidPhone(value: string): boolean {
+  const normalized = normalizePhone(value);
+
+  return normalized ? /^\+?[0-9]{8,15}$/.test(normalized) : false;
+}
+
+export function isValidExternalGuestKey(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(value.trim());
 }
 
 export function sha256(value: string | Buffer): string {

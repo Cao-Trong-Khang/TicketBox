@@ -12,13 +12,18 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   InvalidCsvEncodingError,
   MalformedCsvError,
+  VIP_IMPORT_FIELD_LIMITS,
+  VIP_IMPORT_IDENTITY_COLUMNS,
   VIP_IMPORT_REQUIRED_COLUMNS,
+  VIP_IMPORT_SUPPORTED_COLUMNS,
   UnsupportedCsvDelimiterError,
   buildIdentityKey,
   buildVipQrHash,
   decodeVipCsvContent,
   getCsvValue,
   isValidEmail,
+  isValidExternalGuestKey,
+  isValidPhone,
   normalizeEmail,
   normalizeName,
   normalizePhone,
@@ -371,6 +376,32 @@ export class VipImportWorkerService {
       };
     }
 
+    const duplicateHeaders = this.getDuplicateHeaders(parsed.headers);
+
+    if (duplicateHeaders.length > 0) {
+      return {
+        type: ImportErrorType.FILE,
+        code: 'DUPLICATE_HEADERS',
+        message: `CSV file contains duplicate headers: ${duplicateHeaders.join(', ')}`,
+        metadata: { duplicateHeaders },
+      };
+    }
+
+    const supportedColumns = new Set<string>(VIP_IMPORT_SUPPORTED_COLUMNS);
+    const unsupportedColumns = parsed.headers.filter((header) => !supportedColumns.has(header));
+
+    if (unsupportedColumns.length > 0) {
+      return {
+        type: ImportErrorType.FILE,
+        code: 'UNSUPPORTED_COLUMNS',
+        message: `CSV file contains unsupported columns: ${unsupportedColumns.join(', ')}`,
+        metadata: {
+          unsupportedColumns,
+          supportedColumns: [...VIP_IMPORT_SUPPORTED_COLUMNS],
+        },
+      };
+    }
+
     const missingColumns = VIP_IMPORT_REQUIRED_COLUMNS.filter(
       (column) => !parsed.headers.includes(column),
     );
@@ -381,6 +412,15 @@ export class VipImportWorkerService {
         code: 'MISSING_REQUIRED_COLUMNS',
         message: `CSV file is missing required columns: ${missingColumns.join(', ')}`,
         metadata: { missingColumns },
+      };
+    }
+
+    if (!VIP_IMPORT_IDENTITY_COLUMNS.some((column) => parsed.headers.includes(column))) {
+      return {
+        type: ImportErrorType.FILE,
+        code: 'MISSING_IDENTITY_COLUMNS',
+        message: `CSV file must contain at least one identity column: ${VIP_IMPORT_IDENTITY_COLUMNS.join(', ')}`,
+        metadata: { identityColumns: [...VIP_IMPORT_IDENTITY_COLUMNS] },
       };
     }
 
@@ -402,6 +442,21 @@ export class VipImportWorkerService {
     }
 
     return null;
+  }
+
+  private getDuplicateHeaders(headers: string[]): string[] {
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+
+    for (const header of headers) {
+      if (seen.has(header)) {
+        duplicates.add(header);
+      } else {
+        seen.add(header);
+      }
+    }
+
+    return [...duplicates];
   }
 
   private async processRow(
@@ -679,8 +734,6 @@ export class VipImportWorkerService {
   }
 
   private validateRow(row: ReturnType<typeof parseCsv>['rows'][number]): PendingImportError[] {
-    const errors: PendingImportError[] = [];
-
     if (row.hasColumnCountMismatch) {
       return [
         {
@@ -693,10 +746,12 @@ export class VipImportWorkerService {
       ];
     }
 
+    const errors: PendingImportError[] = this.validateFieldLengths(row);
     const fullName = getCsvValue(row, 'full_name');
     const externalGuestKey = getCsvValue(row, 'external_guest_key');
     const email = normalizeEmail(getCsvValue(row, 'email'));
-    const phone = normalizePhone(getCsvValue(row, 'phone'));
+    const rawPhone = getCsvValue(row, 'phone');
+    const phone = normalizePhone(rawPhone);
 
     if (!fullName) {
       errors.push({
@@ -705,6 +760,18 @@ export class VipImportWorkerService {
         field: 'full_name',
         code: 'FULL_NAME_REQUIRED',
         message: 'VIP guest full_name is required',
+        rawRow: row.rawRow,
+      });
+    }
+
+    if (externalGuestKey && !isValidExternalGuestKey(externalGuestKey)) {
+      errors.push({
+        type: ImportErrorType.ROW,
+        rowNumber: row.rowNumber,
+        field: 'external_guest_key',
+        code: 'EXTERNAL_GUEST_KEY_INVALID',
+        message:
+          'VIP guest external_guest_key must be 1-64 characters using letters, numbers, dot, underscore, colon, or hyphen',
         rawRow: row.rawRow,
       });
     }
@@ -720,6 +787,17 @@ export class VipImportWorkerService {
       });
     }
 
+    if (rawPhone && !isValidPhone(rawPhone)) {
+      errors.push({
+        type: ImportErrorType.ROW,
+        rowNumber: row.rowNumber,
+        field: 'phone',
+        code: 'PHONE_INVALID',
+        message: 'VIP guest phone must be 8-15 digits with an optional leading +',
+        rawRow: row.rawRow,
+      });
+    }
+
     if (!externalGuestKey && !email && !phone) {
       errors.push({
         type: ImportErrorType.ROW,
@@ -727,6 +805,32 @@ export class VipImportWorkerService {
         code: 'IDENTITY_REQUIRED',
         message: 'VIP guest row needs external_guest_key, email, or phone',
         rawRow: row.rawRow,
+      });
+    }
+
+    return errors;
+  }
+
+  private validateFieldLengths(
+    row: ReturnType<typeof parseCsv>['rows'][number],
+  ): PendingImportError[] {
+    const errors: PendingImportError[] = [];
+
+    for (const [field, maxLength] of Object.entries(VIP_IMPORT_FIELD_LIMITS)) {
+      const value = row.rawRow[field];
+
+      if (value === undefined || value.length <= maxLength) {
+        continue;
+      }
+
+      errors.push({
+        type: ImportErrorType.ROW,
+        rowNumber: row.rowNumber,
+        field,
+        code: 'FIELD_TOO_LONG',
+        message: `VIP guest ${field} must be ${maxLength} characters or fewer`,
+        rawRow: row.rawRow,
+        metadata: { maxLength, actualLength: value.length },
       });
     }
 

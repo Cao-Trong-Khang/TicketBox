@@ -170,6 +170,83 @@ test('worker stores file-level errors without deleting existing accepted VIP gue
   });
 });
 
+test('worker rejects duplicate normalized CSV headers as a file-level error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,Full Name,email',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest,Duplicate Guest,demo@example.test',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'DUPLICATE_HEADERS');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.deepEqual(state.errors[0].metadata, { duplicateHeaders: ['full_name'] });
+    assert.equal(state.guests.length, 0);
+  });
+});
+
+test('worker rejects unsupported CSV headers as a file-level error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,vip_level',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest,demo@example.test,Gold',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'UNSUPPORTED_COLUMNS');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.deepEqual(
+      (state.errors[0].metadata as { unsupportedColumns: string[] }).unsupportedColumns,
+      ['vip_level'],
+    );
+    assert.equal(state.guests.length, 0);
+  });
+});
+
+test('worker requires an identity column in the CSV header', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,full_name,guest_type',
+        'Demo Concert,LOCAL_DEMO,Demo Guest,Press',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'MISSING_IDENTITY_COLUMNS');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.deepEqual(state.errors[0].metadata, {
+      identityColumns: ['external_guest_key', 'email', 'phone'],
+    });
+    assert.equal(state.guests.length, 0);
+  });
+});
+
 test('worker fails oversized CSV files before parsing rows', async () => {
   await withEnv('VIP_IMPORT_MAX_FILE_SIZE_BYTES', '32', async () => {
     await withTempCsv(async (sourcePath) => {
@@ -218,6 +295,37 @@ test('worker fails CSV files that exceed the configured max row count', async ()
       assert.equal(state.errors[0].type, ImportErrorType.FILE);
       assert.equal(state.guests.length, 0);
     });
+  });
+});
+
+test('worker validates VIP row phone, external key, and field lengths', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone,notes',
+        'Demo Concert,LOCAL_DEMO,VIP-PHONE,Bad Phone,phone@example.test,call-me,',
+        'Demo Concert,LOCAL_DEMO,BAD KEY,Bad Key,badkey@example.test,+84900000001,',
+        `Demo Concert,LOCAL_DEMO,VIP-LONG,${'A'.repeat(129)},long@example.test,+84900000002,`,
+        'Demo Concert,LOCAL_DEMO,VIP-GOOD,Valid Guest,valid@example.test,+84900000003,ok',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.totalRows, 4);
+    assert.equal(result.acceptedRows, 1);
+    assert.equal(result.rejectedRows, 3);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].externalGuestKey, 'VIP-GOOD');
+    assert.deepEqual(
+      state.errors.map((error) => error.code).sort(),
+      ['EXTERNAL_GUEST_KEY_INVALID', 'FIELD_TOO_LONG', 'PHONE_INVALID'],
+    );
   });
 });
 
