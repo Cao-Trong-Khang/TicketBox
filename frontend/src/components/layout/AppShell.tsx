@@ -38,6 +38,7 @@ export function AppShell({ children }: AppShellProps) {
 
         <nav className="nav-links" aria-label="Primary">
           <NavLink to="/concerts">Concerts</NavLink>
+          <NavLink to="/organizer/concerts">Kênh organizer</NavLink>
           {!hasToken && <NavLink to="/login">Đăng nhập</NavLink>}
           {!hasToken && <NavLink to="/register">Đăng ký</NavLink>}
           {hasToken && (

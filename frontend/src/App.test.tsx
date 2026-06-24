@@ -104,6 +104,52 @@ describe('frontend auth shell', () => {
     await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('jwt-token'));
     expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
   });
+
+  it('renders the organizer dashboard route with concert list', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse(createOrganizerConcerts())));
+
+    renderApp('/organizer/concerts');
+
+    expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
+    expect(screen.getByText('Organizer Draft Concert')).toBeInTheDocument();
+    expect(screen.getByText('TicketBox Artist')).toBeInTheDocument();
+    expect(screen.getAllByText('Sắp ra mắt')).toHaveLength(3);
+  });
+
+  it('shows organizer empty state when no concerts are returned', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse([])));
+
+    renderApp('/organizer/concerts');
+
+    expect(await screen.findByText('Bạn chưa có concert nào trong kênh organizer.')).toBeInTheDocument();
+  });
+
+  it('shows organizer login guidance for 401', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        mockJsonResponse({ message: 'Unauthorized' }, 401),
+      ),
+    );
+
+    renderApp('/organizer/concerts');
+
+    expect(
+      await screen.findByText('Vui lòng đăng nhập để truy cập kênh organizer'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Đi đến đăng nhập' })).toHaveAttribute('href', '/login');
+  });
+
+  it('shows organizer permission guidance for 403', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => mockJsonResponse({ message: 'Forbidden' }, 403)),
+    );
+
+    renderApp('/organizer/concerts');
+
+    expect(await screen.findByText('Tài khoản này không có quyền organizer')).toBeInTheDocument();
+  });
 });
 
 function createConcerts() {
@@ -119,6 +165,22 @@ function createConcerts() {
       startsAt: '2026-08-20T12:30:00.000Z',
       endsAt: '2026-08-20T15:30:00.000Z',
       minPriceVnd: 800000,
+    },
+  ];
+}
+
+function createOrganizerConcerts() {
+  return [
+    {
+      id: '77777777-7777-4777-8777-777777777777',
+      status: 'DRAFT',
+      title: 'Organizer Draft Concert',
+      artistName: 'TicketBox Artist',
+      venueName: 'TicketBox Arena',
+      startsAt: '2026-08-20T12:30:00.000Z',
+      endsAt: '2026-08-20T15:30:00.000Z',
+      createdAt: '2026-06-24T10:00:00.000Z',
+      updatedAt: '2026-06-24T10:00:00.000Z',
     },
   ];
 }
