@@ -9,6 +9,7 @@ import request from 'supertest';
 import { RbacModule } from '../rbac/rbac.module';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { AuthModule } from './auth.module';
 
 type TestState = {
@@ -144,6 +145,8 @@ async function createTestApp(prisma: Partial<PrismaService>): Promise<INestAppli
   })
     .overrideProvider(PrismaService)
     .useValue(prisma)
+    .overrideProvider(RedisCacheService)
+    .useValue(createRedisCacheMock())
     .compile();
 
   const app = moduleRef.createNestApplication();
@@ -409,4 +412,11 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
   }
 
   return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
+}
+
+function createRedisCacheMock() {
+  return {
+    incrementWithTtl: async () => 1,
+    getTtlSeconds: async () => 60,
+  } satisfies Partial<RedisCacheService>;
 }

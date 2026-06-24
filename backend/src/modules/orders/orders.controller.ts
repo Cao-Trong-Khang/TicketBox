@@ -11,13 +11,21 @@ import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreateOrderRequestDto } from './dto/create-order.request.dto';
 import { CreateOrderResponseDto } from './dto/create-order.response.dto';
+import { RateLimit } from '../rate-limit/rate-limit.decorator';
+import { RateLimitGuard } from '../rate-limit/rate-limit.guard';
 
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RateLimitGuard)
+  @RateLimit({
+    keyPrefix: 'orders-create',
+    limit: 5,
+    ttlSeconds: 5 * 60,
+    identity: 'user_or_ip',
+  })
   @HttpCode(200)
   async createOrder(
     @Req() req: Request,

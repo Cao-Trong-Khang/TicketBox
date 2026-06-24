@@ -10,6 +10,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { RateLimit } from "../rate-limit/rate-limit.decorator";
+import { RateLimitGuard } from "../rate-limit/rate-limit.guard";
 import { AuthenticatedUser } from "../auth/types";
 import { OrganizerConcertCreateDto } from "./dto/organizer-concert-create.dto";
 import { OrganizerConcertDetailDto } from "./dto/organizer-concert-detail.dto";
@@ -36,6 +38,13 @@ export class OrganizerConcertsController {
   }
 
   @Post()
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: "organizer-mutation",
+    limit: 20,
+    ttlSeconds: 5 * 60,
+    identity: "user_or_ip",
+  })
   createConcert(
     @Req() request: AuthenticatedRequest,
     @Body() dto: OrganizerConcertCreateDto,
@@ -55,6 +64,13 @@ export class OrganizerConcertsController {
   }
 
   @Patch(":id")
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: "organizer-mutation",
+    limit: 20,
+    ttlSeconds: 5 * 60,
+    identity: "user_or_ip",
+  })
   updateOwnedConcert(
     @Req() request: AuthenticatedRequest,
     @Param("id", new ParseUUIDPipe({ version: "4" })) concertId: string,
@@ -68,6 +84,13 @@ export class OrganizerConcertsController {
   }
 
   @Post(":id/publish")
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: "organizer-mutation",
+    limit: 20,
+    ttlSeconds: 5 * 60,
+    identity: "user_or_ip",
+  })
   publishOwnedConcert(
     @Req() request: AuthenticatedRequest,
     @Param("id", new ParseUUIDPipe({ version: "4" })) concertId: string,

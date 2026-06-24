@@ -67,6 +67,22 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  async getTtlSeconds(key: string): Promise<number | null> {
+    try {
+      await this.ensureConnected();
+      const ttl = await this.redis.ttl(key);
+
+      if (ttl < 0) {
+        return null;
+      }
+
+      return ttl;
+    } catch (error) {
+      this.warn('ttl', key, error);
+      return null;
+    }
+  }
+
   onModuleDestroy(): void {
     if (this.redis.status !== 'end') {
       this.redis.disconnect();

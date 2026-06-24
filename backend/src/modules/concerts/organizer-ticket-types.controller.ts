@@ -10,6 +10,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { RateLimit } from "../rate-limit/rate-limit.decorator";
+import { RateLimitGuard } from "../rate-limit/rate-limit.guard";
 import { AuthenticatedUser } from "../auth/types";
 import { OrganizerTicketTypeCreateDto } from "./dto/organizer-ticket-type-create.dto";
 import { OrganizerTicketTypeDto } from "./dto/organizer-ticket-type.dto";
@@ -39,6 +41,13 @@ export class OrganizerTicketTypesController {
   }
 
   @Post()
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: "organizer-mutation",
+    limit: 20,
+    ttlSeconds: 5 * 60,
+    identity: "user_or_ip",
+  })
   createTicketType(
     @Req() request: AuthenticatedRequest,
     @Param("concertId", new ParseUUIDPipe({ version: "4" })) concertId: string,
@@ -52,6 +61,13 @@ export class OrganizerTicketTypesController {
   }
 
   @Patch(":ticketTypeId")
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: "organizer-mutation",
+    limit: 20,
+    ttlSeconds: 5 * 60,
+    identity: "user_or_ip",
+  })
   updateTicketType(
     @Req() request: AuthenticatedRequest,
     @Param("concertId", new ParseUUIDPipe({ version: "4" })) concertId: string,
@@ -68,6 +84,13 @@ export class OrganizerTicketTypesController {
   }
 
   @Post(":ticketTypeId/activate")
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: "organizer-mutation",
+    limit: 20,
+    ttlSeconds: 5 * 60,
+    identity: "user_or_ip",
+  })
   activateTicketType(
     @Req() request: AuthenticatedRequest,
     @Param("concertId", new ParseUUIDPipe({ version: "4" })) concertId: string,
@@ -82,6 +105,13 @@ export class OrganizerTicketTypesController {
   }
 
   @Post(":ticketTypeId/deactivate")
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: "organizer-mutation",
+    limit: 20,
+    ttlSeconds: 5 * 60,
+    identity: "user_or_ip",
+  })
   deactivateTicketType(
     @Req() request: AuthenticatedRequest,
     @Param("concertId", new ParseUUIDPipe({ version: "4" })) concertId: string,
