@@ -4,8 +4,10 @@ import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { FormField } from '../../../components/ui/FormField';
 import { ApiError } from '../../../lib/api-client';
-import { login } from '../api';
+import { getAuthProfile, login } from '../api';
 import { AuthLayout } from '../../../components/layout/AuthLayout';
+
+const ORGANIZER_ROLE = 'ORGANIZER';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -23,7 +25,12 @@ export function LoginPage() {
       const data = await login({ email, password });
       localStorage.setItem('accessToken', data.accessToken);
       window.dispatchEvent(new Event('ticketbox-auth-changed'));
-      navigate('/home');
+      try {
+        const profile = await getAuthProfile();
+        navigate(profile.roles.includes(ORGANIZER_ROLE) ? '/organizer/concerts' : '/concerts');
+      } catch {
+        navigate('/concerts');
+      }
     } catch (err: unknown) {
       const apiError = err as ApiError;
       setError(apiError.status === 401 ? 'Email hoặc mật khẩu không đúng.' : apiError.message || 'Không thể đăng nhập lúc này.');

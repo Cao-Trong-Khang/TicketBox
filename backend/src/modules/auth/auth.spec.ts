@@ -91,6 +91,7 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
     assert.deepEqual(meResponse.body, {
       id: storedUser.id,
       email: storedUser.email,
+      roles: [ROLE_CODES.audience],
     });
 
     await request(app.getHttpServer()).get('/rbac-test/concert-create').expect(401);
@@ -311,31 +312,55 @@ function createPrismaDelegates(state: TestState) {
         state.userRoles.push(userRole);
         return userRole;
       },
-      findMany: async ({ where }: { where: Prisma.UserRoleWhereInput }) => {
+      findMany: async ({
+        where,
+        include,
+        select,
+      }: {
+        where: Prisma.UserRoleWhereInput;
+        include?: Prisma.UserRoleInclude;
+        select?: Prisma.UserRoleSelect;
+      }) => {
         return state.userRoles
           .filter((userRole) => !where.userId || userRole.userId === where.userId)
           .map((userRole) => {
             const role = state.roles.find((candidate) => candidate.id === userRole.roleId);
             assert.ok(role);
 
+            if (select?.role) {
+              return {
+                ...userRole,
+                role: {
+                  code: role.code,
+                },
+              };
+            }
+
+            if (include?.role) {
+              return {
+                ...userRole,
+                role: {
+                  ...role,
+                  rolePermissions: state.rolePermissions
+                    .filter((rolePermission) => rolePermission.roleId === role.id)
+                    .map((rolePermission) => {
+                      const permission = state.permissions.find(
+                        (candidate) => candidate.id === rolePermission.permissionId,
+                      );
+                      assert.ok(permission);
+
+                      return {
+                        ...rolePermission,
+                        permission,
+                      };
+                    }),
+                },
+              };
+            }
+
             return {
               ...userRole,
-              role: {
-                ...role,
-                rolePermissions: state.rolePermissions
-                  .filter((rolePermission) => rolePermission.roleId === role.id)
-                  .map((rolePermission) => {
-                    const permission = state.permissions.find(
-                      (candidate) => candidate.id === rolePermission.permissionId,
-                    );
-                    assert.ok(permission);
-
-                    return {
-                      ...rolePermission,
-                      permission,
-                    };
-                  }),
-              },
+              role,
             };
           });
       },

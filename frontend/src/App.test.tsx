@@ -87,10 +87,17 @@ describe('frontend auth shell', () => {
     expect(localStorage.getItem('accessToken')).toBeNull();
   });
 
-  it('stores access token and routes home after successful login', async () => {
+  it('stores access token and routes audience login to concerts after successful profile lookup', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
+      .mockImplementationOnce(() =>
+        mockJsonResponse({
+          id: 'user-1',
+          email: 'audience@example.com',
+          roles: ['AUDIENCE'],
+        }),
+      )
       .mockImplementationOnce(() => mockJsonResponse(createConcerts()));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -101,6 +108,49 @@ describe('frontend auth shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/login', expect.any(Object)));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/me', expect.any(Object)));
+    await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('jwt-token'));
+    expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
+  });
+
+  it('redirects organizer login to organizer dashboard after profile lookup', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
+      .mockImplementationOnce(() =>
+        mockJsonResponse({
+          id: 'user-2',
+          email: 'organizer@example.com',
+          roles: ['ORGANIZER'],
+        }),
+      )
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcerts()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/login');
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'organizer@example.com' } });
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/me', expect.any(Object)));
+    expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
+  });
+
+  it('falls back to concerts when auth profile lookup fails after successful login', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
+      .mockImplementationOnce(() => mockJsonResponse({ message: 'Unauthorized' }, 401))
+      .mockImplementationOnce(() => mockJsonResponse(createConcerts()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/login');
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'audience@example.com' } });
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+
     await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('jwt-token'));
     expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
   });

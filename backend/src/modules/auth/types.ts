@@ -8,6 +8,12 @@ export type AuthenticatedUser = {
   email: string;
 };
 
+export type AuthProfile = {
+  id: string;
+  email: string;
+  roles: string[];
+};
+
 export type PublicUser = {
   id: string;
   email: string;

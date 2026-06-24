@@ -3,7 +3,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { AuthenticatedUser } from './types';
+import { AuthenticatedUser, AuthProfile } from './types';
 
 type AuthenticatedRequest = {
   user: AuthenticatedUser;
@@ -25,7 +25,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  me(@Req() request: AuthenticatedRequest): AuthenticatedUser {
-    return request.user;
+  me(@Req() request: AuthenticatedRequest): Promise<AuthProfile> {
+    return this.authService.getProfile(request.user.id, request.user.email);
   }
 }

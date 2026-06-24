@@ -11,7 +11,7 @@ import { ROLE_CODES } from '../rbac/rbac.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { JwtPayload, PublicUser } from './types';
+import { AuthProfile, JwtPayload, PublicUser } from './types';
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -88,6 +88,27 @@ export class AuthService {
 
     return {
       accessToken: await this.jwtService.signAsync(payload),
+    };
+  }
+
+  async getProfile(userId: string, email: string): Promise<AuthProfile> {
+    const userRoles = await this.prisma.userRole.findMany({
+      where: {
+        userId,
+      },
+      select: {
+        role: {
+          select: {
+            code: true,
+          },
+        },
+      },
+    });
+
+    return {
+      id: userId,
+      email,
+      roles: userRoles.map((userRole) => userRole.role.code),
     };
   }
 }

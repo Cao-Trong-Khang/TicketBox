@@ -7,6 +7,12 @@ export type LoginResponse = {
   accessToken: string;
 };
 
+export type AuthProfile = {
+  id: string;
+  email: string;
+  roles: string[];
+};
+
 export type RegisterInput = {
   displayName: string;
   email: string;
