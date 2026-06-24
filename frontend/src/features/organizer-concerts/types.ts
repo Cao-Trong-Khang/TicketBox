@@ -49,3 +49,42 @@ export type OrganizerConcertFormValues = {
   startsAt: string;
   endsAt: string;
 };
+
+export type OrganizerTicketTypeStatus = 'ACTIVE' | 'INACTIVE' | string;
+
+export type OrganizerTicketType = {
+  id: string;
+  code: string;
+  name: string;
+  priceVnd: number;
+  totalQuantity: number;
+  reservedQuantity: number;
+  soldQuantity: number;
+  availableQuantity: number;
+  perUserLimit: number;
+  saleStartAt: string | null;
+  saleEndAt: string | null;
+  status: OrganizerTicketTypeStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OrganizerTicketTypePayload = {
+  code: string;
+  name: string;
+  priceVnd: number;
+  totalQuantity: number;
+  perUserLimit: number;
+  saleStartAt?: string;
+  saleEndAt?: string;
+};
+
+export type OrganizerTicketTypeFormValues = {
+  code: string;
+  name: string;
+  priceVnd: string;
+  totalQuantity: string;
+  perUserLimit: string;
+  saleStartAt: string;
+  saleEndAt: string;
+};

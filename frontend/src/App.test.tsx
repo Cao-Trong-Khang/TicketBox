@@ -165,7 +165,8 @@ describe('frontend auth shell', () => {
     expect(screen.getByText('TicketBox Artist')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tạo concert' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sửa' })).toBeInTheDocument();
-    expect(screen.getAllByText('Sắp ra mắt')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Quản lý vé' })).toBeInTheDocument();
+    expect(screen.queryByText('Sắp ra mắt')).not.toBeInTheDocument();
   });
 
   it('shows organizer empty state when no concerts are returned', async () => {
@@ -294,6 +295,127 @@ describe('frontend auth shell', () => {
     expect(await screen.findByText('Concert đã được publish.')).toBeInTheDocument();
     expect(screen.getByText('PUBLISHED')).toBeInTheDocument();
   });
+
+  it('renders organizer ticket-type management route with list data', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypes()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
+
+    expect(await screen.findByRole('heading', { name: /Quản lý vé - Organizer Draft Concert/i })).toBeInTheDocument();
+    expect(screen.getByText('Vé thường')).toBeInTheDocument();
+    expect(screen.getByText('500.000 ₫')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Activate' })).toBeInTheDocument();
+  });
+
+  it('validates organizer ticket-type form before submit', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
+
+    await screen.findByRole('heading', { name: /Quản lý vé - Organizer Draft Concert/i });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Tạo loại vé' })[1]);
+
+    expect(await screen.findByText('Vui lòng nhập mã loại vé.')).toBeInTheDocument();
+    expect(screen.getByText('Vui lòng nhập giá vé.')).toBeInTheDocument();
+  });
+
+  it('creates and then activates an organizer ticket type', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse([]))
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypeDetail()))
+      .mockImplementationOnce(() =>
+        mockJsonResponse({
+          ...createOrganizerTicketTypeDetail(),
+          status: 'ACTIVE',
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
+
+    fireEvent.change(await screen.findByLabelText('Mã loại vé'), {
+      target: { value: 'GA' },
+    });
+    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
+      target: { value: 'Vé thường' },
+    });
+    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
+      target: { value: '500000' },
+    });
+    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
+      target: { value: '100' },
+    });
+    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
+      target: { value: '4' },
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Tạo loại vé' })[1]);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types',
+        expect.any(Object),
+      ),
+    );
+    expect(await screen.findByText('Đã tạo loại vé mới. Backend hiện mặc định trạng thái INACTIVE.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types/99999999-9999-4999-8999-999999999999/activate',
+        expect.any(Object),
+      ),
+    );
+    expect(await screen.findByText('Loại vé đã được kích hoạt.')).toBeInTheDocument();
+    expect(screen.getByText('ACTIVE')).toBeInTheDocument();
+  });
+
+  it('updates an organizer ticket type from edit mode', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypes()))
+      .mockImplementationOnce(() =>
+        mockJsonResponse({
+          ...createOrganizerTicketTypeDetail(),
+          name: 'Vé thường cập nhật',
+          totalQuantity: 150,
+          availableQuantity: 145,
+          updatedAt: '2026-06-24T12:00:00.000Z',
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sửa' }));
+    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
+      target: { value: 'Vé thường cập nhật' },
+    });
+    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
+      target: { value: '150' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu loại vé' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types/99999999-9999-4999-8999-999999999999',
+        expect.any(Object),
+      ),
+    );
+    expect(await screen.findByText('Đã cập nhật loại vé.')).toBeInTheDocument();
+    expect(screen.getByText('Vé thường cập nhật')).toBeInTheDocument();
+  });
 });
 
 function createConcerts() {
@@ -342,6 +464,29 @@ function createOrganizerConcertDetail() {
     seatingSvg: '',
     startsAt: '2026-08-20T12:30:00.000Z',
     endsAt: '2026-08-20T15:30:00.000Z',
+    createdAt: '2026-06-24T10:00:00.000Z',
+    updatedAt: '2026-06-24T10:00:00.000Z',
+  };
+}
+
+function createOrganizerTicketTypes() {
+  return [createOrganizerTicketTypeDetail()];
+}
+
+function createOrganizerTicketTypeDetail() {
+  return {
+    id: '99999999-9999-4999-8999-999999999999',
+    code: 'GA',
+    name: 'Vé thường',
+    priceVnd: 500000,
+    totalQuantity: 100,
+    reservedQuantity: 0,
+    soldQuantity: 0,
+    availableQuantity: 100,
+    perUserLimit: 4,
+    saleStartAt: '2026-08-01T03:00:00.000Z',
+    saleEndAt: '2026-08-20T12:00:00.000Z',
+    status: 'INACTIVE',
     createdAt: '2026-06-24T10:00:00.000Z',
     updatedAt: '2026-06-24T10:00:00.000Z',
   };

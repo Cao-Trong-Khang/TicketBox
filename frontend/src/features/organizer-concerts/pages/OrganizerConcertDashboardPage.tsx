@@ -133,9 +133,14 @@ export function OrganizerConcertDashboardPage() {
                   >
                     Sửa
                   </Button>
-                  <Button type="button" className="organizer-placeholder-button" disabled>
+                  <Button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() =>
+                      navigate(`/organizer/concerts/${concert.id}/ticket-types`)
+                    }
+                  >
                     Quản lý vé
-                    <span className="organizer-placeholder-tag">Sắp ra mắt</span>
                   </Button>
                 </div>
               </article>
