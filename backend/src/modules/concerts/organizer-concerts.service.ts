@@ -31,7 +31,7 @@ type OrganizerConcertListQueryResult = {
   updatedAt: Date;
 };
 
-type OrganizerConcertDetailQueryResult = {
+export type OrganizerConcertDetailQueryResult = {
   id: string;
   organizerId: string;
   status: ConcertStatus;
@@ -248,7 +248,7 @@ export class OrganizerConcertsService {
     return this.toOrganizerDetail(publishedConcert);
   }
 
-  private async ensureOrganizerRole(userId: string): Promise<void> {
+  async ensureOrganizerRole(userId: string): Promise<void> {
     const organizerRole = await this.prisma.role.findUnique({
       where: {
         code: ROLE_CODES.organizer,
@@ -277,7 +277,7 @@ export class OrganizerConcertsService {
     }
   }
 
-  private async findOwnedConcertOrThrow(
+  async findOwnedConcertOrThrow(
     organizerId: string,
     concertId: string,
   ): Promise<OrganizerConcertDetailQueryResult> {
