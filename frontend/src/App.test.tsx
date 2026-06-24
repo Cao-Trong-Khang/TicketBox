@@ -163,7 +163,9 @@ describe('frontend auth shell', () => {
     expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
     expect(screen.getByText('Organizer Draft Concert')).toBeInTheDocument();
     expect(screen.getByText('TicketBox Artist')).toBeInTheDocument();
-    expect(screen.getAllByText('Sắp ra mắt')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'Tạo concert' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sửa' })).toBeInTheDocument();
+    expect(screen.getAllByText('Sắp ra mắt')).toHaveLength(1);
   });
 
   it('shows organizer empty state when no concerts are returned', async () => {
@@ -200,6 +202,98 @@ describe('frontend auth shell', () => {
 
     expect(await screen.findByText('Tài khoản này không có quyền organizer')).toBeInTheDocument();
   });
+
+  it('renders the organizer create route and validates required fields', async () => {
+    renderApp('/organizer/concerts/new');
+
+    expect(screen.getByRole('heading', { name: 'Tạo concert mới' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+
+    expect(await screen.findByText('Vui lòng nhập tên concert.')).toBeInTheDocument();
+    expect(screen.getByText('Vui lòng chọn thời gian bắt đầu.')).toBeInTheDocument();
+  });
+
+  it('creates a concert then navigates to edit page when id is available', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/organizer/concerts/new');
+
+    fireEvent.change(screen.getByLabelText('Tên concert'), {
+      target: { value: 'Organizer Draft Concert' },
+    });
+    fireEvent.change(screen.getByLabelText('Nghệ sĩ'), {
+      target: { value: 'TicketBox Artist' },
+    });
+    fireEvent.change(screen.getByLabelText('Địa điểm'), {
+      target: { value: 'TicketBox Arena' },
+    });
+    fireEvent.change(screen.getByLabelText('Địa chỉ'), {
+      target: { value: 'District 1' },
+    });
+    fireEvent.change(screen.getByLabelText('Bắt đầu'), {
+      target: { value: '2026-08-20T19:30' },
+    });
+    fireEvent.change(screen.getByLabelText('Kết thúc'), {
+      target: { value: '2026-08-20T22:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3000/organizer/concerts',
+        expect.any(Object),
+      ),
+    );
+    expect(await screen.findByRole('heading', { name: /Chỉnh sửa Organizer Draft Concert/i })).toBeInTheDocument();
+  });
+
+  it('loads published concert edit page as read-only and shows the MVP note', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        mockJsonResponse({
+          ...createOrganizerConcertDetail(),
+          status: 'PUBLISHED',
+        }),
+      ),
+    );
+
+    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
+
+    expect(await screen.findByText('Concert đã publish, chưa hỗ trợ chỉnh sửa trong MVP.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Lưu thay đổi' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Publish concert' })).not.toBeInTheDocument();
+  });
+
+  it('publishes a draft concert from the edit page', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() =>
+        mockJsonResponse({
+          ...createOrganizerConcertDetail(),
+          status: 'PUBLISHED',
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish concert' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/publish',
+        expect.any(Object),
+      ),
+    );
+    expect(await screen.findByText('Concert đã được publish.')).toBeInTheDocument();
+    expect(screen.getByText('PUBLISHED')).toBeInTheDocument();
+  });
 });
 
 function createConcerts() {
@@ -233,4 +327,22 @@ function createOrganizerConcerts() {
       updatedAt: '2026-06-24T10:00:00.000Z',
     },
   ];
+}
+
+function createOrganizerConcertDetail() {
+  return {
+    id: '77777777-7777-4777-8777-777777777777',
+    status: 'DRAFT',
+    title: 'Organizer Draft Concert',
+    artistName: 'TicketBox Artist',
+    description: 'Draft description',
+    venueName: 'TicketBox Arena',
+    venueAddress: 'District 1',
+    bannerUrl: '',
+    seatingSvg: '',
+    startsAt: '2026-08-20T12:30:00.000Z',
+    endsAt: '2026-08-20T15:30:00.000Z',
+    createdAt: '2026-06-24T10:00:00.000Z',
+    updatedAt: '2026-06-24T10:00:00.000Z',
+  };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
@@ -7,6 +8,7 @@ import { getOrganizerConcerts } from '../api';
 import { OrganizerConcertListItem } from '../types';
 
 export function OrganizerConcertDashboardPage() {
+  const navigate = useNavigate();
   const [concerts, setConcerts] = useState<OrganizerConcertListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -61,9 +63,8 @@ export function OrganizerConcertDashboardPage() {
           </div>
 
           <div className="organizer-toolbar" aria-label="Organizer actions">
-            <Button type="button" className="organizer-placeholder-button" disabled>
+            <Button type="button" onClick={() => navigate('/organizer/concerts/new')}>
               Tạo concert
-              <span className="organizer-placeholder-tag">Sắp ra mắt</span>
             </Button>
           </div>
         </header>
@@ -126,9 +127,11 @@ export function OrganizerConcertDashboardPage() {
                 </div>
 
                 <div className="organizer-concert-actions" aria-label={`Concert actions for ${concert.title}`}>
-                  <Button type="button" className="organizer-placeholder-button" disabled>
+                  <Button
+                    type="button"
+                    onClick={() => navigate(`/organizer/concerts/${concert.id}/edit`)}
+                  >
                     Sửa
-                    <span className="organizer-placeholder-tag">Sắp ra mắt</span>
                   </Button>
                   <Button type="button" className="organizer-placeholder-button" disabled>
                     Quản lý vé
