@@ -1,15 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ConcertStatus, TicketTypeStatus } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { RedisCacheService } from '../redis-cache/redis-cache.service';
-import { PublicConcertDetailDto } from './dto/public-concert-detail.dto';
-import { PublicConcertListItemDto } from './dto/public-concert-list-item.dto';
-import { PublicTicketTypeDto } from './dto/public-ticket-type.dto';
-
-const PUBLIC_CONCERTS_CACHE_KEY = 'concerts:list:published';
-const PUBLIC_CONCERTS_CACHE_TTL_SECONDS = 60;
-const PUBLIC_CONCERT_DETAIL_CACHE_TTL_SECONDS = 300;
-const PUBLIC_TICKET_TYPES_CACHE_TTL_SECONDS = 5;
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConcertStatus, TicketTypeStatus } from "@prisma/client";
+import { PrismaService } from "../../prisma/prisma.service";
+import { RedisCacheService } from "../redis-cache/redis-cache.service";
+import {
+  getPublicConcertDetailCacheKey,
+  getPublicTicketTypesCacheKey,
+  PUBLIC_CONCERT_DETAIL_CACHE_TTL_SECONDS,
+  PUBLIC_CONCERTS_CACHE_KEY,
+  PUBLIC_CONCERTS_CACHE_TTL_SECONDS,
+  PUBLIC_TICKET_TYPES_CACHE_TTL_SECONDS,
+} from "./concerts.cache";
+import { PublicConcertDetailDto } from "./dto/public-concert-detail.dto";
+import { PublicConcertListItemDto } from "./dto/public-concert-list-item.dto";
+import { PublicTicketTypeDto } from "./dto/public-ticket-type.dto";
 
 type PublicConcertQueryResult = {
   id: string;
@@ -78,7 +81,7 @@ export class ConcertsService {
         },
       },
       orderBy: {
-        startsAt: 'asc',
+        startsAt: "asc",
       },
       select: {
         id: true,
@@ -112,7 +115,9 @@ export class ConcertsService {
     return response;
   }
 
-  async findPublishedConcertDetail(concertId: string): Promise<PublicConcertDetailDto> {
+  async findPublishedConcertDetail(
+    concertId: string,
+  ): Promise<PublicConcertDetailDto> {
     const cacheKey = this.getPublicConcertDetailCacheKey(concertId);
     const cached = await this.redisCache.get(cacheKey);
 
@@ -144,7 +149,7 @@ export class ConcertsService {
     });
 
     if (!concert) {
-      throw new NotFoundException('Concert not found');
+      throw new NotFoundException("Concert not found");
     }
 
     const response = this.toPublicDetail(concert);
@@ -158,12 +163,17 @@ export class ConcertsService {
     return response;
   }
 
-  async findPublishedConcertTicketTypes(concertId: string): Promise<PublicTicketTypeDto[]> {
+  async findPublishedConcertTicketTypes(
+    concertId: string,
+  ): Promise<PublicTicketTypeDto[]> {
     const cacheKey = this.getPublicTicketTypesCacheKey(concertId);
     const cached = await this.redisCache.get(cacheKey);
 
     if (cached) {
-      const cachedTicketTypes = await this.tryParseCachedTicketTypes(cacheKey, cached);
+      const cachedTicketTypes = await this.tryParseCachedTicketTypes(
+        cacheKey,
+        cached,
+      );
 
       if (cachedTicketTypes) {
         return cachedTicketTypes;
@@ -180,7 +190,7 @@ export class ConcertsService {
           where: {
             status: TicketTypeStatus.ACTIVE,
           },
-          orderBy: [{ priceVnd: 'asc' }, { code: 'asc' }],
+          orderBy: [{ priceVnd: "asc" }, { code: "asc" }],
           select: {
             id: true,
             code: true,
@@ -198,7 +208,7 @@ export class ConcertsService {
     });
 
     if (!concert) {
-      throw new NotFoundException('Concert not found');
+      throw new NotFoundException("Concert not found");
     }
 
     const response = this.toPublicTicketTypes(concert);
@@ -212,7 +222,9 @@ export class ConcertsService {
     return response;
   }
 
-  private toPublicListItem(concert: PublicConcertQueryResult): PublicConcertListItemDto {
+  private toPublicListItem(
+    concert: PublicConcertQueryResult,
+  ): PublicConcertListItemDto {
     const prices = concert.ticketTypes.map((ticketType) => ticketType.priceVnd);
 
     return {
@@ -229,7 +241,9 @@ export class ConcertsService {
     };
   }
 
-  private toPublicDetail(concert: PublicConcertDetailQueryResult): PublicConcertDetailDto {
+  private toPublicDetail(
+    concert: PublicConcertDetailQueryResult,
+  ): PublicConcertDetailDto {
     return {
       id: concert.id,
       title: concert.title,
@@ -245,10 +259,12 @@ export class ConcertsService {
   }
 
   private getPublicConcertDetailCacheKey(concertId: string): string {
-    return `concerts:detail:${concertId}`;
+    return getPublicConcertDetailCacheKey(concertId);
   }
 
-  private toPublicTicketTypes(concert: PublicTicketTypesQueryResult): PublicTicketTypeDto[] {
+  private toPublicTicketTypes(
+    concert: PublicTicketTypesQueryResult,
+  ): PublicTicketTypeDto[] {
     return concert.ticketTypes.map((ticketType) => ({
       id: ticketType.id,
       code: ticketType.code,
@@ -257,7 +273,9 @@ export class ConcertsService {
       totalQuantity: ticketType.totalQuantity,
       availableQuantity: Math.max(
         0,
-        ticketType.totalQuantity - ticketType.reservedQuantity - ticketType.soldQuantity,
+        ticketType.totalQuantity -
+          ticketType.reservedQuantity -
+          ticketType.soldQuantity,
       ),
       perUserLimit: ticketType.perUserLimit,
       saleStartAt: ticketType.saleStartAt.toISOString(),
@@ -266,7 +284,7 @@ export class ConcertsService {
   }
 
   private getPublicTicketTypesCacheKey(concertId: string): string {
-    return `concerts:${concertId}:ticket-types`;
+    return getPublicTicketTypesCacheKey(concertId);
   }
 
   private async tryParseCachedDetail(
