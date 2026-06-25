@@ -27,6 +27,7 @@ describe('AI artist biography UI', () => {
 
   it('rejects an oversized PDF before upload', async () => {
     localStorage.setItem('accessToken', 'organizer-token');
+    localStorage.setItem('userRoles', JSON.stringify(['ORGANIZER']));
     vi.stubGlobal('fetch', vi.fn(() => json([])));
     renderAt('/admin/concerts/11111111-1111-4111-8111-111111111111/artist-bio');
     const file = new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'press-kit.pdf', { type: 'application/pdf' });

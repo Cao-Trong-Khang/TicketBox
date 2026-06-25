@@ -67,6 +67,7 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
 
     assert.equal(typeof audienceLogin.body.accessToken, 'string');
     assert.equal(typeof audienceLogin.body.refreshToken, 'string');
+    assert.deepEqual(audienceLogin.body.user.roles, [ROLE_CODES.audience]);
     assert.equal(state.refreshTokens.length, 1);
     assert.equal(state.refreshTokens[0].userId, storedUser.id);
     assert.notEqual(state.refreshTokens[0].tokenHash, audienceLogin.body.refreshToken);
@@ -97,6 +98,9 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
     assert.deepEqual(meResponse.body, {
       id: storedUser.id,
       email: storedUser.email,
+      displayName: storedUser.displayName,
+      status: storedUser.status,
+      roles: [ROLE_CODES.audience],
     });
     const refreshResponse = await request(app.getHttpServer())
       .post('/auth/refresh')
@@ -105,6 +109,7 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
 
     assert.equal(typeof refreshResponse.body.accessToken, 'string');
     assert.equal(typeof refreshResponse.body.refreshToken, 'string');
+    assert.deepEqual(refreshResponse.body.user.roles, [ROLE_CODES.audience]);
     assert.notEqual(refreshResponse.body.refreshToken, audienceLogin.body.refreshToken);
     assert.ok(state.refreshTokens[0].revokedAt);
     assert.equal(state.refreshTokens.length, 2);
@@ -143,6 +148,7 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
     replaceUserRoles(state, organizer.id, [ROLE_CODES.organizer]);
 
     const organizerLogin = await login(app, 'organizer@example.com');
+    assert.deepEqual(organizerLogin.user.roles, [ROLE_CODES.organizer]);
 
     await request(app.getHttpServer())
       .get('/rbac-test/concert-create')
@@ -203,7 +209,7 @@ async function createRegisteredUser(app: INestApplication, email: string): Promi
   return response.body as User;
 }
 
-async function login(app: INestApplication, email: string): Promise<{ accessToken: string; refreshToken: string }> {
+async function login(app: INestApplication, email: string): Promise<{ accessToken: string; refreshToken: string; user: { roles: string[] } }> {
   const response = await request(app.getHttpServer())
     .post('/auth/login')
     .send({
@@ -212,7 +218,7 @@ async function login(app: INestApplication, email: string): Promise<{ accessToke
     })
     .expect(201);
 
-  return response.body as { accessToken: string; refreshToken: string };
+  return response.body as { accessToken: string; refreshToken: string; user: { roles: string[] } };
 }
 
 function createSeededState(): TestState {

@@ -3,8 +3,18 @@ export type LoginInput = {
   password: string;
 };
 
+export type AuthUser = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  status: string;
+  roles: string[];
+};
+
 export type LoginResponse = {
   accessToken: string;
+  refreshToken: string;
+  user: AuthUser;
 };
 
 export type RegisterInput = {

@@ -12,7 +12,7 @@ import { ROLE_CODES } from '../rbac/rbac.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { JwtPayload, PublicUser } from './types';
+import { AuthUserProfile, JwtPayload, PublicUser } from './types';
 
 const BCRYPT_SALT_ROUNDS = 12;
 const REFRESH_TOKEN_BYTES = 48;
@@ -21,6 +21,7 @@ const REFRESH_TOKEN_TTL_DAYS = 30;
 type AuthTokens = {
   accessToken: string;
   refreshToken: string;
+  user: AuthUserProfile;
 };
 
 @Injectable()
@@ -103,6 +104,7 @@ export class AuthService {
     return {
       accessToken: await this.signAccessToken(user),
       refreshToken,
+      user: await this.getUserProfile(user.id),
     };
   }
 
@@ -139,6 +141,7 @@ export class AuthService {
     return {
       accessToken: await this.signAccessToken(user),
       refreshToken: nextRefreshToken,
+      user: await this.getUserProfile(user.id),
     };
   }
 
@@ -153,6 +156,27 @@ export class AuthService {
       where: { id: matchedToken.id },
       data: { revokedAt: new Date() },
     });
+  }
+
+  async getUserProfile(userId: string): Promise<AuthUserProfile> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException('User is not active');
+    }
+
+    const userRoles = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: { role: true },
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      status: user.status,
+      roles: userRoles.map((userRole) => userRole.role.code).sort(),
+    };
   }
 
   private async findMatchingRefreshToken(

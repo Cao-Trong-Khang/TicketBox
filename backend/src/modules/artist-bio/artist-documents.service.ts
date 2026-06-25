@@ -28,13 +28,15 @@ export class ArtistDocumentsService {
     await this.assertOwner(user.id, concertId);
     if (!file) throw new BadRequestException('PDF file is required');
     if (file.size > PDF_MAX_BYTES) throw new BadRequestException('PDF must not exceed 10 MB');
-    this.pdfExtractor.assertValidPdf(file.originalname, file.mimetype, file.buffer);
+
+    const fileName = decodeUploadedFileName(file.originalname);
+    this.pdfExtractor.assertValidPdf(fileName, file.mimetype, file.buffer);
 
     const documentId = randomUUID();
     const storageKey = this.storage.buildStorageKey(concertId, documentId);
     await this.storage.upload(storageKey, file.buffer);
     try {
-      await this.prisma.artistDocument.create({ data: { id: documentId, concertId, fileName: file.originalname, storageKey } });
+      await this.prisma.artistDocument.create({ data: { id: documentId, concertId, fileName, storageKey } });
     } catch (error) {
       await this.storage.remove(storageKey).catch(() => undefined);
       throw error;
@@ -114,4 +116,9 @@ export class ArtistDocumentsService {
     const organizer = roles.some(({ role }) => role.code === ROLE_CODES.organizer);
     if (!organizer || !permitted || concert.organizerId !== userId) throw new ForbiddenException('Organizer ownership and concert management permission are required');
   }
+}
+
+function decodeUploadedFileName(fileName: string): string {
+  const decoded = Buffer.from(fileName, 'latin1').toString('utf8');
+  return decoded.includes('\uFFFD') ? fileName : decoded;
 }

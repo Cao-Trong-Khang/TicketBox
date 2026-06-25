@@ -27,10 +27,10 @@ test('PDF cleaning normalizes control characters and whitespace', () => {
   assert.equal(extractor.clean('  Artist\u0000\n\n biography\t here  '), 'Artist biography here');
 });
 
-test('mock AI adapter is deterministic and caps source input at 4000 characters', async () => {
+test('mock AI adapter returns Vietnamese text and caps source input at 4000 characters', async () => {
   const provider = new ArtistBioAiProvider(config());
   const result = await provider.generate(`${'A'.repeat(4000)}SECRET_AFTER_CAP`);
-  assert.match(result, /^Artist biography:/);
+  assert.match(result, /^Tiểu sử nghệ sĩ:/);
   assert.equal(result.includes('SECRET_AFTER_CAP'), false);
 });
 
@@ -96,6 +96,14 @@ test('owned organizer upload persists and publishes before returning uploaded', 
   assert.equal(result.status, 'uploaded');
   assert.equal(harness.created.length, 1);
   assert.equal(harness.published.length, 1);
+});
+test('owned organizer upload decodes Vietnamese PDF file names before storing', async () => {
+  const harness = artistServiceHarness();
+  const mojibakeName = Buffer.from('Chị Đẹp Đạp Gió Rẽ Sóng Live Concert 2026.pdf', 'utf8').toString('latin1');
+  await harness.service.upload({ id: 'owner', email: 'owner@test' }, '11111111-1111-4111-8111-111111111111', {
+    originalname: mojibakeName, mimetype: 'application/pdf', size: 12, buffer: Buffer.from('%PDF-1.4 demo'),
+  });
+  assert.equal((harness.created[0] as { fileName: string }).fileName, 'Chị Đẹp Đạp Gió Rẽ Sóng Live Concert 2026.pdf');
 });
 
 test('non-owner upload is forbidden before storage or publication', async () => {

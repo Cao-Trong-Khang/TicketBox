@@ -87,10 +87,16 @@ describe('frontend auth shell', () => {
     expect(localStorage.getItem('accessToken')).toBeNull();
   });
 
-  it('stores access token and routes home after successful login', async () => {
+  it('stores tokens and routes audience users to concerts after successful login', async () => {
     const fetchMock = vi
       .fn()
-      .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
+      .mockImplementationOnce(() =>
+        mockJsonResponse({
+          accessToken: 'jwt-token',
+          refreshToken: 'refresh-token',
+          user: { id: 'user-1', email: 'audience@example.com', displayName: null, status: 'ACTIVE', roles: ['AUDIENCE'] },
+        }),
+      )
       .mockImplementationOnce(() => mockJsonResponse(createConcerts()));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -102,7 +108,52 @@ describe('frontend auth shell', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/login', expect.any(Object)));
     await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('jwt-token'));
+    expect(localStorage.getItem('refreshToken')).toBe('refresh-token');
+    expect(localStorage.getItem('userRoles')).toBe(JSON.stringify(['AUDIENCE']));
     expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
+  });
+
+  it('routes organizers to the admin dashboard after successful login', async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() =>
+      mockJsonResponse({
+        accessToken: 'organizer-token',
+        refreshToken: 'organizer-refresh-token',
+        user: { id: 'user-2', email: 'organizer@example.com', displayName: null, status: 'ACTIVE', roles: ['ORGANIZER'] },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/login');
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'organizer@example.com' } });
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+
+    await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('organizer-token'));
+    expect(localStorage.getItem('userRoles')).toBe(JSON.stringify(['ORGANIZER']));
+    expect(await screen.findByRole('heading', { name: 'Admin Dashboard' })).toBeInTheDocument();
+  });
+  it('blocks Check-in Staff-only accounts from the web app', async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() =>
+      mockJsonResponse({
+        accessToken: 'staff-token',
+        refreshToken: 'staff-refresh-token',
+        user: { id: 'user-3', email: 'staff@example.com', displayName: null, status: 'ACTIVE', roles: ['CHECKIN_STAFF'] },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/login');
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'staff@example.com' } });
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/login', expect.any(Object)));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('accessToken')).toBeNull();
+    expect(localStorage.getItem('refreshToken')).toBeNull();
+    expect(localStorage.getItem('userRoles')).toBeNull();
   });
 });
 
