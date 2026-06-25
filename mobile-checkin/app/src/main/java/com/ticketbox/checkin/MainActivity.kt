@@ -76,6 +76,7 @@ import com.ticketbox.checkin.domain.syncQueueStatus
 import com.ticketbox.checkin.domain.vipGuestTypes
 import com.ticketbox.checkin.domain.vipSponsors
 import com.ticketbox.checkin.sync.CheckInSyncWorker
+import com.ticketbox.checkin.ui.scan.QrCameraPreview
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -711,6 +712,8 @@ internal fun ScanScreen(
     val scope = rememberCoroutineScope()
     var payload by remember { mutableStateOf("") }
     var flashEnabled by remember { mutableStateOf(false) }
+    var scanningEnabled by remember { mutableStateOf(true) }
+    var isValidating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
@@ -722,25 +725,33 @@ internal fun ScanScreen(
         item { EventHeader(assignment) }
         item { StatusBanner(if (isOnline) "Online" else "Offline") }
         item {
-            Box(
+            QrCameraPreview(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(220.dp)
-                    .background(Color(0xFF111827), RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("QR Scan Area", color = Color.White, style = MaterialTheme.typography.titleLarge)
-            }
+                    .height(260.dp),
+                torchEnabled = flashEnabled,
+                scanningEnabled = scanningEnabled && !isValidating,
+                onQrDetected = { scannedValue ->
+                    payload = scannedValue
+                    scanningEnabled = false
+                    error = null
+                },
+                onCameraError = { message ->
+                    error = message
+                },
+            )
         }
         item {
             OutlinedTextField(
                 value = payload,
-                onValueChange = {
-                    payload = it
+                onValueChange = { value ->
+                    payload = value
+                    scanningEnabled = value.isBlank()
                     error = null
                 },
                 label = { Text("Scanned QR or ticket code") },
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
             )
         }
         item {
@@ -749,7 +760,7 @@ internal fun ScanScreen(
                     modifier = Modifier.weight(1f).height(52.dp),
                     onClick = { flashEnabled = !flashEnabled },
                 ) {
-                    Text(if (flashEnabled) "Flash On" else "Flash Off")
+                    Text(if (flashEnabled) "Turn Flash Off" else "Turn Flash On")
                 }
                 OutlinedButton(
                     modifier = Modifier.weight(1f).height(52.dp),
@@ -762,25 +773,34 @@ internal fun ScanScreen(
         item {
             Button(
                 modifier = Modifier.fillMaxWidth().height(56.dp),
-                enabled = payload.isNotBlank(),
+                enabled = payload.isNotBlank() && !isValidating,
                 onClick = {
                     val input = payload.trim()
                     if (input.isBlank()) {
                         error = "Enter or scan a code"
                         return@Button
                     }
+
                     scope.launch {
-                        val outcome = repository.recordScan(
-                            concertId = assignment.concertId,
-                            payload = input,
-                            gateName = assignment.gateName,
-                        )
-                        payload = ""
-                        onShowResult(outcome)
+                        isValidating = true
+                        runCatching {
+                            repository.recordScan(
+                                concertId = assignment.concertId,
+                                payload = input,
+                                gateName = assignment.gateName,
+                            )
+                        }.onSuccess { outcome ->
+                            payload = ""
+                            onShowResult(outcome)
+                        }.onFailure { throwable ->
+                            error = throwable.message ?: "Could not validate QR code"
+                            scanningEnabled = true
+                        }
+                        isValidating = false
                     }
                 },
             ) {
-                Text("Validate")
+                Text(if (isValidating) "Validating..." else "Validate")
             }
         }
         error?.let { message ->
