@@ -59,6 +59,7 @@ services:
       DATABASE_URL: postgresql://ticketbox:ticketbox@postgres:5432/ticketbox?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
       JWT_ACCESS_SECRET: local-development-jwt-secret
       JWT_ACCESS_TOKEN_TTL: 1h
@@ -96,6 +97,7 @@ services:
       DATABASE_URL: postgresql://ticketbox:ticketbox@postgres:5432/ticketbox?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
       JWT_ACCESS_SECRET: local-development-jwt-secret
       JWT_ACCESS_TOKEN_TTL: 1h
