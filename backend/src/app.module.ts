@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 import { AppConfigModule } from './config/app-config.module';
+import { AuditLogModule } from './modules/audit/audit-log.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ArtistBioModule } from './modules/artist-bio/artist-bio.module';
 import { CheckInModule } from './modules/check-in/check-in.module';
@@ -21,6 +22,7 @@ import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
     AppConfigModule,
     RedisCacheModule,
     ScheduleModule.forRoot(),
+    AuditLogModule,
     AuthModule,
     ArtistBioModule,
     RbacModule,
