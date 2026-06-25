@@ -12,6 +12,7 @@ import { ROLE_CODES } from "../rbac/rbac.constants";
 import { RedisCacheService } from "../redis-cache/redis-cache.service";
 import {
   getPublicConcertDetailCacheKey,
+  getPublicTicketTypesCacheKey,
   PUBLIC_CONCERTS_CACHE_KEY,
 } from "./concerts.cache";
 import { OrganizerConcertCreateDto } from "./dto/organizer-concert-create.dto";
@@ -47,6 +48,8 @@ export type OrganizerConcertDetailQueryResult = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+type OrganizerConcertLifecycleStatus = "UPCOMING" | "ONGOING" | "ENDED";
 
 @Injectable()
 export class OrganizerConcertsService {
@@ -98,7 +101,7 @@ export class OrganizerConcertsService {
     const concert = await this.prisma.concert.create({
       data: {
         organizerId,
-        status: ConcertStatus.DRAFT,
+        status: ConcertStatus.PUBLISHED,
         title: dto.title,
         artistName: dto.artistName,
         description: dto.description ?? null,
@@ -127,6 +130,8 @@ export class OrganizerConcertsService {
       },
     });
 
+    await this.invalidatePublicConcertListCache();
+
     return this.toOrganizerDetail(concert);
   }
 
@@ -150,10 +155,7 @@ export class OrganizerConcertsService {
     this.assertNoNullForRequiredPatchFields(dto);
 
     const concert = await this.findOwnedConcertOrThrow(organizerId, concertId);
-
-    if (concert.status !== ConcertStatus.DRAFT) {
-      throw new ConflictException("Only draft concerts can be updated");
-    }
+    this.assertConcertEditable(concert);
 
     const startsAt = dto.startsAt
       ? this.parseDateString(dto.startsAt, "startsAt")
@@ -201,29 +203,26 @@ export class OrganizerConcertsService {
       },
     });
 
+    await this.invalidatePublicConcertCache(concertId);
+
     return this.toOrganizerDetail(updatedConcert);
   }
 
-  async publishOwnedConcert(
+  async cancelOwnedConcert(
     organizerId: string,
     concertId: string,
   ): Promise<OrganizerConcertDetailDto> {
     await this.ensureOrganizerRole(organizerId);
 
     const concert = await this.findOwnedConcertOrThrow(organizerId, concertId);
+    this.assertConcertCancelable(concert);
 
-    if (concert.status === ConcertStatus.PUBLISHED) {
-      throw new ConflictException("Concert is already published");
-    }
-
-    this.assertPublishReady(concert);
-
-    const publishedConcert = await this.prisma.concert.update({
+    const cancelledConcert = await this.prisma.concert.update({
       where: {
         id: concertId,
       },
       data: {
-        status: ConcertStatus.PUBLISHED,
+        status: ConcertStatus.CANCELLED,
       },
       select: {
         id: true,
@@ -243,9 +242,9 @@ export class OrganizerConcertsService {
       },
     });
 
-    await this.invalidatePublishedConcertCache(concertId);
+    await this.invalidatePublicConcertCache(concertId);
 
-    return this.toOrganizerDetail(publishedConcert);
+    return this.toOrganizerDetail(cancelledConcert);
   }
 
   async ensureOrganizerRole(userId: string): Promise<void> {
@@ -346,38 +345,47 @@ export class OrganizerConcertsService {
     }
   }
 
-  private assertPublishReady(concert: OrganizerConcertDetailQueryResult): void {
-    const requiredTextFields = [
-      ["title", concert.title],
-      ["artistName", concert.artistName],
-      ["venueName", concert.venueName],
-      ["venueAddress", concert.venueAddress],
-    ] as const;
-
-    for (const [fieldName, value] of requiredTextFields) {
-      if (!value || value.trim().length === 0) {
-        throw new BadRequestException(
-          `${fieldName} is required before publish`,
-        );
-      }
+  private assertConcertEditable(
+    concert: OrganizerConcertDetailQueryResult,
+  ): void {
+    if (concert.status === ConcertStatus.CANCELLED) {
+      throw new ConflictException("Concert đã hủy nên không thể chỉnh sửa.");
     }
 
-    this.assertValidDateRange(concert.startsAt, concert.endsAt);
-
-    if (concert.startsAt <= new Date()) {
-      throw new BadRequestException(
-        "startsAt must be in the future before publish",
+    if (this.getLifecycleStatus(concert) !== "UPCOMING") {
+      throw new ConflictException(
+        "Concert đang diễn ra hoặc đã kết thúc nên không thể chỉnh sửa.",
       );
     }
   }
 
-  private async invalidatePublishedConcertCache(
-    concertId: string,
-  ): Promise<void> {
-    const cacheKeys = [
+  private assertConcertCancelable(
+    concert: OrganizerConcertDetailQueryResult,
+  ): void {
+    if (concert.status === ConcertStatus.CANCELLED) {
+      throw new ConflictException("Concert đã hủy nên không thể hủy.");
+    }
+
+    if (this.getLifecycleStatus(concert) !== "UPCOMING") {
+      throw new ConflictException(
+        "Concert đang diễn ra hoặc đã kết thúc nên không thể hủy.",
+      );
+    }
+  }
+
+  private async invalidatePublicConcertListCache(): Promise<void> {
+    await this.invalidateCacheKeys([PUBLIC_CONCERTS_CACHE_KEY]);
+  }
+
+  private async invalidatePublicConcertCache(concertId: string): Promise<void> {
+    await this.invalidateCacheKeys([
       PUBLIC_CONCERTS_CACHE_KEY,
       getPublicConcertDetailCacheKey(concertId),
-    ];
+      getPublicTicketTypesCacheKey(concertId),
+    ]);
+  }
+
+  private async invalidateCacheKeys(cacheKeys: string[]): Promise<void> {
     const results = await Promise.allSettled(
       cacheKeys.map((cacheKey) => this.redisCache.del(cacheKey)),
     );
@@ -395,12 +403,30 @@ export class OrganizerConcertsService {
     }
   }
 
+  private getLifecycleStatus(
+    concert: Pick<OrganizerConcertDetailQueryResult, "startsAt" | "endsAt">,
+    now = new Date(),
+  ): OrganizerConcertLifecycleStatus {
+    const endsAt = concert.endsAt ?? concert.startsAt;
+
+    if (now < concert.startsAt) {
+      return "UPCOMING";
+    }
+
+    if (now <= endsAt) {
+      return "ONGOING";
+    }
+
+    return "ENDED";
+  }
+
   private toOrganizerListItem(
     concert: OrganizerConcertListQueryResult,
   ): OrganizerConcertListItemDto {
     return {
       id: concert.id,
       status: concert.status,
+      lifecycleStatus: this.getLifecycleStatus(concert),
       title: concert.title,
       artistName: concert.artistName,
       venueName: concert.venueName,
@@ -417,6 +443,7 @@ export class OrganizerConcertsService {
     return {
       id: concert.id,
       status: concert.status,
+      lifecycleStatus: this.getLifecycleStatus(concert),
       title: concert.title,
       artistName: concert.artistName,
       description: concert.description,

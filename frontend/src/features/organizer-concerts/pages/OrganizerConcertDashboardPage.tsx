@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
-import { getOrganizerConcerts } from '../api';
+import { cancelOrganizerConcert, getOrganizerConcerts } from '../api';
 import { OrganizerConcertListItem } from '../types';
 
 export function OrganizerConcertDashboardPage() {
@@ -12,6 +12,9 @@ export function OrganizerConcertDashboardPage() {
   const [concerts, setConcerts] = useState<OrganizerConcertListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
+  const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -42,6 +45,7 @@ export function OrganizerConcertDashboardPage() {
   const fetchConcerts = async () => {
     setIsLoading(true);
     setError(null);
+    setActionError(null);
 
     try {
       setConcerts(await getOrganizerConcerts());
@@ -49,6 +53,33 @@ export function OrganizerConcertDashboardPage() {
       setError(toApiError(err));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCancel = async (concertId: string) => {
+    setActionError(null);
+    setFeedback(null);
+    setPendingCancelId(concertId);
+
+    try {
+      const cancelledConcert = await cancelOrganizerConcert(concertId);
+      setConcerts((current) =>
+        current.map((concert) =>
+          concert.id === concertId
+            ? {
+                ...concert,
+                status: cancelledConcert.status,
+                lifecycleStatus: cancelledConcert.lifecycleStatus,
+                updatedAt: cancelledConcert.updatedAt,
+              }
+            : concert,
+        ),
+      );
+      setFeedback('Concert đã được hủy.');
+    } catch (err: unknown) {
+      setActionError(toApiError(err));
+    } finally {
+      setPendingCancelId(null);
     }
   };
 
@@ -95,6 +126,11 @@ export function OrganizerConcertDashboardPage() {
           </div>
         )}
 
+        {!isLoading && !error && feedback && <Alert tone="success">{feedback}</Alert>}
+        {!isLoading && !error && actionError && (
+          <Alert tone="error">{toActionErrorMessage(actionError)}</Alert>
+        )}
+
         {!isLoading && !error && concerts.length === 0 && (
           <div className="organizer-dashboard-note">
             <p>Bạn chưa có concert nào trong kênh organizer.</p>
@@ -110,9 +146,9 @@ export function OrganizerConcertDashboardPage() {
                     <div className="organizer-concert-card-topline">
                       <h2>{concert.title}</h2>
                       <span
-                        className={`organizer-status organizer-status--${concert.status.toLowerCase()}`}
+                        className={`organizer-status organizer-status--${getOrganizerStatusVariant(concert)}`}
                       >
-                        {concert.status}
+                        {getOrganizerStatusLabel(concert)}
                       </span>
                     </div>
                     <p className="organizer-concert-subtitle">
@@ -129,18 +165,18 @@ export function OrganizerConcertDashboardPage() {
                 <div className="organizer-concert-actions" aria-label={`Concert actions for ${concert.title}`}>
                   <Button
                     type="button"
+                    disabled={!canEditConcert(concert)}
                     onClick={() => navigate(`/organizer/concerts/${concert.id}/edit`)}
                   >
                     Sửa
                   </Button>
                   <Button
                     type="button"
-                    className="button-secondary"
-                    onClick={() =>
-                      navigate(`/organizer/concerts/${concert.id}/ticket-types`)
-                    }
+                    className="button-danger"
+                    disabled={!canCancelConcert(concert) || pendingCancelId === concert.id}
+                    onClick={() => void handleCancel(concert.id)}
                   >
-                    Quản lý vé
+                    {pendingCancelId === concert.id ? 'Đang hủy...' : 'Hủy'}
                   </Button>
                 </div>
               </article>
@@ -169,6 +205,66 @@ function formatDateRange(startsAt: string, endsAt: string | null): string {
   }
 
   return `${startLabel} - ${formatter.format(new Date(endsAt))}`;
+}
+
+function canEditConcert(concert: OrganizerConcertListItem): boolean {
+  return concert.status !== 'CANCELLED' && concert.lifecycleStatus === 'UPCOMING';
+}
+
+function canCancelConcert(concert: OrganizerConcertListItem): boolean {
+  return concert.status !== 'CANCELLED' && concert.lifecycleStatus === 'UPCOMING';
+}
+
+function getOrganizerStatusLabel(concert: OrganizerConcertListItem): string {
+  if (concert.status === 'CANCELLED') {
+    return 'Đã hủy';
+  }
+
+  if (concert.lifecycleStatus === 'ONGOING') {
+    return 'Đang diễn ra';
+  }
+
+  if (concert.lifecycleStatus === 'ENDED') {
+    return 'Đã kết thúc';
+  }
+
+  return 'Sắp diễn ra';
+}
+
+function getOrganizerStatusVariant(concert: OrganizerConcertListItem): string {
+  if (concert.status === 'CANCELLED') {
+    return 'cancelled';
+  }
+
+  if (concert.lifecycleStatus === 'ONGOING') {
+    return 'ongoing';
+  }
+
+  if (concert.lifecycleStatus === 'ENDED') {
+    return 'ended';
+  }
+
+  return 'upcoming';
+}
+
+function toActionErrorMessage(error: ApiError): string {
+  if (error.status === 401) {
+    return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+  }
+
+  if (error.status === 403) {
+    return 'Tài khoản này không có quyền organizer.';
+  }
+
+  if (error.status === 404) {
+    return 'Không tìm thấy concert organizer này.';
+  }
+
+  if (error.status === 409) {
+    return error.message || 'Concert đang ở trạng thái không thể hủy.';
+  }
+
+  return error.message || 'Không thể cập nhật concert lúc này.';
 }
 
 function toApiError(error: unknown): ApiError {

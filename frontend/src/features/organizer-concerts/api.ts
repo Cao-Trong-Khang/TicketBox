@@ -36,10 +36,10 @@ export function updateOrganizerConcert(
   });
 }
 
-export function publishOrganizerConcert(
+export function cancelOrganizerConcert(
   id: string,
 ): Promise<OrganizerConcertDetail> {
-  return apiFetch<OrganizerConcertDetail>(`/organizer/concerts/${id}/publish`, {
+  return apiFetch<OrganizerConcertDetail>(`/organizer/concerts/${id}/cancel`, {
     method: 'POST',
   });
 }

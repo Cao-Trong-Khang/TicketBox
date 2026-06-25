@@ -52,7 +52,11 @@ export function OrganizerConcertCreatePage() {
           await activateOrganizerTicketType(createdConcert.id, createdTicketType.id);
         }
 
-        navigate(`/organizer/concerts/${createdConcert.id}/edit`);
+        navigate(`/organizer/concerts/${createdConcert.id}/edit`, {
+          state: {
+            feedback: 'Concert đã được tạo và hiển thị công khai. Bạn có thể tiếp tục quản lý vé tại đây.',
+          },
+        });
       } catch (ticketError: unknown) {
         setRecoveryConcertId(createdConcert.id);
         setError(
@@ -89,7 +93,7 @@ export function OrganizerConcertCreatePage() {
           <div>
             <p className="eyebrow">Kênh organizer</p>
             <h1 id="organizer-create-title">Tạo concert mới</h1>
-            <p>Bắt đầu bằng một bản nháp concert để tiếp tục hoàn thiện và publish sau.</p>
+            <p>Tạo concert và đưa lên public ngay khi hoàn tất thông tin cùng cấu hình vé ban đầu.</p>
           </div>
           <Link to="/organizer/concerts" className="organizer-dashboard-link">
             Quay lại dashboard

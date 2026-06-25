@@ -16,7 +16,7 @@ type TestState = {
   userRoles: UserRole[];
 };
 
-test("organizer list returns only owned concerts ordered by createdAt descending", async () => {
+test("organizer list returns only owned concerts ordered by createdAt descending with lifecycle status", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
   const otherOrganizerId = "00000000-0000-4000-8000-000000000002";
   const state = createState({
@@ -24,13 +24,18 @@ test("organizer list returns only owned concerts ordered by createdAt descending
       createConcert({
         id: "11111111-1111-4111-8111-111111111111",
         organizerId,
-        title: "Newer Draft",
+        title: "Upcoming Concert",
+        startsAt: new Date("2099-07-02T10:00:00.000Z"),
+        endsAt: new Date("2099-07-02T13:00:00.000Z"),
         createdAt: new Date("2026-07-02T10:00:00.000Z"),
       }),
       createConcert({
         id: "22222222-2222-4222-8222-222222222222",
         organizerId,
-        title: "Older Draft",
+        title: "Cancelled Concert",
+        status: ConcertStatus.CANCELLED,
+        startsAt: new Date("2099-07-01T10:00:00.000Z"),
+        endsAt: new Date("2099-07-01T13:00:00.000Z"),
         createdAt: new Date("2026-07-01T10:00:00.000Z"),
       }),
       createConcert({
@@ -52,7 +57,10 @@ test("organizer list returns only owned concerts ordered by createdAt descending
       "22222222-2222-4222-8222-222222222222",
     ],
   );
-  assert.equal(response[0].status, ConcertStatus.DRAFT);
+  assert.equal(response[0].status, ConcertStatus.PUBLISHED);
+  assert.equal(response[0].lifecycleStatus, "UPCOMING");
+  assert.equal(response[1].status, ConcertStatus.CANCELLED);
+  assert.equal(response[1].lifecycleStatus, "UPCOMING");
 });
 
 test("non-organizer is forbidden from organizer concert endpoints", async () => {
@@ -68,36 +76,42 @@ test("non-organizer is forbidden from organizer concert endpoints", async () => 
   );
 });
 
-test("organizer create stores a DRAFT concert with organizer ownership and no ticket types", async () => {
+test("organizer create stores a PUBLISHED concert, keeps organizer ownership, and invalidates public list cache", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
   const state = createState({
     userRoles: [createUserRole(organizerId, "role-organizer")],
   });
   const createdPayloads: Array<Record<string, unknown>> = [];
+  const deletedKeys: string[] = [];
   const service = createService(state, {
     onCreate: ({ data }) => {
       createdPayloads.push(data as Record<string, unknown>);
     },
+    redis: {
+      del: async (key: string) => {
+        deletedKeys.push(key);
+      },
+    },
   });
 
   const response = await service.createConcert(organizerId, {
-    title: "Organizer Draft Concert",
+    title: "Organizer Public Concert",
     artistName: "TicketBox Artist",
-    description: "Draft description",
+    description: "Public description",
     venueName: "TicketBox Arena",
     venueAddress: "District 1",
     bannerUrl: "https://example.test/banner.jpg",
     seatingSvg: "<svg />",
-    startsAt: "2026-08-01T12:00:00.000Z",
-    endsAt: "2026-08-01T15:00:00.000Z",
+    startsAt: "2099-08-01T12:00:00.000Z",
+    endsAt: "2099-08-01T15:00:00.000Z",
   });
 
   assert.equal(createdPayloads.length, 1);
   assert.equal(createdPayloads[0].organizerId, organizerId);
-  assert.equal(createdPayloads[0].status, ConcertStatus.DRAFT);
-  assert.equal(createdPayloads[0].ticketTypes, undefined);
-  assert.equal(response.status, ConcertStatus.DRAFT);
-  assert.equal(response.venueAddress, "District 1");
+  assert.equal(createdPayloads[0].status, ConcertStatus.PUBLISHED);
+  assert.equal(response.status, ConcertStatus.PUBLISHED);
+  assert.equal(response.lifecycleStatus, "UPCOMING");
+  assert.deepEqual(deletedKeys, ["concerts:list:published"]);
 });
 
 test("organizer create rejects invalid date range", async () => {
@@ -147,56 +161,125 @@ test("organizer detail returns 404 for missing or foreign concert", async () => 
   );
 });
 
-test("organizer can update owned DRAFT concert and update rejects published concerts", async () => {
+test("organizer can update upcoming owned concert and update invalidates public caches", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
-  const draftConcertId = "55555555-5555-4555-8555-555555555555";
-  const publishedConcertId = "66666666-6666-4666-8666-666666666666";
+  const concertId = "55555555-5555-4555-8555-555555555555";
+  const deletedKeys: string[] = [];
   const state = createState({
     concerts: [
       createConcert({
-        id: draftConcertId,
+        id: concertId,
         organizerId,
-        title: "Original Draft",
-        startsAt: new Date("2026-08-01T12:00:00.000Z"),
-        endsAt: new Date("2026-08-01T15:00:00.000Z"),
-      }),
-      createConcert({
-        id: publishedConcertId,
-        organizerId,
-        status: ConcertStatus.PUBLISHED,
+        title: "Original Concert",
+        startsAt: new Date("2099-08-01T12:00:00.000Z"),
+        endsAt: new Date("2099-08-01T15:00:00.000Z"),
       }),
     ],
     userRoles: [createUserRole(organizerId, "role-organizer")],
   });
-  const service = createService(state);
-
-  const updated = await service.updateOwnedConcert(
-    organizerId,
-    draftConcertId,
-    {
-      title: "Updated Draft",
-      endsAt: "2026-08-01T16:00:00.000Z",
+  const service = createService(state, {
+    redis: {
+      del: async (key: string) => {
+        deletedKeys.push(key);
+      },
     },
-  );
+  });
 
-  assert.equal(updated.title, "Updated Draft");
-  assert.equal(updated.endsAt, "2026-08-01T16:00:00.000Z");
+  const updated = await service.updateOwnedConcert(organizerId, concertId, {
+    title: "Updated Concert",
+    endsAt: "2099-08-01T16:00:00.000Z",
+  });
+
+  assert.equal(updated.title, "Updated Concert");
+  assert.equal(updated.endsAt, "2099-08-01T16:00:00.000Z");
+  assert.deepEqual(deletedKeys, [
+    "concerts:list:published",
+    `concerts:detail:${concertId}`,
+    `concerts:${concertId}:ticket-types`,
+  ]);
+});
+
+test("organizer update rejects ongoing, ended, and cancelled concerts with clear messages", async () => {
+  const organizerId = "00000000-0000-4000-8000-000000000001";
+  const ongoingConcertId = "66666666-6666-4666-8666-666666666666";
+  const endedConcertId = "77777777-7777-4777-8777-777777777777";
+  const cancelledConcertId = "88888888-8888-4888-8888-888888888888";
+  const service = createService(
+    createState({
+      concerts: [
+        createConcert({
+          id: ongoingConcertId,
+          organizerId,
+          startsAt: new Date("2000-08-01T12:00:00.000Z"),
+          endsAt: new Date("2999-08-01T15:00:00.000Z"),
+        }),
+        createConcert({
+          id: endedConcertId,
+          organizerId,
+          startsAt: new Date("2000-08-01T12:00:00.000Z"),
+          endsAt: new Date("2000-08-01T15:00:00.000Z"),
+        }),
+        createConcert({
+          id: cancelledConcertId,
+          organizerId,
+          status: ConcertStatus.CANCELLED,
+          startsAt: new Date("2099-08-01T12:00:00.000Z"),
+          endsAt: new Date("2099-08-01T15:00:00.000Z"),
+        }),
+      ],
+      userRoles: [createUserRole(organizerId, "role-organizer")],
+    }),
+  );
 
   await assert.rejects(
     () =>
-      service.updateOwnedConcert(organizerId, publishedConcertId, {
+      service.updateOwnedConcert(organizerId, ongoingConcertId, {
+        title: "Nope",
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(
+        error.message,
+        "Concert đang diễn ra hoặc đã kết thúc nên không thể chỉnh sửa.",
+      );
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    () =>
+      service.updateOwnedConcert(organizerId, endedConcertId, {
         title: "Nope",
       }),
     ConflictException,
+  );
+
+  await assert.rejects(
+    () =>
+      service.updateOwnedConcert(organizerId, cancelledConcertId, {
+        title: "Nope",
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(error.message, "Concert đã hủy nên không thể chỉnh sửa.");
+      return true;
+    },
   );
 });
 
 test("organizer update rejects invalid patch values and invalid date ranges", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
-  const concertId = "77777777-7777-4777-8777-777777777777";
+  const concertId = "99999999-9999-4999-8999-999999999999";
   const service = createService(
     createState({
-      concerts: [createConcert({ id: concertId, organizerId })],
+      concerts: [
+        createConcert({
+          id: concertId,
+          organizerId,
+          startsAt: new Date("2099-08-01T12:00:00.000Z"),
+          endsAt: new Date("2099-08-01T15:00:00.000Z"),
+        }),
+      ],
       userRoles: [createUserRole(organizerId, "role-organizer")],
     }),
   );
@@ -212,16 +295,16 @@ test("organizer update rejects invalid patch values and invalid date ranges", as
   await assert.rejects(
     () =>
       service.updateOwnedConcert(organizerId, concertId, {
-        startsAt: "2026-08-01T18:00:00.000Z",
-        endsAt: "2026-08-01T17:00:00.000Z",
+        startsAt: "2099-08-01T18:00:00.000Z",
+        endsAt: "2099-08-01T17:00:00.000Z",
       }),
     BadRequestException,
   );
 });
 
-test("organizer publish sets concert to PUBLISHED and invalidates public cache keys", async () => {
+test("organizer cancel marks upcoming concert as CANCELLED and invalidates public caches", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
-  const concertId = "88888888-8888-4888-8888-888888888888";
+  const concertId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const deletedKeys: string[] = [];
   const service = createService(
     createState({
@@ -229,10 +312,6 @@ test("organizer publish sets concert to PUBLISHED and invalidates public cache k
         createConcert({
           id: concertId,
           organizerId,
-          title: "Ready to Publish",
-          artistName: "Artist",
-          venueName: "Venue",
-          venueAddress: "Address",
           startsAt: new Date("2099-08-01T12:00:00.000Z"),
           endsAt: new Date("2099-08-01T15:00:00.000Z"),
         }),
@@ -248,33 +327,41 @@ test("organizer publish sets concert to PUBLISHED and invalidates public cache k
     },
   );
 
-  const response = await service.publishOwnedConcert(organizerId, concertId);
+  const response = await service.cancelOwnedConcert(organizerId, concertId);
 
-  assert.equal(response.status, ConcertStatus.PUBLISHED);
+  assert.equal(response.status, ConcertStatus.CANCELLED);
+  assert.equal(response.lifecycleStatus, "UPCOMING");
   assert.deepEqual(deletedKeys, [
     "concerts:list:published",
     `concerts:detail:${concertId}`,
+    `concerts:${concertId}:ticket-types`,
   ]);
 });
 
-test("organizer publish rejects incomplete or already published concerts", async () => {
+test("organizer cancel rejects ongoing, ended, and cancelled concerts", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
-  const incompleteConcertId = "99999999-9999-4999-8999-999999999999";
-  const publishedConcertId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const ongoingConcertId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const endedConcertId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const cancelledConcertId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
   const service = createService(
     createState({
       concerts: [
         createConcert({
-          id: incompleteConcertId,
+          id: ongoingConcertId,
           organizerId,
-          artistName: null,
-          startsAt: new Date("2099-08-01T12:00:00.000Z"),
-          endsAt: new Date("2099-08-01T15:00:00.000Z"),
+          startsAt: new Date("2000-08-01T12:00:00.000Z"),
+          endsAt: new Date("2999-08-01T15:00:00.000Z"),
         }),
         createConcert({
-          id: publishedConcertId,
+          id: endedConcertId,
           organizerId,
-          status: ConcertStatus.PUBLISHED,
+          startsAt: new Date("2000-08-01T12:00:00.000Z"),
+          endsAt: new Date("2000-08-01T15:00:00.000Z"),
+        }),
+        createConcert({
+          id: cancelledConcertId,
+          organizerId,
+          status: ConcertStatus.CANCELLED,
           startsAt: new Date("2099-08-01T12:00:00.000Z"),
           endsAt: new Date("2099-08-01T15:00:00.000Z"),
         }),
@@ -284,19 +371,35 @@ test("organizer publish rejects incomplete or already published concerts", async
   );
 
   await assert.rejects(
-    () => service.publishOwnedConcert(organizerId, incompleteConcertId),
-    BadRequestException,
+    () => service.cancelOwnedConcert(organizerId, ongoingConcertId),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(
+        error.message,
+        "Concert đang diễn ra hoặc đã kết thúc nên không thể hủy.",
+      );
+      return true;
+    },
   );
 
   await assert.rejects(
-    () => service.publishOwnedConcert(organizerId, publishedConcertId),
+    () => service.cancelOwnedConcert(organizerId, endedConcertId),
     ConflictException,
+  );
+
+  await assert.rejects(
+    () => service.cancelOwnedConcert(organizerId, cancelledConcertId),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(error.message, "Concert đã hủy nên không thể hủy.");
+      return true;
+    },
   );
 });
 
-test("organizer publish still succeeds when Redis invalidation fails", async () => {
+test("organizer update still succeeds when Redis invalidation fails", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
-  const concertId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const concertId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
   const service = createService(
     createState({
       concerts: [
@@ -318,9 +421,11 @@ test("organizer publish still succeeds when Redis invalidation fails", async () 
     },
   );
 
-  const response = await service.publishOwnedConcert(organizerId, concertId);
+  const response = await service.updateOwnedConcert(organizerId, concertId, {
+    title: "Updated With Redis Failure",
+  });
 
-  assert.equal(response.status, ConcertStatus.PUBLISHED);
+  assert.equal(response.title, "Updated With Redis Failure");
 });
 
 function createService(
@@ -368,7 +473,7 @@ function createService(
         options?.onCreate?.({ data });
         const now = new Date("2026-06-20T10:00:00.000Z");
         const createdConcert = createConcert({
-          id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
           organizerId: data.organizerId as string,
           status: data.status as ConcertStatus,
           title: data.title as string,
@@ -482,10 +587,10 @@ function createUserRole(userId: string, roleId: string): UserRole {
 
 function createConcert(overrides?: Partial<Concert>): Concert {
   return {
-    id: overrides?.id ?? "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    id: overrides?.id ?? "11111111-1111-4111-8111-111111111111",
     organizerId:
       overrides?.organizerId ?? "00000000-0000-4000-8000-000000000001",
-    title: overrides?.title ?? "Draft Concert",
+    title: overrides?.title ?? "Public Concert",
     artistName:
       overrides && "artistName" in overrides
         ? (overrides.artistName ?? null)
@@ -493,7 +598,7 @@ function createConcert(overrides?: Partial<Concert>): Concert {
     description:
       overrides && "description" in overrides
         ? (overrides.description ?? null)
-        : "Organizer draft description",
+        : "Organizer public description",
     venueName: overrides?.venueName ?? "TicketBox Hall",
     venueAddress:
       overrides && "venueAddress" in overrides
@@ -507,7 +612,7 @@ function createConcert(overrides?: Partial<Concert>): Concert {
       overrides && "seatingSvg" in overrides
         ? (overrides.seatingSvg ?? null)
         : "<svg />",
-    status: overrides?.status ?? ConcertStatus.DRAFT,
+    status: overrides?.status ?? ConcertStatus.PUBLISHED,
     startsAt: overrides?.startsAt ?? new Date("2099-08-01T12:00:00.000Z"),
     endsAt:
       overrides && "endsAt" in overrides

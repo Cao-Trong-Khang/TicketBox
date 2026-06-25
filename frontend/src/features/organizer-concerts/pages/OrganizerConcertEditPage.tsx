@@ -1,30 +1,53 @@
-import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
 import {
+  createOrganizerTicketType,
   getOrganizerConcertDetail,
-  publishOrganizerConcert,
+  getOrganizerTicketTypes,
   updateOrganizerConcert,
+  updateOrganizerTicketType,
 } from '../api';
 import { OrganizerConcertForm } from '../components/OrganizerConcertForm';
+import { OrganizerTicketTypeForm } from '../components/OrganizerTicketTypeForm';
 import { toConcertFormValues } from '../form-helpers';
-import { OrganizerConcertDetail, OrganizerConcertPayload } from '../types';
+import {
+  formatTicketTypePrice,
+  sortTicketTypes,
+  toTicketTypeFormValues,
+} from '../ticket-type-helpers';
+import {
+  OrganizerConcertDetail,
+  OrganizerConcertPayload,
+  OrganizerTicketType,
+  OrganizerTicketTypePayload,
+} from '../types';
 
 export function OrganizerConcertEditPage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const missingId = !id;
   const [concert, setConcert] = useState<OrganizerConcertDetail | null>(null);
+  const [ticketTypes, setTicketTypes] = useState<OrganizerTicketType[]>([]);
+  const [ticketTypesError, setTicketTypesError] = useState<ApiError | null>(null);
+  const [ticketTypesLoading, setTicketTypesLoading] = useState(!missingId);
   const [loadError, setLoadError] = useState<ApiError | null>(
     missingId ? { status: 404, message: 'Không tìm thấy concert organizer.' } : null,
   );
   const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [ticketActionError, setTicketActionError] = useState<ApiError | null>(null);
   const [isLoading, setIsLoading] = useState(!missingId);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-
+  const [isTicketSubmitting, setIsTicketSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(
+    typeof location.state === 'object' && location.state !== null && 'feedback' in location.state
+      ? String(location.state.feedback)
+      : null,
+  );
+  const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
+  const [formMode, setFormMode] = useState<{ kind: 'create' } | { kind: 'edit'; ticketTypeId: string }>({ kind: 'create' });
   useEffect(() => {
     let isActive = true;
 
@@ -32,15 +55,21 @@ export function OrganizerConcertEditPage() {
       return;
     }
 
-    getOrganizerConcertDetail(id)
-      .then((data) => {
+    Promise.all([
+      getOrganizerConcertDetail(id),
+      getOrganizerTicketTypes(id),
+    ])
+      .then(([concertData, ticketTypeData]) => {
         if (!isActive) {
           return;
         }
 
-        setConcert(data);
+        setConcert(concertData);
+        setTicketTypes(sortTicketTypes(Array.isArray(ticketTypeData) ? ticketTypeData : []));
         setLoadError(null);
         setIsLoading(false);
+        setTicketTypesLoading(false);
+        setTicketTypesError(null);
       })
       .catch((err: unknown) => {
         if (!isActive) {
@@ -49,6 +78,8 @@ export function OrganizerConcertEditPage() {
 
         setLoadError(toApiError(err));
         setIsLoading(false);
+        setTicketTypesLoading(false);
+        setTicketTypesError(toApiError(err));
       });
 
     return () => {
@@ -63,13 +94,22 @@ export function OrganizerConcertEditPage() {
 
     setIsLoading(true);
     setLoadError(null);
+    setTicketTypesLoading(true);
+    setTicketTypesError(null);
 
     try {
-      setConcert(await getOrganizerConcertDetail(id));
+      const [concertData, ticketTypeData] = await Promise.all([
+        getOrganizerConcertDetail(id),
+        getOrganizerTicketTypes(id),
+      ]);
+      setConcert(concertData);
+      setTicketTypes(sortTicketTypes(Array.isArray(ticketTypeData) ? ticketTypeData : []));
     } catch (err: unknown) {
       setLoadError(toApiError(err));
+      setTicketTypesError(toApiError(err));
     } finally {
       setIsLoading(false);
+      setTicketTypesLoading(false);
     }
   };
 
@@ -93,35 +133,75 @@ export function OrganizerConcertEditPage() {
     }
   };
 
-  const handlePublish = async () => {
+  const handleCreateTicketType = async (payload: OrganizerTicketTypePayload) => {
     if (!id) {
       return;
     }
 
-    setActionError(null);
-    setFeedback(null);
-    setIsPublishing(true);
+    setTicketActionError(null);
+    setTicketFeedback(null);
+    setIsTicketSubmitting(true);
 
     try {
-      const publishedConcert = await publishOrganizerConcert(id);
-      setConcert((current) =>
-        current
-          ? {
-              ...current,
-              ...publishedConcert,
-              status: publishedConcert.status || 'PUBLISHED',
-            }
-          : publishedConcert,
-      );
-      setFeedback('Concert đã được publish.');
+      const createdTicketType = await createOrganizerTicketType(id, payload);
+      setTicketTypes((current) => sortTicketTypes([...current, createdTicketType]));
+      setFormMode({ kind: 'edit', ticketTypeId: createdTicketType.id });
+      setTicketFeedback('Đã tạo loại vé mới. Backend hiện mặc định trạng thái INACTIVE.');
     } catch (err: unknown) {
-      setActionError(toApiError(err));
+      setTicketActionError(toApiError(err));
     } finally {
-      setIsPublishing(false);
+      setIsTicketSubmitting(false);
     }
   };
 
-  const isPublished = concert?.status === 'PUBLISHED';
+  const handleUpdateTicketType = async (payload: OrganizerTicketTypePayload) => {
+    if (!id || formMode.kind !== 'edit') {
+      return;
+    }
+
+    setTicketActionError(null);
+    setTicketFeedback(null);
+    setIsTicketSubmitting(true);
+
+    try {
+      const updatedTicketType = await updateOrganizerTicketType(id, formMode.ticketTypeId, payload);
+      setTicketTypes((current) =>
+        sortTicketTypes(
+          current.map((ticketType) =>
+            ticketType.id === updatedTicketType.id ? updatedTicketType : ticketType,
+          ),
+        ),
+      );
+      setTicketFeedback('Đã cập nhật loại vé.');
+    } catch (err: unknown) {
+      setTicketActionError(toApiError(err));
+    } finally {
+      setIsTicketSubmitting(false);
+    }
+  };
+
+  const switchToCreate = () => {
+    setTicketActionError(null);
+    setTicketFeedback(null);
+    setFormMode({ kind: 'create' });
+  };
+
+  const switchToEdit = (ticketTypeId: string) => {
+    setTicketActionError(null);
+    setTicketFeedback(null);
+    setFormMode({ kind: 'edit', ticketTypeId });
+  };
+
+  const isReadonly = !concert ? true : !canEditConcert(concert);
+  const readonlyMessage = concert ? getReadonlyMessage(concert) : null;
+  const selectedTicketType = useMemo(() => {
+    if (formMode.kind !== 'edit') {
+      return null;
+    }
+
+    return ticketTypes.find((ticketType) => ticketType.id === formMode.ticketTypeId) ?? null;
+  }, [formMode, ticketTypes]);
+  const canMutateTicketTypes = !isReadonly;
 
   return (
     <section className="organizer-editor-page" aria-labelledby="organizer-edit-title">
@@ -132,7 +212,7 @@ export function OrganizerConcertEditPage() {
             <h1 id="organizer-edit-title">
               {concert ? `Chỉnh sửa ${concert.title}` : 'Chỉnh sửa concert'}
             </h1>
-            <p>Hoàn thiện thông tin concert, cập nhật bản nháp và publish khi đã sẵn sàng.</p>
+            <p>Cập nhật thông tin concert trong thời gian còn cho phép chỉnh sửa trước khi sự kiện diễn ra.</p>
           </div>
           <Link to="/organizer/concerts" className="organizer-dashboard-link">
             Quay lại dashboard
@@ -147,25 +227,15 @@ export function OrganizerConcertEditPage() {
           <div className="organizer-editor-panel">
             <div className="organizer-editor-topbar">
               <span
-                className={`organizer-status organizer-status--${concert.status.toLowerCase()}`}
+                className={`organizer-status organizer-status--${getOrganizerStatusVariant(concert)}`}
               >
-                {concert.status}
+                {getOrganizerStatusLabel(concert)}
               </span>
-
-              {concert.status === 'DRAFT' && (
-                <Button
-                  type="button"
-                  onClick={handlePublish}
-                  disabled={isSubmitting || isPublishing}
-                >
-                  {isPublishing ? 'Đang publish...' : 'Publish concert'}
-                </Button>
-              )}
             </div>
 
-            {isPublished && (
+            {readonlyMessage && (
               <p className="organizer-editor-note">
-                Concert đã publish, chưa hỗ trợ chỉnh sửa trong MVP.
+                {readonlyMessage}
               </p>
             )}
 
@@ -177,9 +247,117 @@ export function OrganizerConcertEditPage() {
               initialValues={toConcertFormValues(concert)}
               submitLabel="Lưu thay đổi"
               isSubmitting={isSubmitting}
-              isReadonly={isPublished || isPublishing}
+              isReadonly={isReadonly}
               onSubmit={handleSubmit}
             />
+
+            <div className="organizer-ticket-section">
+              <div className="organizer-ticket-panel-header">
+                <div>
+                  <h2 className="organizer-section-title">Cấu hình vé</h2>
+                  <p className="organizer-section-copy">
+                    Quản lý các loại vé cho concert này trực tiếp tại đây.
+                  </p>
+                </div>
+                {canMutateTicketTypes && (
+                  <Button type="button" className="button-secondary" onClick={switchToCreate} disabled={isTicketSubmitting}>
+                    Tạo loại vé
+                  </Button>
+                )}
+              </div>
+
+              {ticketFeedback && <Alert tone="success">{ticketFeedback}</Alert>}
+              {ticketActionError && <Alert tone="error">{toTicketErrorMessage(ticketActionError)}</Alert>}
+
+              {ticketTypesLoading ? (
+                <p className="concerts-loading">Đang tải loại vé...</p>
+              ) : ticketTypesError ? (
+                <div className="concerts-error">
+                  <Alert tone="error">{toTicketErrorMessage(ticketTypesError)}</Alert>
+                  <Button type="button" className="alert-action" onClick={() => void handleRetry()}>
+                    Thử lại
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {ticketTypes.length === 0 ? (
+                    <div className="organizer-dashboard-note organizer-inline-note">
+                      <p>Concert này chưa có loại vé nào.</p>
+                    </div>
+                  ) : (
+                    <div className="organizer-ticket-type-list">
+                      {ticketTypes.map((ticketType) => {
+                        return (
+                          <article key={ticketType.id} className="organizer-ticket-type-card">
+                            <div className="organizer-ticket-type-card-topline">
+                              <div>
+                                <h3>{ticketType.name}</h3>
+                                <p className="organizer-ticket-code">{ticketType.code}</p>
+                              </div>
+                              <span className={`organizer-status organizer-status--${ticketType.status.toLowerCase()}`}>
+                                {ticketType.status}
+                              </span>
+                            </div>
+
+                            <div className="organizer-ticket-type-meta">
+                              <p><strong>Giá:</strong> {formatTicketTypePrice(ticketType.priceVnd)}</p>
+                              <p><strong>Tổng vé:</strong> {ticketType.totalQuantity}</p>
+                              <p><strong>Đã giữ:</strong> {ticketType.reservedQuantity}</p>
+                              <p><strong>Đã bán:</strong> {ticketType.soldQuantity}</p>
+                              <p><strong>Còn lại:</strong> {ticketType.availableQuantity}</p>
+                              <p><strong>Giới hạn/người:</strong> {ticketType.perUserLimit}</p>
+                            </div>
+
+                            <div className="organizer-concert-actions">
+                              {canMutateTicketTypes ? (
+                                <Button type="button" onClick={() => switchToEdit(ticketType.id)}>
+                                  Sửa
+                                </Button>
+                              ) : (
+                                <p className="organizer-editor-note">Không thể thay đổi loại vé khi concert đang diễn ra, đã kết thúc hoặc đã hủy.</p>
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {canMutateTicketTypes ? (
+                    <div className="organizer-editor-panel organizer-ticket-draft-panel">
+                      {formMode.kind === 'create' ? (
+                        <OrganizerTicketTypeForm
+                          title="Tạo loại vé mới"
+                          description="Các loại vé mới sẽ được tạo ở trạng thái INACTIVE cho đến khi bạn kích hoạt."
+                          submitLabel="Tạo loại vé"
+                          isSubmitting={isTicketSubmitting}
+                          onSubmit={handleCreateTicketType}
+                        />
+                      ) : selectedTicketType ? (
+                        <OrganizerTicketTypeForm
+                          key={selectedTicketType.id + selectedTicketType.updatedAt}
+                          title={`Chỉnh sửa ${selectedTicketType.name}`}
+                          description="Bạn chỉ chỉnh sửa các trường cho phép."
+                          initialValues={toTicketTypeFormValues(selectedTicketType)}
+                          submitLabel="Lưu loại vé"
+                          isSubmitting={isTicketSubmitting}
+                          onSubmit={handleUpdateTicketType}
+                          onCancel={switchToCreate}
+                        />
+                      ) : (
+                        <div className="organizer-dashboard-note organizer-inline-note">
+                          <p>Không tìm thấy loại vé cần chỉnh sửa.</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="organizer-dashboard-note organizer-inline-note">
+                      <p>Không thể tạo hoặc chỉnh sửa loại vé khi concert đang diễn ra, đã kết thúc hoặc đã hủy.</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -232,6 +410,22 @@ function renderEditState(
   );
 }
 
+function toTicketErrorMessage(error: ApiError): string {
+  if (error.status === 400) {
+    return error.message || 'Dữ liệu loại vé chưa hợp lệ.';
+  }
+
+  if (error.status === 404) {
+    return 'Không tìm thấy concert hoặc loại vé organizer này.';
+  }
+
+  if (error.status === 409) {
+    return error.message || 'Loại vé đang có xung đột dữ liệu.';
+  }
+
+  return error.message || 'Không thể xử lý loại vé lúc này.';
+}
+
 function toEditErrorMessage(error: ApiError): string {
   if (error.status === 400) {
     return error.message || 'Concert chưa sẵn sàng cho thao tác này.';
@@ -257,4 +451,52 @@ function toApiError(error: unknown): ApiError {
     status: 0,
     message: 'Không thể tải hoặc cập nhật concert lúc này.',
   };
+}
+
+function canEditConcert(concert: OrganizerConcertDetail): boolean {
+  return concert.status !== 'CANCELLED' && concert.lifecycleStatus === 'UPCOMING';
+}
+
+function getReadonlyMessage(concert: OrganizerConcertDetail): string | null {
+  if (concert.status === 'CANCELLED') {
+    return 'Concert đã hủy nên không thể chỉnh sửa.';
+  }
+
+  if (concert.lifecycleStatus === 'ONGOING' || concert.lifecycleStatus === 'ENDED') {
+    return 'Concert đang diễn ra hoặc đã kết thúc nên không thể chỉnh sửa.';
+  }
+
+  return null;
+}
+
+function getOrganizerStatusLabel(concert: OrganizerConcertDetail): string {
+  if (concert.status === 'CANCELLED') {
+    return 'Đã hủy';
+  }
+
+  if (concert.lifecycleStatus === 'ONGOING') {
+    return 'Đang diễn ra';
+  }
+
+  if (concert.lifecycleStatus === 'ENDED') {
+    return 'Đã kết thúc';
+  }
+
+  return 'Sắp diễn ra';
+}
+
+function getOrganizerStatusVariant(concert: OrganizerConcertDetail): string {
+  if (concert.status === 'CANCELLED') {
+    return 'cancelled';
+  }
+
+  if (concert.lifecycleStatus === 'ONGOING') {
+    return 'ongoing';
+  }
+
+  if (concert.lifecycleStatus === 'ENDED') {
+    return 'ended';
+  }
+
+  return 'upcoming';
 }

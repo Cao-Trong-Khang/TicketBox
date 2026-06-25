@@ -83,7 +83,7 @@ export class OrganizerConcertsController {
     );
   }
 
-  @Post(":id/publish")
+  @Post(":id/cancel")
   @UseGuards(RateLimitGuard)
   @RateLimit({
     keyPrefix: "organizer-mutation",
@@ -91,11 +91,11 @@ export class OrganizerConcertsController {
     ttlSeconds: 5 * 60,
     identity: "user_or_ip",
   })
-  publishOwnedConcert(
+  cancelOwnedConcert(
     @Req() request: AuthenticatedRequest,
     @Param("id", new ParseUUIDPipe({ version: "4" })) concertId: string,
   ): Promise<OrganizerConcertDetailDto> {
-    return this.organizerConcertsService.publishOwnedConcert(
+    return this.organizerConcertsService.cancelOwnedConcert(
       request.user.id,
       concertId,
     );

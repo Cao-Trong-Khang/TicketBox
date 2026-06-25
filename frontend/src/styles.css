@@ -231,6 +231,17 @@ h1 {
   border-color: #c1d4e2;
 }
 
+.button-danger {
+  color: #ffffff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  background: #8f1d14;
+  border-color: #8f1d14;
+}
+
 .alert {
   margin: 0;
   padding: 12px 14px;
@@ -618,18 +629,18 @@ h1 {
   font-weight: 800;
 }
 
-.organizer-status--draft {
-  color: #7a4a00;
-  background: #fff4db;
-}
-
-.organizer-status--published {
+.organizer-status--upcoming {
   color: var(--success);
   background: var(--success-soft);
 }
 
-.organizer-status--cancelled,
-.organizer-status--finished {
+.organizer-status--ongoing {
+  color: #7a4a00;
+  background: #fff4db;
+}
+
+.organizer-status--ended,
+.organizer-status--cancelled {
   color: var(--muted);
   background: var(--surface-soft);
 }

@@ -1,6 +1,7 @@
 export class OrganizerConcertDetailDto {
   id!: string;
   status!: string;
+  lifecycleStatus!: string;
   title!: string;
   artistName!: string | null;
   description!: string | null;

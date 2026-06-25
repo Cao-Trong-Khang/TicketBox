@@ -161,12 +161,22 @@ describe('frontend auth shell', () => {
     renderApp('/organizer/concerts');
 
     expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
-    expect(screen.getByText('Organizer Draft Concert')).toBeInTheDocument();
-    expect(screen.getByText('TicketBox Artist')).toBeInTheDocument();
+    expect(screen.getByText('Organizer Public Concert')).toBeInTheDocument();
+    expect(screen.getAllByText('TicketBox Artist')).toHaveLength(4);
     expect(screen.getByRole('button', { name: 'Tạo concert' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sửa' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Quản lý vé' })).toBeInTheDocument();
-    expect(screen.queryByText('Sắp ra mắt')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Sửa' })[0]).toBeEnabled();
+    expect(screen.getAllByRole('button', { name: 'Sửa' })[1]).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: 'Sửa' })[2]).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: 'Sửa' })[3]).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: 'Hủy' })[0]).toBeEnabled();
+    expect(screen.getAllByRole('button', { name: 'Hủy' })[1]).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: 'Hủy' })[2]).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: 'Hủy' })[3]).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Quản lý vé' })).not.toBeInTheDocument();
+    expect(screen.getByText('Sắp diễn ra')).toBeInTheDocument();
+    expect(screen.getByText('Đang diễn ra')).toBeInTheDocument();
+    expect(screen.getByText('Đã kết thúc')).toBeInTheDocument();
+    expect(screen.getByText('Đã hủy')).toBeInTheDocument();
   });
 
   it('shows organizer empty state when no concerts are returned', async () => {
@@ -209,6 +219,7 @@ describe('frontend auth shell', () => {
 
     expect(screen.getByRole('heading', { name: 'Tạo concert mới' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Cấu hình vé' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Publish concert' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
 
     expect(await screen.findByText('Vui lòng nhập tên concert.')).toBeInTheDocument();
@@ -254,7 +265,8 @@ describe('frontend auth shell', () => {
           status: 'ACTIVE',
         }),
       )
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()));
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypes()));
     vi.stubGlobal('fetch', fetchMock);
 
     renderApp('/organizer/concerts/new');
@@ -314,7 +326,10 @@ describe('frontend auth shell', () => {
         expect.any(Object),
       ),
     );
-    expect(await screen.findByRole('heading', { name: /Chỉnh sửa Organizer Draft Concert/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /Chỉnh sửa Organizer Public Concert/i })).toBeInTheDocument();
+    expect(
+      screen.getByText('Concert đã được tạo và hiển thị công khai. Bạn có thể tiếp tục quản lý vé tại đây.'),
+    ).toBeInTheDocument();
   });
 
   it('rejects duplicate local ticket codes before final submit', async () => {
@@ -478,51 +493,89 @@ describe('frontend auth shell', () => {
     expect(screen.getByRole('button', { name: 'Đi đến Quản lý vé' })).toBeInTheDocument();
   });
 
-  it('loads published concert edit page as read-only and shows the MVP note', async () => {
+  it('loads ongoing concert edit page as read-only and shows lifecycle note', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(() =>
         mockJsonResponse({
           ...createOrganizerConcertDetail(),
-          status: 'PUBLISHED',
+          lifecycleStatus: 'ONGOING',
         }),
       ),
     );
 
     renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
 
-    expect(await screen.findByText('Concert đã publish, chưa hỗ trợ chỉnh sửa trong MVP.')).toBeInTheDocument();
+    expect(await screen.findByText('Concert đang diễn ra hoặc đã kết thúc nên không thể chỉnh sửa.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Lưu thay đổi' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Publish concert' })).not.toBeInTheDocument();
   });
 
-  it('publishes a draft concert from the edit page', async () => {
+  it('loads ended concert edit page as read-only and shows lifecycle note', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        mockJsonResponse({
+          ...createOrganizerConcertDetail(),
+          lifecycleStatus: 'ENDED',
+        }),
+      ),
+    );
+
+    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
+
+    expect(await screen.findByText('Concert đang diễn ra hoặc đã kết thúc nên không thể chỉnh sửa.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Lưu thay đổi' })).toBeDisabled();
+  });
+
+  it('loads cancelled concert edit page as read-only and shows cancelled note', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        mockJsonResponse({
+          ...createOrganizerConcertDetail(),
+          status: 'CANCELLED',
+          lifecycleStatus: 'UPCOMING',
+        }),
+      ),
+    );
+
+    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
+
+    expect(await screen.findByText('Concert đã hủy nên không thể chỉnh sửa.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Lưu thay đổi' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Publish concert' })).not.toBeInTheDocument();
+  });
+
+  it('cancels an upcoming concert from the dashboard and refreshes local state', async () => {
     const fetchMock = vi
       .fn()
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcerts()))
       .mockImplementationOnce(() =>
         mockJsonResponse({
           ...createOrganizerConcertDetail(),
-          status: 'PUBLISHED',
+          status: 'CANCELLED',
+          lifecycleStatus: 'UPCOMING',
         }),
       );
     vi.stubGlobal('fetch', fetchMock);
 
-    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
+    renderApp('/organizer/concerts');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Publish concert' }));
+    const cancelButtons = await screen.findAllByRole('button', { name: 'Hủy' });
+    fireEvent.click(cancelButtons[0]);
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/publish',
+        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/cancel',
         expect.any(Object),
       ),
     );
-    expect(await screen.findByText('Concert đã được publish.')).toBeInTheDocument();
-    expect(screen.getByText('PUBLISHED')).toBeInTheDocument();
+    expect(await screen.findByText('Concert đã được hủy.')).toBeInTheDocument();
+    expect(screen.getAllByText('Đã hủy').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('renders organizer ticket-type management route with list data', async () => {
+  it('shows the legacy ticket-type route and inline ticket configuration', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
@@ -531,10 +584,10 @@ describe('frontend auth shell', () => {
 
     renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
 
-    expect(await screen.findByRole('heading', { name: /Quản lý vé - Organizer Draft Concert/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /Quản lý vé - Organizer Public Concert/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Danh sách loại vé' })).toBeInTheDocument();
     expect(screen.getByText('Vé thường')).toBeInTheDocument();
     expect(screen.getByText('500.000 ₫')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Activate' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Bắt đầu bán')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Kết thúc bán')).not.toBeInTheDocument();
   });
@@ -548,25 +601,19 @@ describe('frontend auth shell', () => {
 
     renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
 
-    await screen.findByRole('heading', { name: /Quản lý vé - Organizer Draft Concert/i });
+    await screen.findByRole('heading', { name: /Quản lý vé - Organizer Public Concert/i });
     fireEvent.click(screen.getAllByRole('button', { name: 'Tạo loại vé' })[1]);
 
     expect(await screen.findByText('Vui lòng nhập mã loại vé.')).toBeInTheDocument();
     expect(screen.getByText('Vui lòng nhập giá vé.')).toBeInTheDocument();
   });
 
-  it('creates and then activates an organizer ticket type', async () => {
+  it('shows edit-only actions for newly created organizer ticket types', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
       .mockImplementationOnce(() => mockJsonResponse([]))
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypeDetail()))
-      .mockImplementationOnce(() =>
-        mockJsonResponse({
-          ...createOrganizerTicketTypeDetail(),
-          status: 'ACTIVE',
-        }),
-      );
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypeDetail()));
     vi.stubGlobal('fetch', fetchMock);
 
     renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
@@ -596,16 +643,10 @@ describe('frontend auth shell', () => {
     );
     expect(await screen.findByText('Đã tạo loại vé mới. Backend hiện mặc định trạng thái INACTIVE.')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types/99999999-9999-4999-8999-999999999999/activate',
-        expect.any(Object),
-      ),
-    );
-    expect(await screen.findByText('Loại vé đã được kích hoạt.')).toBeInTheDocument();
-    expect(screen.getByText('ACTIVE')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sửa' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /activate/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /deactivate/i })).not.toBeInTheDocument();
+    expect(screen.getByText('INACTIVE')).toBeInTheDocument();
   });
 
   it('updates an organizer ticket type from edit mode', async () => {
@@ -667,8 +708,9 @@ function createOrganizerConcerts() {
   return [
     {
       id: '77777777-7777-4777-8777-777777777777',
-      status: 'DRAFT',
-      title: 'Organizer Draft Concert',
+      status: 'PUBLISHED',
+      lifecycleStatus: 'UPCOMING',
+      title: 'Organizer Public Concert',
       artistName: 'TicketBox Artist',
       venueName: 'TicketBox Arena',
       startsAt: '2026-08-20T12:30:00.000Z',
@@ -676,16 +718,53 @@ function createOrganizerConcerts() {
       createdAt: '2026-06-24T10:00:00.000Z',
       updatedAt: '2026-06-24T10:00:00.000Z',
     },
+    {
+      id: '77777777-7777-4777-8777-777777777778',
+      status: 'PUBLISHED',
+      lifecycleStatus: 'ONGOING',
+      title: 'Organizer Ongoing Concert',
+      artistName: 'TicketBox Artist',
+      venueName: 'TicketBox Arena',
+      startsAt: '2026-08-20T12:30:00.000Z',
+      endsAt: '2026-08-20T15:30:00.000Z',
+      createdAt: '2026-06-24T09:00:00.000Z',
+      updatedAt: '2026-06-24T09:00:00.000Z',
+    },
+    {
+      id: '77777777-7777-4777-8777-777777777779',
+      status: 'PUBLISHED',
+      lifecycleStatus: 'ENDED',
+      title: 'Organizer Ended Concert',
+      artistName: 'TicketBox Artist',
+      venueName: 'TicketBox Arena',
+      startsAt: '2026-08-20T12:30:00.000Z',
+      endsAt: '2026-08-20T15:30:00.000Z',
+      createdAt: '2026-06-24T08:00:00.000Z',
+      updatedAt: '2026-06-24T08:00:00.000Z',
+    },
+    {
+      id: '77777777-7777-4777-8777-777777777780',
+      status: 'CANCELLED',
+      lifecycleStatus: 'UPCOMING',
+      title: 'Organizer Cancelled Concert',
+      artistName: 'TicketBox Artist',
+      venueName: 'TicketBox Arena',
+      startsAt: '2026-08-20T12:30:00.000Z',
+      endsAt: '2026-08-20T15:30:00.000Z',
+      createdAt: '2026-06-24T07:00:00.000Z',
+      updatedAt: '2026-06-24T07:00:00.000Z',
+    },
   ];
 }
 
 function createOrganizerConcertDetail() {
   return {
     id: '77777777-7777-4777-8777-777777777777',
-    status: 'DRAFT',
-    title: 'Organizer Draft Concert',
+    status: 'PUBLISHED',
+    lifecycleStatus: 'UPCOMING',
+    title: 'Organizer Public Concert',
     artistName: 'TicketBox Artist',
-    description: 'Draft description',
+    description: 'Public description',
     venueName: 'TicketBox Arena',
     venueAddress: 'District 1',
     bannerUrl: '',

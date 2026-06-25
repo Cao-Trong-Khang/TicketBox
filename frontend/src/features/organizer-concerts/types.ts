@@ -1,6 +1,9 @@
+export type OrganizerConcertLifecycleStatus = 'UPCOMING' | 'ONGOING' | 'ENDED' | string;
+
 export type OrganizerConcertListItem = {
   id: string;
   status: string;
+  lifecycleStatus: OrganizerConcertLifecycleStatus;
   title: string;
   artistName: string | null;
   venueName: string;
@@ -13,6 +16,7 @@ export type OrganizerConcertListItem = {
 export type OrganizerConcertDetail = {
   id: string;
   status: string;
+  lifecycleStatus: OrganizerConcertLifecycleStatus;
   title: string;
   artistName: string | null;
   description: string | null;

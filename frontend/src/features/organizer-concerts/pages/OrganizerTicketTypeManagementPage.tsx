@@ -4,9 +4,7 @@ import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
 import {
-  activateOrganizerTicketType,
   createOrganizerTicketType,
-  deactivateOrganizerTicketType,
   getOrganizerConcertDetail,
   getOrganizerTicketTypes,
   updateOrganizerTicketType,
@@ -39,7 +37,6 @@ export function OrganizerTicketTypeManagementPage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(!missingConcertId);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [statusTargetId, setStatusTargetId] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<FormMode>({ kind: 'create' });
 
   useEffect(() => {
@@ -59,7 +56,7 @@ export function OrganizerTicketTypeManagementPage() {
         }
 
         setConcert(concertDetail);
-        setTicketTypes(sortTicketTypes(ticketTypeList));
+        setTicketTypes(sortTicketTypes(Array.isArray(ticketTypeList) ? ticketTypeList : []));
         setLoadError(null);
         setIsLoading(false);
       })
@@ -99,7 +96,7 @@ export function OrganizerTicketTypeManagementPage() {
         getOrganizerTicketTypes(concertId),
       ]);
       setConcert(concertDetail);
-      setTicketTypes(sortTicketTypes(ticketTypeList));
+      setTicketTypes(sortTicketTypes(Array.isArray(ticketTypeList) ? ticketTypeList : []));
     } catch (error: unknown) {
       setLoadError(toApiError(error));
     } finally {
@@ -155,42 +152,6 @@ export function OrganizerTicketTypeManagementPage() {
       setActionError(toApiError(error));
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleStatusChange = async (
-    ticketType: OrganizerTicketType,
-    nextStatus: 'ACTIVE' | 'INACTIVE',
-  ) => {
-    if (!concertId) {
-      return;
-    }
-
-    setActionError(null);
-    setFeedback(null);
-    setStatusTargetId(ticketType.id);
-
-    try {
-      const updatedTicketType =
-        nextStatus === 'ACTIVE'
-          ? await activateOrganizerTicketType(concertId, ticketType.id)
-          : await deactivateOrganizerTicketType(concertId, ticketType.id);
-      setTicketTypes((current) =>
-        sortTicketTypes(
-          current.map((item) =>
-            item.id === updatedTicketType.id ? updatedTicketType : item,
-          ),
-        ),
-      );
-      setFeedback(
-        nextStatus === 'ACTIVE'
-          ? 'Loại vé đã được kích hoạt.'
-          : 'Loại vé đã được tắt bán.',
-      );
-    } catch (error: unknown) {
-      setActionError(toApiError(error));
-    } finally {
-      setStatusTargetId(null);
     }
   };
 
@@ -256,9 +217,6 @@ export function OrganizerTicketTypeManagementPage() {
               ) : (
                 <div className="organizer-ticket-type-list">
                   {ticketTypes.map((ticketType) => {
-                    const isActive = ticketType.status === 'ACTIVE';
-                    const isStatusSubmitting = statusTargetId === ticketType.id;
-
                     return (
                       <article key={ticketType.id} className="organizer-ticket-type-card">
                         <div className="organizer-ticket-type-card-topline">
@@ -286,28 +244,6 @@ export function OrganizerTicketTypeManagementPage() {
                           <Button type="button" onClick={() => switchToEdit(ticketType.id)}>
                             Sửa
                           </Button>
-
-                          {!isActive && (
-                            <Button
-                              type="button"
-                              className="button-secondary"
-                              disabled={isStatusSubmitting}
-                              onClick={() => void handleStatusChange(ticketType, 'ACTIVE')}
-                            >
-                              {isStatusSubmitting ? 'Đang xử lý...' : 'Activate'}
-                            </Button>
-                          )}
-
-                          {isActive && (
-                            <Button
-                              type="button"
-                              className="button-secondary"
-                              disabled={isStatusSubmitting}
-                              onClick={() => void handleStatusChange(ticketType, 'INACTIVE')}
-                            >
-                              {isStatusSubmitting ? 'Đang xử lý...' : 'Deactivate'}
-                            </Button>
-                          )}
                         </div>
                       </article>
                     );

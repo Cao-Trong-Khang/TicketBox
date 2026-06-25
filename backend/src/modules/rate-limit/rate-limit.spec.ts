@@ -185,7 +185,8 @@ async function createTestApp(
       listOwnedConcerts: async () => [],
       createConcert: async (userId: string, dto: Record<string, unknown>) => ({
         id: 'concert-id',
-        status: 'DRAFT',
+        status: 'PUBLISHED',
+        lifecycleStatus: 'UPCOMING',
         title: dto.title,
         artistName: dto.artistName,
         description: null,
@@ -201,7 +202,8 @@ async function createTestApp(
       }),
       getOwnedConcert: async () => ({
         id: 'concert-id',
-        status: 'DRAFT',
+        status: 'PUBLISHED',
+        lifecycleStatus: 'UPCOMING',
         title: 'Concert',
         artistName: 'Artist',
         description: null,
@@ -216,7 +218,8 @@ async function createTestApp(
       }),
       updateOwnedConcert: async () => ({
         id: 'concert-id',
-        status: 'DRAFT',
+        status: 'PUBLISHED',
+        lifecycleStatus: 'UPCOMING',
         title: 'Concert',
         artistName: 'Artist',
         description: null,
@@ -229,9 +232,10 @@ async function createTestApp(
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
       }),
-      publishOwnedConcert: async () => ({
+      cancelOwnedConcert: async () => ({
         id: 'concert-id',
-        status: 'PUBLISHED',
+        status: 'CANCELLED',
+        lifecycleStatus: 'UPCOMING',
         title: 'Concert',
         artistName: 'Artist',
         description: null,
@@ -248,7 +252,7 @@ async function createTestApp(
       findOwnedConcertOrThrow: async () => ({
         id: 'concert-id',
         organizerId: 'user-1',
-        status: 'DRAFT',
+        status: 'PUBLISHED',
         title: 'Concert',
         artistName: 'Artist',
         description: null,
