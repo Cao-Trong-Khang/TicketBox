@@ -208,20 +208,73 @@ describe('frontend auth shell', () => {
     renderApp('/organizer/concerts/new');
 
     expect(screen.getByRole('heading', { name: 'Tạo concert mới' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Cấu hình vé' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
 
     expect(await screen.findByText('Vui lòng nhập tên concert.')).toBeInTheDocument();
     expect(screen.getByText('Vui lòng chọn thời gian bắt đầu.')).toBeInTheDocument();
   });
 
-  it('creates a concert then navigates to edit page when id is available', async () => {
+  it('blocks concert creation when no local ticket type is configured', async () => {
+    renderApp('/organizer/concerts/new');
+
+    fireEvent.change(screen.getByLabelText('Tên concert'), {
+      target: { value: 'Organizer Draft Concert' },
+    });
+    fireEvent.change(screen.getByLabelText('Nghệ sĩ'), {
+      target: { value: 'TicketBox Artist' },
+    });
+    fireEvent.change(screen.getByLabelText('Địa điểm'), {
+      target: { value: 'TicketBox Arena' },
+    });
+    fireEvent.change(screen.getByLabelText('Địa chỉ'), {
+      target: { value: 'District 1' },
+    });
+    fireEvent.change(screen.getByLabelText('Bắt đầu'), {
+      target: { value: '2026-08-20T19:30' },
+    });
+    fireEvent.change(screen.getByLabelText('Kết thúc'), {
+      target: { value: '2026-08-20T22:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+
+    expect(
+      await screen.findByText('Vui lòng cấu hình ít nhất một loại vé trước khi tạo concert.'),
+    ).toBeInTheDocument();
+  });
+
+  it('creates a concert, creates ticket types, activates them, then navigates to edit page', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypeDetail()))
+      .mockImplementationOnce(() =>
+        mockJsonResponse({
+          ...createOrganizerTicketTypeDetail(),
+          status: 'ACTIVE',
+        }),
+      )
       .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()));
     vi.stubGlobal('fetch', fetchMock);
 
     renderApp('/organizer/concerts/new');
+
+    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
+      target: { value: 'GA' },
+    });
+    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
+      target: { value: 'Vé thường' },
+    });
+    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
+      target: { value: '500000' },
+    });
+    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
+      target: { value: '100' },
+    });
+    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
+      target: { value: '4' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
 
     fireEvent.change(screen.getByLabelText('Tên concert'), {
       target: { value: 'Organizer Draft Concert' },
@@ -249,7 +302,180 @@ describe('frontend auth shell', () => {
         expect.any(Object),
       ),
     );
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types',
+        expect.any(Object),
+      ),
+    );
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types/99999999-9999-4999-8999-999999999999/activate',
+        expect.any(Object),
+      ),
+    );
     expect(await screen.findByRole('heading', { name: /Chỉnh sửa Organizer Draft Concert/i })).toBeInTheDocument();
+  });
+
+  it('rejects duplicate local ticket codes before final submit', async () => {
+    renderApp('/organizer/concerts/new');
+
+    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
+      target: { value: 'GA' },
+    });
+    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
+      target: { value: 'Vé thường' },
+    });
+    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
+      target: { value: '500000' },
+    });
+    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
+      target: { value: '100' },
+    });
+    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
+      target: { value: '4' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
+
+    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
+      target: { value: 'GA' },
+    });
+    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
+      target: { value: 'Vé VIP' },
+    });
+    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
+      target: { value: '900000' },
+    });
+    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
+      target: { value: '50' },
+    });
+    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
+      target: { value: '2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
+
+    expect(
+      await screen.findByText('Mã loại vé đang bị trùng trong danh sách cấu hình cục bộ.'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps concert form values unchanged after adding a local ticket type', async () => {
+    renderApp('/organizer/concerts/new');
+
+    fireEvent.change(screen.getByLabelText('Tên concert'), {
+      target: { value: 'Organizer Draft Concert' },
+    });
+    fireEvent.change(screen.getByLabelText('Nghệ sĩ'), {
+      target: { value: 'TicketBox Artist' },
+    });
+    fireEvent.change(screen.getByLabelText('Địa điểm'), {
+      target: { value: 'TicketBox Arena' },
+    });
+    fireEvent.change(screen.getByLabelText('Địa chỉ'), {
+      target: { value: 'District 1' },
+    });
+    fireEvent.change(screen.getByLabelText('Bắt đầu'), {
+      target: { value: '2026-08-20T19:30' },
+    });
+    fireEvent.change(screen.getByLabelText('Kết thúc'), {
+      target: { value: '2026-08-20T22:30' },
+    });
+    fireEvent.change(screen.getByLabelText('Mô tả'), {
+      target: { value: 'Draft description' },
+    });
+    fireEvent.change(screen.getByLabelText('Banner URL'), {
+      target: { value: 'https://example.test/banner.jpg' },
+    });
+    fireEvent.change(screen.getByLabelText('Seating SVG'), {
+      target: { value: '<svg />' },
+    });
+
+    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
+      target: { value: 'GA' },
+    });
+    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
+      target: { value: 'Vé thường' },
+    });
+    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
+      target: { value: '500000' },
+    });
+    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
+      target: { value: '100' },
+    });
+    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
+      target: { value: '4' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
+
+    expect(screen.getByLabelText('Tên concert')).toHaveValue('Organizer Draft Concert');
+    expect(screen.getByLabelText('Nghệ sĩ')).toHaveValue('TicketBox Artist');
+    expect(screen.getByLabelText('Địa điểm')).toHaveValue('TicketBox Arena');
+    expect(screen.getByLabelText('Địa chỉ')).toHaveValue('District 1');
+    expect(screen.getByLabelText('Bắt đầu')).toHaveValue('2026-08-20T19:30');
+    expect(screen.getByLabelText('Kết thúc')).toHaveValue('2026-08-20T22:30');
+    expect(screen.getByLabelText('Mô tả')).toHaveValue('Draft description');
+    expect(screen.getByLabelText('Banner URL')).toHaveValue('https://example.test/banner.jpg');
+    expect(screen.getByLabelText('Seating SVG')).toHaveValue('<svg />');
+
+    expect(screen.getByLabelText('Mã loại vé')).toHaveValue('');
+    expect(screen.getByLabelText('Tên loại vé')).toHaveValue('');
+    expect(screen.getByLabelText('Giá vé (VND)')).toHaveValue('');
+    expect(screen.getByLabelText('Tổng số vé')).toHaveValue('');
+    expect(screen.getByLabelText('Giới hạn mỗi người')).toHaveValue('');
+  });
+
+  it('shows recovery guidance when concert creation succeeds but ticket setup fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
+      .mockImplementationOnce(() => mockJsonResponse({ message: 'Duplicate code' }, 409));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/organizer/concerts/new');
+
+    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
+      target: { value: 'GA' },
+    });
+    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
+      target: { value: 'Vé thường' },
+    });
+    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
+      target: { value: '500000' },
+    });
+    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
+      target: { value: '100' },
+    });
+    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
+      target: { value: '4' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
+
+    fireEvent.change(screen.getByLabelText('Tên concert'), {
+      target: { value: 'Organizer Draft Concert' },
+    });
+    fireEvent.change(screen.getByLabelText('Nghệ sĩ'), {
+      target: { value: 'TicketBox Artist' },
+    });
+    fireEvent.change(screen.getByLabelText('Địa điểm'), {
+      target: { value: 'TicketBox Arena' },
+    });
+    fireEvent.change(screen.getByLabelText('Địa chỉ'), {
+      target: { value: 'District 1' },
+    });
+    fireEvent.change(screen.getByLabelText('Bắt đầu'), {
+      target: { value: '2026-08-20T19:30' },
+    });
+    fireEvent.change(screen.getByLabelText('Kết thúc'), {
+      target: { value: '2026-08-20T22:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+
+    expect(
+      await screen.findByText(
+        'Concert đã được tạo nhưng một số loại vé chưa hoàn tất. Vui lòng kiểm tra lại trong trang Quản lý vé.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Đi đến Quản lý vé' })).toBeInTheDocument();
   });
 
   it('loads published concert edit page as read-only and shows the MVP note', async () => {
@@ -309,6 +535,8 @@ describe('frontend auth shell', () => {
     expect(screen.getByText('Vé thường')).toBeInTheDocument();
     expect(screen.getByText('500.000 ₫')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Activate' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Bắt đầu bán')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Kết thúc bán')).not.toBeInTheDocument();
   });
 
   it('validates organizer ticket-type form before submit', async () => {

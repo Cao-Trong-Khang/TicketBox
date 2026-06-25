@@ -9,6 +9,7 @@ import {
 import { OrganizerConcertFormValues, OrganizerConcertPayload } from '../types';
 
 type OrganizerConcertFormProps = {
+  children?: ReactNode;
   initialValues?: OrganizerConcertFormValues;
   isSubmitting?: boolean;
   isReadonly?: boolean;
@@ -17,6 +18,7 @@ type OrganizerConcertFormProps = {
 };
 
 export function OrganizerConcertForm({
+  children,
   initialValues,
   isSubmitting = false,
   isReadonly = false,
@@ -165,6 +167,8 @@ export function OrganizerConcertForm({
           />
         </FieldBlock>
       </div>
+
+      {children}
 
       <div className="organizer-form-actions">
         <Button type="submit" disabled={isReadonly || isSubmitting}>

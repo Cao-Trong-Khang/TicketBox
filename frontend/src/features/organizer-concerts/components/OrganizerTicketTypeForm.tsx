@@ -15,6 +15,7 @@ type OrganizerTicketTypeFormProps = {
   initialValues?: OrganizerTicketTypeFormValues;
   isReadonly?: boolean;
   isSubmitting?: boolean;
+  renderAsNestedSection?: boolean;
   submitLabel: string;
   title: string;
   description: string;
@@ -26,6 +27,7 @@ export function OrganizerTicketTypeForm({
   initialValues,
   isReadonly = false,
   isSubmitting = false,
+  renderAsNestedSection = false,
   submitLabel,
   title,
   description,
@@ -55,9 +57,7 @@ export function OrganizerTicketTypeForm({
       }
     };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const submitValues = async () => {
     const validationErrors = validateTicketTypeForm(values);
     setErrors(validationErrors);
 
@@ -67,6 +67,102 @@ export function OrganizerTicketTypeForm({
 
     await onSubmit(toTicketTypePayload(values));
   };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitValues();
+  };
+
+  if (renderAsNestedSection) {
+    return (
+      <div className="organizer-form">
+        <div>
+          <h2 className="organizer-section-title">{title}</h2>
+          <p className="organizer-section-copy">{description}</p>
+        </div>
+
+        <div className="organizer-form-grid">
+          <FieldBlock label="Mã loại vé" error={errors.code}>
+            <FormField
+              label="Mã loại vé"
+              name="code"
+              value={values.code}
+              onChange={handleChange('code')}
+              disabled={isReadonly || isSubmitting}
+              required
+            />
+          </FieldBlock>
+
+          <FieldBlock label="Tên loại vé" error={errors.name}>
+            <FormField
+              label="Tên loại vé"
+              name="name"
+              value={values.name}
+              onChange={handleChange('name')}
+              disabled={isReadonly || isSubmitting}
+              required
+            />
+          </FieldBlock>
+
+          <FieldBlock label="Giá vé (VND)" error={errors.priceVnd}>
+            <FormField
+              label="Giá vé (VND)"
+              name="priceVnd"
+              inputMode="numeric"
+              value={values.priceVnd}
+              onChange={handleChange('priceVnd')}
+              disabled={isReadonly || isSubmitting}
+              required
+            />
+          </FieldBlock>
+
+          <FieldBlock label="Tổng số vé" error={errors.totalQuantity}>
+            <FormField
+              label="Tổng số vé"
+              name="totalQuantity"
+              inputMode="numeric"
+              value={values.totalQuantity}
+              onChange={handleChange('totalQuantity')}
+              disabled={isReadonly || isSubmitting}
+              required
+            />
+          </FieldBlock>
+
+          <FieldBlock label="Giới hạn mỗi người" error={errors.perUserLimit}>
+            <FormField
+              label="Giới hạn mỗi người"
+              name="perUserLimit"
+              inputMode="numeric"
+              value={values.perUserLimit}
+              onChange={handleChange('perUserLimit')}
+              disabled={isReadonly || isSubmitting}
+              required
+            />
+          </FieldBlock>
+        </div>
+
+        <div className="organizer-form-actions">
+          <Button
+            type="button"
+            disabled={isReadonly || isSubmitting}
+            onClick={() => void submitValues()}
+          >
+            {isSubmitting ? 'Đang xử lý...' : submitLabel}
+          </Button>
+          {onCancel && (
+            <Button
+              type="button"
+              className="button-secondary"
+              onClick={onCancel}
+              disabled={isSubmitting}
+            >
+              Hủy
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form className="organizer-form" onSubmit={handleSubmit} noValidate>
@@ -131,28 +227,6 @@ export function OrganizerTicketTypeForm({
             onChange={handleChange('perUserLimit')}
             disabled={isReadonly || isSubmitting}
             required
-          />
-        </FieldBlock>
-
-        <FieldBlock label="Bắt đầu bán" error={errors.saleStartAt}>
-          <FormField
-            label="Bắt đầu bán"
-            name="saleStartAt"
-            type="datetime-local"
-            value={values.saleStartAt}
-            onChange={handleChange('saleStartAt')}
-            disabled={isReadonly || isSubmitting}
-          />
-        </FieldBlock>
-
-        <FieldBlock label="Kết thúc bán" error={errors.saleEndAt}>
-          <FormField
-            label="Kết thúc bán"
-            name="saleEndAt"
-            type="datetime-local"
-            value={values.saleEndAt}
-            onChange={handleChange('saleEndAt')}
-            disabled={isReadonly || isSubmitting}
           />
         </FieldBlock>
       </div>

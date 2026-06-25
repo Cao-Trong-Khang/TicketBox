@@ -3,7 +3,6 @@ import {
   OrganizerTicketTypeFormValues,
   OrganizerTicketTypePayload,
 } from './types';
-import { dateTimeLocalValueToIso, isoToDateTimeLocalValue } from './form-helpers';
 
 export function createEmptyTicketTypeFormValues(): OrganizerTicketTypeFormValues {
   return {
@@ -12,8 +11,6 @@ export function createEmptyTicketTypeFormValues(): OrganizerTicketTypeFormValues
     priceVnd: '',
     totalQuantity: '',
     perUserLimit: '',
-    saleStartAt: '',
-    saleEndAt: '',
   };
 }
 
@@ -26,8 +23,6 @@ export function toTicketTypeFormValues(
     priceVnd: String(ticketType.priceVnd),
     totalQuantity: String(ticketType.totalQuantity),
     perUserLimit: String(ticketType.perUserLimit),
-    saleStartAt: isoToDateTimeLocalValue(ticketType.saleStartAt),
-    saleEndAt: isoToDateTimeLocalValue(ticketType.saleEndAt),
   };
 }
 
@@ -72,15 +67,6 @@ export function validateTicketTypeForm(
     errors.perUserLimit = 'Giới hạn mỗi người không được vượt quá tổng số vé.';
   }
 
-  if (values.saleStartAt && values.saleEndAt) {
-    const saleStartAt = new Date(values.saleStartAt);
-    const saleEndAt = new Date(values.saleEndAt);
-
-    if (saleStartAt >= saleEndAt) {
-      errors.saleEndAt = 'Thời gian kết thúc bán phải sau thời gian bắt đầu bán.';
-    }
-  }
-
   return errors;
 }
 
@@ -93,8 +79,6 @@ export function toTicketTypePayload(
     priceVnd: Number(values.priceVnd),
     totalQuantity: Number(values.totalQuantity),
     perUserLimit: Number(values.perUserLimit),
-    saleStartAt: normalizeOptionalDateTime(values.saleStartAt),
-    saleEndAt: normalizeOptionalDateTime(values.saleEndAt),
   };
 }
 
@@ -131,16 +115,6 @@ export function sortTicketTypes(
 
     return left.code.localeCompare(right.code, 'vi');
   });
-}
-
-function normalizeOptionalDateTime(value: string): string | undefined {
-  const normalized = value.trim();
-
-  if (!normalized) {
-    return undefined;
-  }
-
-  return dateTimeLocalValueToIso(normalized);
 }
 
 function isInteger(value: string): boolean {

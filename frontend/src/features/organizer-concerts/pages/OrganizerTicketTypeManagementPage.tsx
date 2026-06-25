@@ -13,7 +13,6 @@ import {
 } from '../api';
 import { OrganizerTicketTypeForm } from '../components/OrganizerTicketTypeForm';
 import {
-  formatTicketTypeDateTime,
   formatTicketTypePrice,
   sortTicketTypes,
   toTicketTypeFormValues,
@@ -281,8 +280,6 @@ export function OrganizerTicketTypeManagementPage() {
                           <p><strong>Đã bán:</strong> {ticketType.soldQuantity}</p>
                           <p><strong>Còn lại:</strong> {ticketType.availableQuantity}</p>
                           <p><strong>Giới hạn/người:</strong> {ticketType.perUserLimit}</p>
-                          <p><strong>Mở bán:</strong> {formatTicketTypeDateTime(ticketType.saleStartAt)}</p>
-                          <p><strong>Kết thúc bán:</strong> {formatTicketTypeDateTime(ticketType.saleEndAt)}</p>
                         </div>
 
                         <div className="organizer-concert-actions">

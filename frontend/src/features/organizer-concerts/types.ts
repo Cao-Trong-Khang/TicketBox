@@ -75,8 +75,6 @@ export type OrganizerTicketTypePayload = {
   priceVnd: number;
   totalQuantity: number;
   perUserLimit: number;
-  saleStartAt?: string;
-  saleEndAt?: string;
 };
 
 export type OrganizerTicketTypeFormValues = {
@@ -85,6 +83,4 @@ export type OrganizerTicketTypeFormValues = {
   priceVnd: string;
   totalQuantity: string;
   perUserLimit: string;
-  saleStartAt: string;
-  saleEndAt: string;
 };

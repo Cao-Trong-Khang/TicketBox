@@ -662,6 +662,21 @@ h1 {
   gap: 18px;
 }
 
+.organizer-ticket-draft-section {
+  display: grid;
+  gap: 18px;
+}
+
+.organizer-ticket-draft-panel {
+  align-content: start;
+}
+
+.organizer-create-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .organizer-ticket-list-panel {
   align-content: start;
 }
