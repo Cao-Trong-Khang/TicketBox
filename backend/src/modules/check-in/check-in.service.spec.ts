@@ -27,6 +27,13 @@ type TestState = {
     sourceDeviceId: string | null;
     active: boolean;
   }[];
+  checkInStaffAssignments: {
+    id: string;
+    userId: string;
+    concertId: string;
+    gateLabel: string;
+    assignedAt: Date;
+  }[];
   concerts: {
     id: string;
     title: string;
@@ -319,6 +326,15 @@ function createHarness(
         active: true,
       },
     ],
+    checkInStaffAssignments: [
+      {
+        id: 'staff-assignment-a',
+        userId: 'staff-1',
+        concertId: 'concert-1',
+        gateLabel: 'Gate A',
+        assignedAt: new Date('2026-06-01T00:00:00.000Z'),
+      },
+    ],
     concerts: [
       {
         id: 'concert-1',
@@ -432,7 +448,18 @@ function createPrismaMock(state: TestState) {
               : {}),
           })),
     },
-    concert: {
+    checkInStaffAssignment: {
+      findFirst: async ({ where }: { where: { userId: string; concertId: string } }) =>
+        state.checkInStaffAssignments.find(
+          (assignment) =>
+            assignment.userId === where.userId && assignment.concertId === where.concertId,
+        ) ?? null,
+      findMany: async ({ where }: { where: { userId: string; concertId: string } }) =>
+        state.checkInStaffAssignments.filter(
+          (assignment) =>
+            assignment.userId === where.userId && assignment.concertId === where.concertId,
+        ),
+    },    concert: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         state.concerts.find((concert) => concert.id === where.id) ?? null,
     },

@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { HttpErrorFormatFilter } from './common/filters/http-error-format.filter';
 import { getHttpConfig } from './config/app.config';
 
 async function bootstrap() {
@@ -13,6 +14,7 @@ async function bootstrap() {
     origin: httpConfig.frontendOrigins,
     credentials: true,
   });
+  app.useGlobalFilters(new HttpErrorFormatFilter());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

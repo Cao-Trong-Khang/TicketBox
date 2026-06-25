@@ -18,14 +18,23 @@ export class ArtistBioAiProvider {
   async generate(cleanedText: string): Promise<string> {
     const input = cleanedText.slice(0, this.config.aiTextMaxChars);
     if (this.config.aiProvider === 'mock') {
-      return `Artist biography: ${input.slice(0, 700)}`;
+      return `Tiểu sử nghệ sĩ: ${input.slice(0, 700)}`;
     }
     if (!this.config.aiApiKey) throw new AiProviderError('unavailable', 'AI provider is not configured');
     return this.config.aiProvider === 'gemini' ? this.generateGemini(input) : this.generateOpenAi(input);
   }
 
   private prompt(text: string): string {
-    return `Write a factual, engaging artist biography for a concert page using only this press-kit text. Do not invent facts. Return plain text only.\n\n${text}`;
+    return [
+      'Hãy viết tiểu sử nghệ sĩ bằng tiếng Việt cho trang concert, dựa hoàn toàn trên nội dung press kit bên dưới.',
+      'Yêu cầu:',
+      '- Chỉ trả về tiếng Việt.',
+      '- Không bịa thêm thông tin ngoài press kit.',
+      '- Giọng văn tự nhiên, thu hút, phù hợp để hiển thị công khai trên website bán vé.',
+      '- Trả về văn bản thuần, không Markdown, không tiêu đề phụ.',
+      '',
+      text,
+    ].join('\n');
   }
 
   private async generateOpenAi(text: string): Promise<string> {

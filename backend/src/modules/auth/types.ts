@@ -16,3 +16,11 @@ export type PublicUser = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+export type AuthUserProfile = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  status: string;
+  roles: string[];
+};

@@ -191,11 +191,13 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
-  userRoles UserRole[]
+  userRoles     UserRole[]
+  refreshTokens RefreshToken[]
 
   // Relations nghiá»‡p vá»¥ TicketBox
   concerts           Concert[]           @relation("ConcertOrganizer")
-  checkInAssignments CheckInAssignment[] @relation("CheckInStaffAssignments")
+  checkInAssignments      CheckInAssignment[]      @relation("CheckInStaffAssignments")
+  checkInStaffAssignments CheckInStaffAssignment[] @relation("CheckInStaffAssignmentUser")
   orders             Order[]
   tickets            Ticket[]
   checkIns           CheckIn[]           @relation("CheckInStaff")
@@ -252,6 +254,21 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("refresh_tokens")
+}
 // =====================
 // CONCERTS & TICKET TYPES
 // =====================
@@ -280,7 +297,8 @@ model Concert {
   orders             Order[]
   tickets            Ticket[]
   checkIns           CheckIn[]
-  checkInAssignments CheckInAssignment[]
+  checkInAssignments      CheckInAssignment[]
+  checkInStaffAssignments CheckInStaffAssignment[] @relation("CheckInStaffAssignmentConcert")
   notifications      Notification[]
   artistBioJobs      ArtistBioJob[]
   artistDocuments    ArtistDocument[]
@@ -492,6 +510,21 @@ model CheckInAssignment {
   @@map("check_in_assignments")
 }
 
+model CheckInStaffAssignment {
+  id         String   @id @default(uuid()) @db.Uuid
+  concertId  String   @map("concert_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  gateLabel  String   @map("gate_label")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  concert Concert @relation("CheckInStaffAssignmentConcert", fields: [concertId], references: [id], onDelete: Cascade)
+  user    User    @relation("CheckInStaffAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([concertId, userId])
+  @@index([concertId])
+  @@index([userId])
+  @@map("check_in_staff_assignments")
+}
 // =====================
 // NOTIFICATIONS
 // =====================
