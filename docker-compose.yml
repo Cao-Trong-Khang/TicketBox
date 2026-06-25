@@ -62,6 +62,8 @@ services:
       KAFKA_BROKERS: kafka:29092
       JWT_ACCESS_SECRET: local-development-jwt-secret
       JWT_ACCESS_TOKEN_TTL: 1h
+      CHECK_IN_QR_HMAC_SECRET: local-development-check-in-qr-secret-1234567890
+      CHECK_IN_QR_ISSUER: ticketbox
       VIP_CSV_SOURCE_DIR: /app/prisma/demo-sponsor-csv
       VIP_CSV_DEFAULT_SOURCE_NAME: SPONSOR_CSV
       VIP_IMPORT_MAX_FILE_SIZE_BYTES: 10485760
@@ -97,6 +99,8 @@ services:
       KAFKA_BROKERS: kafka:29092
       JWT_ACCESS_SECRET: local-development-jwt-secret
       JWT_ACCESS_TOKEN_TTL: 1h
+      CHECK_IN_QR_HMAC_SECRET: local-development-check-in-qr-secret-1234567890
+      CHECK_IN_QR_ISSUER: ticketbox
       VIP_CSV_SOURCE_DIR: /app/prisma/demo-sponsor-csv
       VIP_CSV_DEFAULT_SOURCE_NAME: SPONSOR_CSV
       VIP_IMPORT_MAX_FILE_SIZE_BYTES: 10485760

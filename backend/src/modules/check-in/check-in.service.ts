@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -24,7 +25,11 @@ import { PermissionService } from '../rbac/permission.service';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { CheckInEventsPublisher } from './check-in-events.publisher';
-import { createTicketQrToken, verifyTicketQrToken } from './check-in-qr-token';
+import {
+  CHECK_IN_QR_ENTITY_TYPES,
+  createCheckInQrToken,
+  verifyCheckInQrTokenForEntity,
+} from './check-in-qr-token';
 import {
   CheckInAssignmentDto,
   CheckInPreloadDto,
@@ -46,6 +51,8 @@ const DEFAULT_TICKET_QR_EXPIRATION_GRACE_SECONDS = 7 * 24 * 60 * 60;
 const DEFAULT_TICKET_QR_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const DEFAULT_CLOCK_SKEW_SECONDS = 5 * 60;
 const DEFAULT_OFFLINE_GRACE_SECONDS = 24 * 60 * 60;
+
+export const CHECK_IN_NOW = 'CHECK_IN_NOW';
 
 type AssignmentAccess = {
   id: string;
@@ -85,7 +92,7 @@ export class CheckInService {
     private readonly permissionService: PermissionService,
     private readonly redisCache: RedisCacheService,
     private readonly eventsPublisher: CheckInEventsPublisher,
-    private readonly now: () => Date = () => new Date(),
+    @Inject(CHECK_IN_NOW) private readonly now: () => Date,
   ) {}
 
   async listAssignments(user: AuthenticatedUser): Promise<CheckInAssignmentDto[]> {
@@ -248,10 +255,12 @@ export class CheckInService {
       tickets: tickets.map((ticket) => ({
         id: ticket.id,
         ticketCode: ticket.ticketCode,
-        qrHash: createTicketQrToken({
-          ticketId: ticket.id,
+        qrHash: createCheckInQrToken({
+          entityType: CHECK_IN_QR_ENTITY_TYPES.ticket,
+          entityId: ticket.id,
           concertId,
           nonce: ticket.qrHash,
+          issuedAt: ticket.issuedAt,
           expiresAt: this.resolveTicketQrExpiresAt(concert.endsAt, generatedAt),
         }),
         status: ticket.status,
@@ -274,7 +283,14 @@ export class CheckInService {
       })),
       vipGuests: vipGuests.map((guest) => ({
         id: guest.id,
-        qrHash: guest.qrHash,
+        qrHash: createCheckInQrToken({
+          entityType: CHECK_IN_QR_ENTITY_TYPES.vipGuest,
+          entityId: guest.id,
+          concertId,
+          nonce: guest.qrHash ?? guest.id,
+          issuedAt: guest.checkedInAt ?? generatedAt,
+          expiresAt: this.resolveTicketQrExpiresAt(concert.endsAt, generatedAt),
+        }),
         externalGuestKey: guest.externalGuestKey,
         fullName: guest.fullName,
         email: guest.email,
@@ -420,7 +436,11 @@ export class CheckInService {
     scan: CheckInSyncScanDto,
     timing: ScanTiming,
   ): Promise<CheckIn> {
-    const verifiedTicketQr = verifyTicketQrToken(scan.qrHash);
+    const verifiedTicketQr = verifyCheckInQrTokenForEntity(
+      scan.qrHash,
+      CHECK_IN_QR_ENTITY_TYPES.ticket,
+      timing.serverReceivedAt,
+    );
 
     if (!verifiedTicketQr.valid) {
       return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
@@ -430,7 +450,7 @@ export class CheckInService {
     }
 
     const ticket = await tx.ticket.findUnique({
-      where: { id: verifiedTicketQr.payload.ticketId },
+      where: { id: verifiedTicketQr.payload.entityId },
       include: {
         concert: {
           select: {
@@ -456,7 +476,15 @@ export class CheckInService {
     if (!ticket) {
       return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         status: CheckInStatus.INVALID_QR,
-        note: 'QR hash was not found for any issued ticket',
+        note: 'QR token was not found for any issued ticket',
+      });
+    }
+
+    if (verifiedTicketQr.payload.concertId !== concertId) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        ticketId: ticket.id,
+        status: CheckInStatus.UNAUTHORIZED,
+        note: 'QR token belongs to a different concert',
       });
     }
 
@@ -543,11 +571,19 @@ export class CheckInService {
       });
     }
 
-    const checkIn = await this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
-      ticketId: ticket.id,
-      status: CheckInStatus.SUCCESS,
-      note: scan.localResult ? `Local result: ${scan.localResult}` : null,
-    });
+    const checkIn = await this.createCheckIn(
+      tx,
+      staffUserId,
+      concertId,
+      sourceDeviceId,
+      scan,
+      timing,
+      {
+        ticketId: ticket.id,
+        status: CheckInStatus.SUCCESS,
+        note: scan.localResult ? `Local result: ${scan.localResult}` : null,
+      },
+    );
 
     await tx.ticket.update({
       where: { id: ticket.id },
@@ -569,9 +605,22 @@ export class CheckInService {
     scan: CheckInSyncScanDto,
     timing: ScanTiming,
   ): Promise<CheckIn> {
+    const verifiedVipQr = verifyCheckInQrTokenForEntity(
+      scan.qrHash,
+      CHECK_IN_QR_ENTITY_TYPES.vipGuest,
+      timing.serverReceivedAt,
+    );
+
+    if (!verifiedVipQr.valid) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        status: CheckInStatus.INVALID_QR,
+        note: verifiedVipQr.reason,
+      });
+    }
+
     const guest = await tx.vipGuest.findFirst({
       where: {
-        OR: [{ qrHash: scan.qrHash }, { externalGuestKey: scan.qrHash }],
+        id: verifiedVipQr.payload.entityId,
         import: {
           status: ImportStatus.COMPLETED,
         },
@@ -588,7 +637,26 @@ export class CheckInService {
     if (!guest) {
       return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         status: CheckInStatus.INVALID_QR,
-        note: 'QR hash was not found for any VIP guest',
+        note: 'QR token was not found for any VIP guest',
+      });
+    }
+
+    if (verifiedVipQr.payload.concertId !== concertId) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        vipGuestId: guest.id,
+        status: CheckInStatus.UNAUTHORIZED,
+        note: 'QR token belongs to a different concert',
+      });
+    }
+
+    if (
+      (guest.qrHash ?? guest.id) !== verifiedVipQr.payload.nonce ||
+      guest.concertId !== verifiedVipQr.payload.concertId
+    ) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        vipGuestId: guest.id,
+        status: CheckInStatus.INVALID_QR,
+        note: 'VIP guest QR token does not match the imported guest',
       });
     }
 
@@ -662,11 +730,19 @@ export class CheckInService {
       });
     }
 
-    const checkIn = await this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
-      vipGuestId: guest.id,
-      status: CheckInStatus.SUCCESS,
-      note: scan.localResult ? `Local result: ${scan.localResult}` : null,
-    });
+    const checkIn = await this.createCheckIn(
+      tx,
+      staffUserId,
+      concertId,
+      sourceDeviceId,
+      scan,
+      timing,
+      {
+        vipGuestId: guest.id,
+        status: CheckInStatus.SUCCESS,
+        note: scan.localResult ? `Local result: ${scan.localResult}` : null,
+      },
+    );
 
     await tx.vipGuest.update({
       where: { id: guest.id },
@@ -749,19 +825,8 @@ export class CheckInService {
   ): Promise<CheckIn> {
     const [ticket, vipGuest] =
       scan.entityType === CheckInScanEntityType.ticket
-        ? [
-            await this.findTicketFromSignedQrForConflict(scan.qrHash),
-            null,
-          ]
-        : [
-            null,
-            await this.prisma.vipGuest.findFirst({
-              where: {
-                OR: [{ qrHash: scan.qrHash }, { externalGuestKey: scan.qrHash }],
-              },
-              select: { id: true },
-            }),
-          ];
+        ? [await this.findTicketFromSignedQrForConflict(scan.qrHash), null]
+        : [null, await this.findVipGuestFromSignedQrForConflict(scan.qrHash)];
 
     return this.prisma.checkIn.create({
       data: {
@@ -790,14 +855,17 @@ export class CheckInService {
   }
 
   private async findTicketFromSignedQrForConflict(qrHash: string): Promise<{ id: string } | null> {
-    const verifiedTicketQr = verifyTicketQrToken(qrHash);
+    const verifiedTicketQr = verifyCheckInQrTokenForEntity(
+      qrHash,
+      CHECK_IN_QR_ENTITY_TYPES.ticket,
+    );
 
     if (!verifiedTicketQr.valid) {
       return null;
     }
 
     const ticket = await this.prisma.ticket.findUnique({
-      where: { id: verifiedTicketQr.payload.ticketId },
+      where: { id: verifiedTicketQr.payload.entityId },
       select: {
         id: true,
         concertId: true,
@@ -814,6 +882,40 @@ export class CheckInService {
     }
 
     return { id: ticket.id };
+  }
+
+  private async findVipGuestFromSignedQrForConflict(
+    qrHash: string,
+  ): Promise<{ id: string } | null> {
+    const verifiedVipQr = verifyCheckInQrTokenForEntity(
+      qrHash,
+      CHECK_IN_QR_ENTITY_TYPES.vipGuest,
+    );
+
+    if (!verifiedVipQr.valid) {
+      return null;
+    }
+
+    const guest = await this.prisma.vipGuest.findFirst({
+      where: {
+        id: verifiedVipQr.payload.entityId,
+      },
+      select: {
+        id: true,
+        concertId: true,
+        qrHash: true,
+      },
+    });
+
+    if (
+      !guest ||
+      (guest.qrHash ?? guest.id) !== verifiedVipQr.payload.nonce ||
+      guest.concertId !== verifiedVipQr.payload.concertId
+    ) {
+      return null;
+    }
+
+    return { id: guest.id };
   }
 
   private async findIdempotentCheckIn(

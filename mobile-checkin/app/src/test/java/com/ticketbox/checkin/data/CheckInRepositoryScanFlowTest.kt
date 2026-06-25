@@ -119,6 +119,26 @@ class CheckInRepositoryScanFlowTest {
     }
 
     @Test
+    fun rawVipExternalGuestKeyIsNotAcceptedAsQrCredential() = runTest {
+        val dao = ScanFlowFakeDao(
+            snapshot = snapshot(),
+            vipGuests = listOf(vipGuest(allowedGate = "VIP Gate")),
+        )
+        val repository = CheckInRepository(
+            dao = dao,
+            api = UnusedCheckInApiService,
+            sessionStore = ScanFlowFakeSession(),
+            clock = { 2_000L },
+        )
+
+        val outcome = repository.recordScan("concert-1", "VIP-001", "VIP Gate")
+
+        assertEquals(LocalScanResult.Invalid, outcome.result)
+        assertEquals("QR payload is not in the preload snapshot", outcome.message)
+        assertEquals("invalid", dao.scanLogs.value.single().localResult)
+    }
+
+    @Test
     fun canceledTicketIsInvalidAndRetainsReason() = runTest {
         val dao = ScanFlowFakeDao(
             snapshot = snapshot(),
@@ -276,7 +296,7 @@ private class ScanFlowFakeDao(
         tickets.filter { it.concertId == concertId }
     override suspend fun vipGuestByQrHash(concertId: String, qrHash: String): PreloadedVipGuestEntity? =
         vipGuests.firstOrNull {
-            it.concertId == concertId && (it.qrHash == qrHash || it.externalGuestKey == qrHash)
+            it.concertId == concertId && it.qrHash == qrHash
         }
     override fun observeVipGuestsForConcert(concertId: String): Flow<List<PreloadedVipGuestEntity>> =
         MutableStateFlow(vipGuests.filter { it.concertId == concertId })
@@ -331,6 +351,7 @@ private class ScanFlowFakeDao(
         message: String,
     ) = Unit
 }
+
 
 private object UnusedCheckInApiService : CheckInApiService {
     override suspend fun login(request: ApiLoginRequest): ApiLoginResponse = error("Not used")

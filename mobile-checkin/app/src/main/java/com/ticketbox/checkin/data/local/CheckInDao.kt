@@ -83,7 +83,7 @@ abstract class CheckInDao {
     @Query(
         """
         SELECT * FROM preloaded_vip_guests
-        WHERE concertId = :concertId AND (qrHash = :qrHash OR externalGuestKey = :qrHash)
+        WHERE concertId = :concertId AND qrHash = :qrHash
         """,
     )
     abstract suspend fun vipGuestByQrHash(concertId: String, qrHash: String): PreloadedVipGuestEntity?

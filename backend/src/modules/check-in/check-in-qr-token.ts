@@ -1,38 +1,54 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-const TICKET_QR_TOKEN_VERSION = 1;
+const CHECK_IN_QR_TOKEN_VERSION = 1;
 const DEFAULT_ISSUER = 'ticketbox';
+const MINIMUM_SECRET_LENGTH = 32;
 
-export type TicketQrTokenPayload = {
-  ticketId: string;
+export const CHECK_IN_QR_ENTITY_TYPES = {
+  ticket: 'TICKET',
+  vipGuest: 'VIP_GUEST',
+} as const;
+
+export type CheckInQrEntityType =
+  (typeof CHECK_IN_QR_ENTITY_TYPES)[keyof typeof CHECK_IN_QR_ENTITY_TYPES];
+
+export type CheckInQrTokenPayload = {
+  version: number;
+  entityType: CheckInQrEntityType;
+  entityId: string;
   concertId: string;
-  iss: string;
-  exp: number;
+  issuer: string;
+  issuedAt: number;
+  expiresAt: number;
   nonce: string;
-  v: number;
 };
 
-export type TicketQrTokenVerificationResult =
-  | { valid: true; payload: TicketQrTokenPayload }
+export type CheckInQrTokenVerificationResult =
+  | { valid: true; payload: CheckInQrTokenPayload }
   | { valid: false; reason: string };
 
-export function createTicketQrToken(input: {
-  ticketId: string;
+export function createCheckInQrToken(input: {
+  entityType: CheckInQrEntityType;
+  entityId: string;
   concertId: string;
   nonce: string;
+  issuedAt?: Date;
   expiresAt: Date;
 }): string {
+  const issuedAt = input.issuedAt ?? new Date();
   const header = {
     alg: 'HS256',
     typ: 'JWT',
   };
-  const payload: TicketQrTokenPayload = {
-    ticketId: input.ticketId,
+  const payload: CheckInQrTokenPayload = {
+    version: CHECK_IN_QR_TOKEN_VERSION,
+    entityType: input.entityType,
+    entityId: input.entityId,
     concertId: input.concertId,
-    iss: getIssuer(),
-    exp: Math.floor(input.expiresAt.getTime() / 1000),
+    issuer: getIssuer(),
+    issuedAt: Math.floor(issuedAt.getTime() / 1000),
+    expiresAt: Math.floor(input.expiresAt.getTime() / 1000),
     nonce: input.nonce,
-    v: TICKET_QR_TOKEN_VERSION,
   };
   const encodedHeader = encodeJson(header);
   const encodedPayload = encodeJson(payload);
@@ -41,47 +57,73 @@ export function createTicketQrToken(input: {
   return `${encodedHeader}.${encodedPayload}.${signature}`;
 }
 
-export function verifyTicketQrToken(
+export function verifyCheckInQrToken(
   token: string,
   now = new Date(),
-): TicketQrTokenVerificationResult {
+): CheckInQrTokenVerificationResult {
   const parts = token.split('.');
 
   if (parts.length !== 3) {
-    return { valid: false, reason: 'Ticket QR token is not signed' };
+    return { valid: false, reason: 'QR token is not signed' };
   }
 
   const [encodedHeader, encodedPayload, signature] = parts;
   const expectedSignature = sign(`${encodedHeader}.${encodedPayload}`);
 
   if (!timingSafeEqualString(signature, expectedSignature)) {
-    return { valid: false, reason: 'Ticket QR token signature is invalid' };
+    return { valid: false, reason: 'QR token signature is invalid' };
   }
 
   const header = decodeJson(encodedHeader);
   const payload = decodeJson(encodedPayload);
 
   if (!isRecord(header) || header.alg !== 'HS256' || header.typ !== 'JWT') {
-    return { valid: false, reason: 'Ticket QR token header is invalid' };
+    return { valid: false, reason: 'QR token header is invalid' };
   }
 
-  if (!isTicketQrPayload(payload)) {
-    return { valid: false, reason: 'Ticket QR token payload is invalid' };
+  if (!isCheckInQrPayload(payload)) {
+    return { valid: false, reason: 'QR token payload is invalid' };
   }
 
-  if (payload.iss !== getIssuer()) {
-    return { valid: false, reason: 'Ticket QR token issuer is invalid' };
+  if (payload.issuer !== getIssuer()) {
+    return { valid: false, reason: 'QR token issuer is invalid' };
   }
 
-  if (payload.v !== TICKET_QR_TOKEN_VERSION) {
-    return { valid: false, reason: 'Ticket QR token version is unsupported' };
+  if (payload.version !== CHECK_IN_QR_TOKEN_VERSION) {
+    return { valid: false, reason: 'QR token version is unsupported' };
   }
 
-  if (payload.exp <= Math.floor(now.getTime() / 1000)) {
-    return { valid: false, reason: 'Ticket QR token is expired' };
+  if (payload.expiresAt <= Math.floor(now.getTime() / 1000)) {
+    return { valid: false, reason: 'QR token is expired' };
   }
 
   return { valid: true, payload };
+}
+
+export function verifyCheckInQrTokenForEntity(
+  token: string,
+  entityType: CheckInQrEntityType,
+  now = new Date(),
+): CheckInQrTokenVerificationResult {
+  const verification = verifyCheckInQrToken(token, now);
+
+  if (!verification.valid) {
+    return verification;
+  }
+
+  if (verification.payload.entityType !== entityType) {
+    return {
+      valid: false,
+      reason: `QR token entity type is invalid for ${entityType}`,
+    };
+  }
+
+  return verification;
+}
+
+export function assertCheckInQrConfiguration(): void {
+  getSecret();
+  getIssuer();
 }
 
 function encodeJson(value: unknown): string {
@@ -104,45 +146,62 @@ function timingSafeEqualString(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
 
-  return (
-    leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
-  );
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function getSecret(): string {
-  const secret = process.env.CHECK_IN_QR_HMAC_SECRET;
+  const secret = process.env.CHECK_IN_QR_HMAC_SECRET?.trim();
 
   if (!secret) {
     throw new Error('CHECK_IN_QR_HMAC_SECRET is required');
+  }
+
+  if (secret.length < MINIMUM_SECRET_LENGTH) {
+    throw new Error(
+      `CHECK_IN_QR_HMAC_SECRET must be at least ${MINIMUM_SECRET_LENGTH} characters long`,
+    );
   }
 
   return secret;
 }
 
 function getIssuer(): string {
-  return process.env.CHECK_IN_QR_ISSUER || DEFAULT_ISSUER;
+  const issuer = process.env.CHECK_IN_QR_ISSUER?.trim() || DEFAULT_ISSUER;
+
+  if (!issuer) {
+    throw new Error('CHECK_IN_QR_ISSUER must not be empty');
+  }
+
+  return issuer;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isTicketQrPayload(value: unknown): value is TicketQrTokenPayload {
+function isCheckInQrPayload(value: unknown): value is CheckInQrTokenPayload {
   if (!isRecord(value)) {
     return false;
   }
 
   return (
-    typeof value.ticketId === 'string' &&
-    value.ticketId.length > 0 &&
+    value.version === CHECK_IN_QR_TOKEN_VERSION &&
+    isEntityType(value.entityType) &&
+    typeof value.entityId === 'string' &&
+    value.entityId.length > 0 &&
     typeof value.concertId === 'string' &&
     value.concertId.length > 0 &&
-    typeof value.iss === 'string' &&
-    value.iss.length > 0 &&
-    typeof value.exp === 'number' &&
-    Number.isInteger(value.exp) &&
+    typeof value.issuer === 'string' &&
+    value.issuer.length > 0 &&
+    typeof value.issuedAt === 'number' &&
+    Number.isInteger(value.issuedAt) &&
+    typeof value.expiresAt === 'number' &&
+    Number.isInteger(value.expiresAt) &&
     typeof value.nonce === 'string' &&
-    value.nonce.length > 0 &&
-    value.v === TICKET_QR_TOKEN_VERSION
+    value.nonce.length > 0
   );
+}
+
+function isEntityType(value: unknown): value is CheckInQrEntityType {
+  return value === CHECK_IN_QR_ENTITY_TYPES.ticket || value === CHECK_IN_QR_ENTITY_TYPES.vipGuest;
 }

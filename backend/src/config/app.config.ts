@@ -27,6 +27,11 @@ export type JwtConfig = {
   accessTokenTtl: string;
 };
 
+export type CheckInQrConfig = {
+  issuer: string;
+  hmacSecret: string;
+};
+
 export function getHttpConfig(configService: ConfigService): HttpConfig {
   return {
     port: readNumber(configService, 'PORT', 3000),
@@ -54,6 +59,29 @@ export function getRedisConfig(configService: ConfigService): RedisConfig {
 export function getKafkaConfig(configService: ConfigService): KafkaConfig {
   return {
     brokers: readList(configService, 'KAFKA_BROKERS', ['localhost:9092']),
+  };
+}
+
+export function getCheckInQrConfig(configService: ConfigService): CheckInQrConfig {
+  const hmacSecret = configService.get<string>('CHECK_IN_QR_HMAC_SECRET', '');
+
+  if (!hmacSecret.trim()) {
+    throw new Error('Invalid empty environment value for CHECK_IN_QR_HMAC_SECRET');
+  }
+
+  if (hmacSecret.trim().length < 32) {
+    throw new Error('CHECK_IN_QR_HMAC_SECRET must be at least 32 characters long');
+  }
+
+  const issuer = configService.get<string>('CHECK_IN_QR_ISSUER', 'ticketbox');
+
+  if (!issuer.trim()) {
+    throw new Error('Invalid empty environment value for CHECK_IN_QR_ISSUER');
+  }
+
+  return {
+    issuer: issuer.trim(),
+    hmacSecret: hmacSecret.trim(),
   };
 }
 

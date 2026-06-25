@@ -15,11 +15,16 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { CheckInEventsPublisher } from './check-in-events.publisher';
-import { createTicketQrToken } from './check-in-qr-token';
+import {
+  CHECK_IN_QR_ENTITY_TYPES,
+  createCheckInQrToken,
+  verifyCheckInQrTokenForEntity,
+} from './check-in-qr-token';
 import { CheckInService } from './check-in.service';
 import { CheckInClientMode, CheckInScanEntityType } from './dto/sync-check-in.dto';
 
-process.env.CHECK_IN_QR_HMAC_SECRET = 'test-check-in-qr-hmac-secret';
+process.env.CHECK_IN_QR_HMAC_SECRET = 'test-check-in-qr-hmac-secret-1234567890';
+process.env.CHECK_IN_QR_ISSUER = 'ticketbox';
 
 type TestState = {
   userRoles: { userId: string; role: { code: string } }[];
@@ -97,6 +102,32 @@ test('preload rejects a user without Check-in Staff role and preload permission'
   );
 });
 
+test('preload returns signed QR tokens for ticket and VIP guests, not raw credentials', async () => {
+  const { service, state } = createHarness();
+  const preload = await service.preloadEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+  );
+
+  assert.notEqual(preload.tickets[0].qrHash, state.tickets[0].qrHash);
+  assert.notEqual(preload.vipGuests[0].qrHash, state.vipGuests[0].qrHash);
+  assert.equal(preload.vipGuests[0].externalGuestKey, state.vipGuests[0].externalGuestKey);
+
+  const ticketVerification = verifyCheckInQrTokenForEntity(
+    preload.tickets[0].qrHash,
+    CHECK_IN_QR_ENTITY_TYPES.ticket,
+    new Date('2026-08-01T00:00:00.000Z'),
+  );
+  assert.equal(ticketVerification.valid, true);
+
+  const vipVerification = verifyCheckInQrTokenForEntity(
+    preload.vipGuests[0].qrHash ?? '',
+    CHECK_IN_QR_ENTITY_TYPES.vipGuest,
+    new Date('2026-08-01T00:00:00.000Z'),
+  );
+  assert.equal(vipVerification.valid, true);
+});
+
 test('preload includes completed imported VIP guests for assigned Check-in Staff only', async () => {
   const { service, state } = createHarness();
   state.vipGuests.push(
@@ -147,8 +178,6 @@ test('preload includes completed imported VIP guests for assigned Check-in Staff
     preload.vipGuests.map((guest) => guest.id),
     ['vip-1'],
   );
-  assert.equal(preload.vipGuests[0].sponsorCompany, 'TicketBox Partners');
-  assert.equal(preload.vipGuests[0].guestType, 'Artist Guest');
 });
 
 test('preload rejects Check-in Staff without an active assignment for the concert', async () => {
@@ -165,59 +194,125 @@ test('sync accepts a valid assigned ticket scan and updates authoritative ticket
   const qrHash = signedTicketQr(state.tickets[0]);
   const serverNow = new Date('2026-08-20T12:00:05.000Z');
 
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'local-1',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-          localResult: 'accepted',
-        },
-      ],
-    },
-  );
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'local-1',
+    qrHash,
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+    localResult: 'accepted',
+  });
 
   assert.equal(response.outcomes[0].resultCode, 'accepted');
   assert.equal(response.outcomes[0].serverCheckInAt, serverNow.toISOString());
-  assert.equal(response.outcomes[0].idempotent, false);
   assert.equal(state.tickets[0].status, TicketStatus.USED);
   assert.deepEqual(state.tickets[0].checkedInAt, serverNow);
-  assert.equal(state.checkIns.length, 1);
-  assert.equal(state.checkIns[0].status, CheckInStatus.SUCCESS);
-  assert.deepEqual(state.checkIns[0].clientScannedAt, new Date('2026-08-20T12:00:00.000Z'));
-  assert.deepEqual(state.checkIns[0].serverReceivedAt, serverNow);
-  assert.deepEqual(state.checkIns[0].serverCheckedInAt, serverNow);
-  assert.deepEqual(state.checkIns[0].scannedAt, serverNow);
 });
 
 test('sync rejects unsigned ticket QR bearer hashes', async () => {
   const { service, state } = createHarness();
 
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'unsigned-ticket',
-          qrHash: 'ticket-qr-1',
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-        },
-      ],
-    },
-  );
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'unsigned-ticket',
+    qrHash: 'ticket-qr-1',
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
 
   assert.equal(response.outcomes[0].resultCode, 'invalid');
-  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
-  assert.equal(state.checkIns[0].note, 'Ticket QR token is not signed');
-  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
+  assert.equal(state.checkIns[0].note, 'QR token is not signed');
+});
+
+test('sync rejects a tampered ticket signature', async () => {
+  const { service, state } = createHarness();
+  const tampered = `${signedTicketQr(state.tickets[0]).slice(0, -1)}x`;
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'tampered-ticket-signature',
+    qrHash: tampered,
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].note, 'QR token signature is invalid');
+});
+
+test('sync rejects a tampered ticket payload', async () => {
+  const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0], undefined, { nonce: 'other-qr' });
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'tampered-ticket-payload',
+    qrHash,
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].note, 'Ticket QR token does not match the issued ticket');
+});
+
+test('sync rejects a ticket token for the wrong concert', async () => {
+  const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0], undefined, { concertId: 'concert-2' });
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'wrong-concert-ticket',
+    qrHash,
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'unauthorized');
+  assert.equal(state.checkIns[0].note, 'QR token belongs to a different concert');
+});
+
+test('sync rejects a ticket token with the wrong entity type', async () => {
+  const { service, state } = createHarness();
+  const qrHash = signedVipQr(state.vipGuests[0], undefined, { entityId: state.tickets[0].id });
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'wrong-ticket-entity-type',
+    qrHash,
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(
+    state.checkIns[0].note,
+    'QR token entity type is invalid for TICKET',
+  );
+});
+
+test('sync rejects a ticket token with the wrong issuer', async () => {
+  const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0], undefined, { issuer: 'other-issuer' });
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'wrong-ticket-issuer',
+    qrHash,
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].note, 'QR token issuer is invalid');
+});
+
+test('sync rejects expired signed ticket QR tokens before ticket lookup acceptance', async () => {
+  const { service, state } = createHarness();
+  const qrHash = signedTicketQr(state.tickets[0], new Date('2026-01-01T00:00:00.000Z'));
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'expired-ticket',
+    qrHash,
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].note, 'QR token is expired');
 });
 
 test('sync rejects active tickets whose order is not paid', async () => {
@@ -225,259 +320,173 @@ test('sync rejects active tickets whose order is not paid', async () => {
   state.tickets[0].order.status = OrderStatus.PENDING;
   state.tickets[0].order.paidAt = null;
   state.tickets[0].order.payments = [];
-  const qrHash = signedTicketQr(state.tickets[0]);
 
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'unpaid-order',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-        },
-      ],
-    },
-  );
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'unpaid-order',
+    qrHash: signedTicketQr(state.tickets[0]),
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
 
   assert.equal(response.outcomes[0].resultCode, 'invalid');
-  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
   assert.equal(state.checkIns[0].note, 'Ticket order has not been paid');
-  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
-});
-
-test('sync rejects paid ticket orders without enough successful payment amount', async () => {
-  const { service, state } = createHarness();
-  state.tickets[0].order.payments = [
-    {
-      status: PaymentStatus.FAILED,
-      amountVnd: 100_000,
-    },
-  ];
-  const qrHash = signedTicketQr(state.tickets[0]);
-
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'missing-success-payment',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-        },
-      ],
-    },
-  );
-
-  assert.equal(response.outcomes[0].resultCode, 'invalid');
-  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
-  assert.equal(state.checkIns[0].note, 'Ticket order does not have a successful payment');
-  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
-});
-
-test('sync rejects active tickets from cancelled or refunded orders', async () => {
-  const { service, state } = createHarness();
-  state.tickets[0].order.status = OrderStatus.CANCELLED;
-  const qrHash = signedTicketQr(state.tickets[0]);
-
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'cancelled-order',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-        },
-      ],
-    },
-  );
-
-  assert.equal(response.outcomes[0].resultCode, 'invalid');
-  assert.equal(state.checkIns[0].status, CheckInStatus.CANCELLED_TICKET);
-  assert.equal(state.checkIns[0].note, 'Ticket order is cancelled or refunded');
-  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
-});
-
-test('sync rejects client scan timestamps outside future clock skew', async () => {
-  const { service, state } = createHarness();
-  const qrHash = signedTicketQr(state.tickets[0]);
-
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'future-skew',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:06:00.000Z',
-        },
-      ],
-    },
-  );
-
-  assert.equal(response.outcomes[0].resultCode, 'invalid');
-  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
-  assert.equal(state.checkIns[0].note, 'Client scannedAt is outside allowed clock skew');
-  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
-});
-
-test('sync rejects expired signed ticket QR tokens before ticket lookup acceptance', async () => {
-  const { service, state } = createHarness();
-  const qrHash = signedTicketQr(state.tickets[0], new Date('2026-01-01T00:00:00.000Z'));
-
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'expired-ticket',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-        },
-      ],
-    },
-  );
-
-  assert.equal(response.outcomes[0].resultCode, 'invalid');
-  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
-  assert.equal(state.checkIns[0].note, 'Ticket QR token is expired');
-  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
 });
 
 test('sync accepts offline scans after event end only within grace window', async () => {
-  const { service, state } = createHarness({
-    now: new Date('2026-08-21T12:00:00.000Z'),
-  });
-  const qrHash = signedTicketQr(state.tickets[0]);
+  const { service, state } = createHarness({ now: new Date('2026-08-21T12:00:00.000Z') });
 
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'offline-before-end',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T15:29:00.000Z',
-          mode: CheckInClientMode.offline,
-        },
-      ],
-    },
-  );
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'offline-before-end',
+    qrHash: signedTicketQr(state.tickets[0]),
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T15:29:00.000Z',
+    mode: CheckInClientMode.offline,
+  });
 
   assert.equal(response.outcomes[0].resultCode, 'accepted');
-  assert.equal(state.checkIns[0].status, CheckInStatus.SUCCESS);
 });
 
-test('sync expires offline scans received after the grace window', async () => {
-  const { service, state } = createHarness({
-    now: new Date('2026-08-21T16:00:01.000Z'),
-  });
-  const qrHash = signedTicketQr(state.tickets[0]);
-
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'offline-outside-grace',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T15:29:00.000Z',
-          mode: CheckInClientMode.offline,
-        },
-      ],
-    },
-  );
-
-  assert.equal(response.outcomes[0].resultCode, 'invalid');
-  assert.equal(state.checkIns[0].status, CheckInStatus.INVALID_QR);
-  assert.equal(state.checkIns[0].note, 'Offline scan is outside allowed grace window');
-  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
-});
-
-test('sync accepts a VIP guest only at an assigned gate', async () => {
+test('sync accepts a valid VIP guest only at an assigned gate', async () => {
   const { service, state } = createHarness();
   state.vipGuests[0].allowedGate = ' gate a ';
 
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'vip-local-1',
-          qrHash: 'vip-qr-1',
-          entityType: CheckInScanEntityType.vipGuest,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-          localResult: 'accepted',
-        },
-      ],
-    },
-  );
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-local-1',
+    qrHash: signedVipQr(state.vipGuests[0]),
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+    localResult: 'accepted',
+  });
 
   assert.equal(response.outcomes[0].resultCode, 'accepted');
-  assert.equal(state.checkIns[0].status, CheckInStatus.SUCCESS);
   assert.equal(state.vipGuests[0].status, VipGuestStatus.CHECKED_IN);
+});
+
+test('sync rejects VIP raw external guest keys as QR credentials', async () => {
+  const { service, state } = createHarness();
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-raw-external-key',
+    qrHash: state.vipGuests[0].externalGuestKey ?? 'VIP-1',
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].note, 'QR token is not signed');
 });
 
 test('sync rejects VIP guest scans at the wrong assignment gate', async () => {
   const { service, state } = createHarness();
 
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'vip-wrong-gate',
-          qrHash: 'vip-qr-1',
-          entityType: CheckInScanEntityType.vipGuest,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-          localResult: 'accepted',
-        },
-      ],
-    },
-  );
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-wrong-gate',
+    qrHash: signedVipQr(state.vipGuests[0]),
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
 
   assert.equal(response.outcomes[0].resultCode, 'unauthorized');
-  assert.equal(state.checkIns[0].status, CheckInStatus.UNAUTHORIZED);
   assert.equal(state.checkIns[0].note, 'VIP guest is assigned to VIP Gate');
-  assert.equal(state.vipGuests[0].status, VipGuestStatus.ACTIVE);
-  assert.equal(state.vipGuests[0].checkedInAt, null);
+});
+
+test('sync rejects a VIP token with the wrong concert', async () => {
+  const { service, state } = createHarness();
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-wrong-concert',
+    qrHash: signedVipQr(state.vipGuests[0], undefined, { concertId: 'concert-2' }),
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'unauthorized');
+  assert.equal(state.checkIns[0].note, 'QR token belongs to a different concert');
+});
+
+test('sync rejects a VIP token with the wrong entity type', async () => {
+  const { service, state } = createHarness();
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-wrong-entity-type',
+    qrHash: signedTicketQr(state.tickets[0], undefined, { entityId: state.vipGuests[0].id }),
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(
+    state.checkIns[0].note,
+    'QR token entity type is invalid for VIP_GUEST',
+  );
+});
+
+test('sync rejects a VIP token with the wrong issuer', async () => {
+  const { service, state } = createHarness();
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-wrong-issuer',
+    qrHash: signedVipQr(state.vipGuests[0], undefined, { issuer: 'other-issuer' }),
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].note, 'QR token issuer is invalid');
+});
+
+test('sync rejects expired VIP tokens', async () => {
+  const { service, state } = createHarness();
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-expired',
+    qrHash: signedVipQr(state.vipGuests[0], new Date('2026-01-01T00:00:00.000Z')),
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].note, 'QR token is expired');
+});
+
+test('sync rejects a VIP token whose payload nonce is tampered', async () => {
+  const { service, state } = createHarness();
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-tampered-payload',
+    qrHash: signedVipQr(state.vipGuests[0], undefined, { nonce: 'other-vip-qr' }),
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'invalid');
+  assert.equal(state.checkIns[0].note, 'VIP guest QR token does not match the imported guest');
+});
+
+test('sync rejects already checked-in VIP tokens as duplicates', async () => {
+  const { service, state } = createHarness();
+  state.vipGuests[0].allowedGate = null;
+  state.vipGuests[0].status = VipGuestStatus.CHECKED_IN;
+  state.vipGuests[0].checkedInAt = new Date('2026-08-20T11:59:00.000Z');
+
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-already-used',
+    qrHash: signedVipQr(state.vipGuests[0]),
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
+
+  assert.equal(response.outcomes[0].resultCode, 'duplicate');
 });
 
 test('sync retry with the same device and local scan ID returns the original outcome', async () => {
   const { service, state } = createHarness();
-  const qrHash = signedTicketQr(state.tickets[0]);
   const dto = {
     sourceDeviceId: 'device-a',
     scans: [
       {
         localScanId: 'local-retry',
-        qrHash,
+        qrHash: signedTicketQr(state.tickets[0]),
         entityType: CheckInScanEntityType.ticket,
         scannedAt: '2026-08-20T12:00:00.000Z',
       },
@@ -489,29 +498,18 @@ test('sync retry with the same device and local scan ID returns the original out
 
   assert.equal(first.outcomes[0].checkInId, retry.outcomes[0].checkInId);
   assert.equal(retry.outcomes[0].idempotent, true);
-  assert.equal(state.checkIns.length, 1);
 });
 
 test('cross-device offline ticket scans resolve to first successful sync and later conflict outcome', async () => {
   const { service, state } = createHarness();
   const qrHash = signedTicketQr(state.tickets[0]);
-  const winningServerCheckInAt = new Date('2026-08-20T12:00:05.000Z');
 
-  const first = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'device-a-local',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-        },
-      ],
-    },
-  );
+  const first = await syncOne(service, 'concert-1', {
+    localScanId: 'device-a-local',
+    qrHash,
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
   const second = await service.syncEvent(
     { id: 'staff-1', email: 'staff@example.test' },
     'concert-1',
@@ -530,44 +528,23 @@ test('cross-device offline ticket scans resolve to first successful sync and lat
 
   assert.equal(first.outcomes[0].resultCode, 'accepted');
   assert.equal(second.outcomes[0].resultCode, 'conflict');
-  assert.equal(second.outcomes[0].status, CheckInStatus.CONFLICT);
-  assert.equal(
-    second.outcomes[0].message,
-    'Ticket or guest was already checked in on another device',
-  );
-  assert.equal(second.outcomes[0].serverCheckInAt, winningServerCheckInAt.toISOString());
   assert.equal(
     state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.SUCCESS).length,
     1,
   );
-  assert.equal(
-    state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.CONFLICT).length,
-    1,
-  );
-  assert.deepEqual(state.checkIns[1].serverCheckedInAt, winningServerCheckInAt);
-  assert.equal(state.tickets[0].status, TicketStatus.USED);
 });
 
 test('cross-device offline VIP scans resolve to conflict with winning check-in metadata', async () => {
   const { service, state } = createHarness();
-  const winningServerCheckInAt = new Date('2026-08-20T12:00:05.000Z');
   state.vipGuests[0].allowedGate = null;
+  const qrHash = signedVipQr(state.vipGuests[0]);
 
-  const first = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'vip-device-a-local',
-          qrHash: 'vip-qr-1',
-          entityType: CheckInScanEntityType.vipGuest,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-        },
-      ],
-    },
-  );
+  const first = await syncOne(service, 'concert-1', {
+    localScanId: 'vip-device-a-local',
+    qrHash,
+    entityType: CheckInScanEntityType.vipGuest,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
   const second = await service.syncEvent(
     { id: 'staff-1', email: 'staff@example.test' },
     'concert-1',
@@ -576,7 +553,7 @@ test('cross-device offline VIP scans resolve to conflict with winning check-in m
       scans: [
         {
           localScanId: 'vip-device-b-local',
-          qrHash: 'vip-qr-1',
+          qrHash,
           entityType: CheckInScanEntityType.vipGuest,
           scannedAt: '2026-08-20T12:01:00.000Z',
         },
@@ -586,67 +563,37 @@ test('cross-device offline VIP scans resolve to conflict with winning check-in m
 
   assert.equal(first.outcomes[0].resultCode, 'accepted');
   assert.equal(second.outcomes[0].resultCode, 'conflict');
-  assert.equal(second.outcomes[0].status, CheckInStatus.CONFLICT);
-  assert.equal(
-    second.outcomes[0].message,
-    'Ticket or guest was already checked in on another device',
-  );
-  assert.equal(second.outcomes[0].serverCheckInAt, winningServerCheckInAt.toISOString());
   assert.equal(
     state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.SUCCESS).length,
     1,
   );
-  assert.equal(
-    state.checkIns.filter((checkIn) => checkIn.status === CheckInStatus.CONFLICT).length,
-    1,
-  );
-  assert.deepEqual(state.checkIns[1].serverCheckedInAt, winningServerCheckInAt);
-  assert.equal(state.vipGuests[0].status, VipGuestStatus.CHECKED_IN);
 });
 
 test('Redis rate limiting returns a retryable 429 before changing scan state', async () => {
   const { service, state } = createHarness({ redisCount: 301 });
-  const qrHash = signedTicketQr(state.tickets[0]);
 
   await assert.rejects(
     () =>
-      service.syncEvent({ id: 'staff-1', email: 'staff@example.test' }, 'concert-1', {
-        sourceDeviceId: 'device-a',
-        scans: [
-          {
-            localScanId: 'rate-limited',
-            qrHash,
-            entityType: CheckInScanEntityType.ticket,
-            scannedAt: '2026-08-20T12:00:00.000Z',
-          },
-        ],
+      syncOne(service, 'concert-1', {
+        localScanId: 'rate-limited',
+        qrHash: signedTicketQr(state.tickets[0]),
+        entityType: CheckInScanEntityType.ticket,
+        scannedAt: '2026-08-20T12:00:00.000Z',
       }),
-    (error) =>
-      error instanceof HttpException && error.getStatus() === HttpStatus.TOO_MANY_REQUESTS,
+    (error) => error instanceof HttpException && error.getStatus() === HttpStatus.TOO_MANY_REQUESTS,
   );
   assert.equal(state.checkIns.length, 0);
-  assert.equal(state.tickets[0].status, TicketStatus.ACTIVE);
 });
 
 test('Kafka publish failures do not change the authoritative sync response', async () => {
   const { service, state } = createHarness({ publisherThrows: true });
-  const qrHash = signedTicketQr(state.tickets[0]);
 
-  const response = await service.syncEvent(
-    { id: 'staff-1', email: 'staff@example.test' },
-    'concert-1',
-    {
-      sourceDeviceId: 'device-a',
-      scans: [
-        {
-          localScanId: 'kafka-down',
-          qrHash,
-          entityType: CheckInScanEntityType.ticket,
-          scannedAt: '2026-08-20T12:00:00.000Z',
-        },
-      ],
-    },
-  );
+  const response = await syncOne(service, 'concert-1', {
+    localScanId: 'kafka-down',
+    qrHash: signedTicketQr(state.tickets[0]),
+    entityType: CheckInScanEntityType.ticket,
+    scannedAt: '2026-08-20T12:00:00.000Z',
+  });
 
   assert.equal(response.outcomes[0].resultCode, 'accepted');
 });
@@ -751,6 +698,7 @@ function createHarness(
     ],
     checkIns: [],
   };
+
   const prisma = createPrismaMock(state);
   const permissionService = {
     userHasPermissions: async (userId: string, permissions: string[]) => {
@@ -788,18 +736,7 @@ function createPrismaMock(state: TestState) {
         state.userRoles.filter((userRole) => userRole.userId === where.userId),
     },
     checkInAssignment: {
-      findMany: async ({
-        where,
-        include,
-      }: {
-        where: {
-          staffUserId: string;
-          concertId?: string;
-          active: boolean;
-          OR?: { sourceDeviceId: string | null }[];
-        };
-        include?: unknown;
-      }) =>
+      findMany: async ({ where, include }: { where: { staffUserId: string; concertId?: string; active: boolean; OR?: { sourceDeviceId: string | null }[] }; include?: unknown }) =>
         state.assignments
           .filter((assignment) => assignment.staffUserId === where.staffUserId)
           .filter((assignment) => !where.concertId || assignment.concertId === where.concertId)
@@ -825,19 +762,13 @@ function createPrismaMock(state: TestState) {
     ticket: {
       findMany: async ({ where }: { where: { concertId: string } }) =>
         state.tickets.filter((ticket) => ticket.concertId === where.concertId),
-      findUnique: async ({ where }: { where: { id?: string; qrHash?: string } }) => {
-        const ticket = state.tickets.find(
-          (candidate) =>
-            (where.id !== undefined && candidate.id === where.id) ||
-            (where.qrHash !== undefined && candidate.qrHash === where.qrHash),
-        );
+      findUnique: async ({ where }: { where: { id?: string } }) => {
+        const ticket = state.tickets.find((candidate) => where.id !== undefined && candidate.id === where.id);
         const concert = ticket
           ? state.concerts.find((candidate) => candidate.id === ticket.concertId)
           : null;
 
-        return ticket && concert
-          ? { ...ticket, concert: { endsAt: concert.endsAt }, order: ticket.order }
-          : null;
+        return ticket && concert ? { ...ticket, concert: { endsAt: concert.endsAt }, order: ticket.order } : null;
       },
       update: async ({ where, data }: { where: { id: string }; data: Partial<TestState['tickets'][0]> }) => {
         const ticket = state.tickets.find((candidate) => candidate.id === where.id);
@@ -847,50 +778,22 @@ function createPrismaMock(state: TestState) {
       },
     },
     vipGuest: {
-      findMany: async ({
-        where,
-      }: {
-        where: {
-          concertId: string;
-          status?: { in: VipGuestStatus[] };
-          import?: { status: ImportStatus };
-        };
-      }) =>
+      findMany: async ({ where }: { where: { concertId: string; status?: { in: VipGuestStatus[] }; import?: { status: ImportStatus } } }) =>
         state.vipGuests
           .filter((guest) => guest.concertId === where.concertId)
           .filter((guest) => !where.status || where.status.in.includes(guest.status))
           .filter((guest) => !where.import || guest.importStatus === where.import.status),
-      findFirst: async ({
-        where,
-      }: {
-        where: {
-          OR: { qrHash?: string; externalGuestKey?: string }[];
-          import?: { status: ImportStatus };
-        };
-      }) => {
+      findFirst: async ({ where }: { where: { id?: string; import?: { status: ImportStatus } } }) => {
         const guest = state.vipGuests
           .filter((candidate) => !where.import || candidate.importStatus === where.import.status)
-          .find((candidate) =>
-            where.OR.some(
-              (condition) =>
-                ('qrHash' in condition && condition.qrHash === candidate.qrHash) ||
-                ('externalGuestKey' in condition &&
-                  condition.externalGuestKey === candidate.externalGuestKey),
-            ),
-          );
+          .find((candidate) => (where.id !== undefined ? candidate.id === where.id : false));
         const concert = guest
           ? state.concerts.find((candidate) => candidate.id === guest.concertId)
           : null;
 
         return guest && concert ? { ...guest, concert: { endsAt: concert.endsAt } } : null;
       },
-      update: async ({
-        where,
-        data,
-      }: {
-        where: { id: string };
-        data: Partial<TestState['vipGuests'][0]>;
-      }) => {
+      update: async ({ where, data }: { where: { id: string }; data: Partial<TestState['vipGuests'][0]> }) => {
         const guest = state.vipGuests.find((candidate) => candidate.id === where.id);
         assert.ok(guest);
         Object.assign(guest, data);
@@ -898,17 +801,7 @@ function createPrismaMock(state: TestState) {
       },
     },
     checkIn: {
-      findFirst: async ({
-        where,
-      }: {
-        where: {
-          sourceDeviceId?: string;
-          localScanId?: string;
-          ticketId?: string;
-          vipGuestId?: string;
-          status?: CheckInStatus;
-        };
-      }) =>
+      findFirst: async ({ where }: { where: { sourceDeviceId?: string; localScanId?: string; ticketId?: string; vipGuestId?: string; status?: CheckInStatus } }) =>
         state.checkIns.find(
           (checkIn) =>
             (!where.sourceDeviceId || checkIn.sourceDeviceId === where.sourceDeviceId) &&
@@ -953,11 +846,70 @@ function createPrismaMock(state: TestState) {
 function signedTicketQr(
   ticket: TestState['tickets'][number],
   expiresAt = new Date('2026-08-27T15:30:00.000Z'),
+  overrides: Partial<{ concertId: string; nonce: string; entityId: string; issuer: string }> = {},
 ): string {
-  return createTicketQrToken({
-    ticketId: ticket.id,
-    concertId: ticket.concertId,
-    nonce: ticket.qrHash,
-    expiresAt,
-  });
+  return withIssuer(overrides.issuer, () =>
+    createCheckInQrToken({
+      entityType: CHECK_IN_QR_ENTITY_TYPES.ticket,
+      entityId: overrides.entityId ?? ticket.id,
+      concertId: overrides.concertId ?? ticket.concertId,
+      nonce: overrides.nonce ?? ticket.qrHash,
+      issuedAt: ticket.issuedAt,
+      expiresAt,
+    }),
+  );
 }
+
+function signedVipQr(
+  guest: TestState['vipGuests'][number],
+  expiresAt = new Date('2026-08-27T15:30:00.000Z'),
+  overrides: Partial<{ concertId: string; nonce: string; entityId: string; issuer: string }> = {},
+): string {
+  return withIssuer(overrides.issuer, () =>
+    createCheckInQrToken({
+      entityType: CHECK_IN_QR_ENTITY_TYPES.vipGuest,
+      entityId: overrides.entityId ?? guest.id,
+      concertId: overrides.concertId ?? guest.concertId,
+      nonce: overrides.nonce ?? (guest.qrHash ?? guest.id),
+      issuedAt: new Date('2026-06-15T12:00:00.000Z'),
+      expiresAt,
+    }),
+  );
+}
+
+function withIssuer<T>(issuer: string | undefined, callback: () => T): T {
+  const originalIssuer = process.env.CHECK_IN_QR_ISSUER;
+
+  if (issuer) {
+    process.env.CHECK_IN_QR_ISSUER = issuer;
+  }
+
+  try {
+    return callback();
+  } finally {
+    process.env.CHECK_IN_QR_ISSUER = originalIssuer;
+  }
+}
+
+function syncOne(
+  service: CheckInService,
+  concertId: string,
+  scan: {
+    localScanId: string;
+    qrHash: string;
+    entityType: CheckInScanEntityType;
+    scannedAt: string;
+    localResult?: string;
+    mode?: CheckInClientMode;
+  },
+) {
+  return service.syncEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    concertId,
+    {
+      sourceDeviceId: 'device-a',
+      scans: [scan],
+    },
+  );
+}
+

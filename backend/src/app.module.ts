@@ -7,6 +7,7 @@ import { ConcertsModule } from './modules/concerts/concerts.module';
 import { HealthModule } from './modules/health/health.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
 import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
 
 @Module({
@@ -17,6 +18,7 @@ import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
     }),
     AppConfigModule,
     RedisCacheModule,
+    TicketsModule,
     AuthModule,
     RbacModule,
     CheckInModule,
