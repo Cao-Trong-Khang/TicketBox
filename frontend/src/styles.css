@@ -1315,6 +1315,18 @@ h1 {
   box-shadow: 0 12px 28px rgba(28, 37, 54, 0.06);
 }
 
+.admin-dashboard-tile--interactive {
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.admin-dashboard-tile--interactive:hover,
+.admin-dashboard-tile--interactive:focus-visible {
+  transform: translateY(-1px);
+  border-color: var(--accent-strong);
+  box-shadow: 0 14px 30px rgba(28, 37, 54, 0.1);
+}
+
 .admin-dashboard-tile svg {
   color: var(--accent-strong);
 }

@@ -20,6 +20,23 @@ function mockJsonResponse(body: unknown, status = 200) {
   );
 }
 
+function createConcerts() {
+  return [
+    {
+      id: 'concert-1',
+      title: 'Anh Trai Say Hi Concert 2026',
+      artistName: 'Anh Trai Say Hi',
+      description: null,
+      venueName: 'Nhà thi đấu',
+      venueAddress: 'Hà Nội',
+      bannerUrl: null,
+      startsAt: '2026-07-01T20:00:00.000Z',
+      endsAt: '2026-07-01T23:00:00.000Z',
+      minPriceVnd: 800000,
+    },
+  ];
+}
+
 describe('frontend auth shell', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -169,5 +186,25 @@ describe('frontend auth shell', () => {
     expect(localStorage.getItem('accessToken')).toBeNull();
     expect(localStorage.getItem('refreshToken')).toBeNull();
     expect(localStorage.getItem('userRoles')).toBeNull();
+  });
+
+  it('redirects non-organizers away from organizer routes', async () => {
+    localStorage.setItem('userRoles', JSON.stringify(['AUDIENCE']));
+
+    renderApp('/organizer/concerts');
+
+    expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Concert của bạn' })).not.toBeInTheDocument();
+  });
+
+  it('navigates to the organizer dashboard from the concert management card', async () => {
+    localStorage.setItem('userRoles', JSON.stringify(['ORGANIZER']));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse([])));
+
+    renderApp('/admin/dashboard');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Concert Management/i }));
+
+    expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
   });
 });

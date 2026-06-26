@@ -23,9 +23,30 @@ export function AppRouter() {
       <Route path="/" element={<Navigate to="/concerts" replace />} />
       <Route path="/concerts" element={<ConcertsListPage />} />
       <Route path="/concerts/:id" element={<ConcertDetailPage />} />
-      <Route path="/organizer/concerts" element={<OrganizerConcertDashboardPage />} />
-      <Route path="/organizer/concerts/new" element={<OrganizerConcertCreatePage />} />
-      <Route path="/organizer/concerts/:id/edit" element={<OrganizerConcertEditPage />} />
+      <Route
+        path="/organizer/concerts"
+        element={
+          <RequireOrganizer>
+            <OrganizerConcertDashboardPage />
+          </RequireOrganizer>
+        }
+      />
+      <Route
+        path="/organizer/concerts/new"
+        element={
+          <RequireOrganizer>
+            <OrganizerConcertCreatePage />
+          </RequireOrganizer>
+        }
+      />
+      <Route
+        path="/organizer/concerts/:id/edit"
+        element={
+          <RequireOrganizer>
+            <OrganizerConcertEditPage />
+          </RequireOrganizer>
+        }
+      />
       <Route
         path="/organizer/concerts/:concertId/ticket-types"
         element={<OrganizerTicketTypeManagementPage />}
