@@ -44,6 +44,7 @@ export class AuthService {
             displayName: normalizeOptionalText(dto.displayName),
           },
         });
+
         const audienceRole = await tx.role.findUnique({
           where: { code: ROLE_CODES.audience },
         });
@@ -115,7 +116,9 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token is invalid, revoked, or expired');
     }
 
-    const user = await this.prisma.user.findUnique({ where: { id: matchedToken.userId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: matchedToken.userId },
+    });
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Refresh token is invalid, revoked, or expired');
@@ -129,6 +132,7 @@ export class AuthService {
         where: { id: matchedToken.id },
         data: { revokedAt: new Date() },
       });
+
       await tx.refreshToken.create({
         data: {
           userId: user.id,
@@ -158,8 +162,41 @@ export class AuthService {
     });
   }
 
+  /**
+   * Unified profile for frontend (/auth/me)
+   */
+  async getProfile(userId: string): Promise<AuthUserProfile> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException('User is not active');
+    }
+
+    const userRoles = await this.prisma.userRole.findMany({
+      where: { userId },
+      select: {
+        role: { select: { code: true } },
+      },
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      status: user.status,
+      roles: userRoles.map((r) => r.role.code),
+    };
+  }
+
+  /**
+   * Used for login/refresh flow
+   */
   async getUserProfile(userId: string): Promise<AuthUserProfile> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('User is not active');
@@ -178,6 +215,8 @@ export class AuthService {
       roles: userRoles.map((userRole) => userRole.role.code).sort(),
     };
   }
+
+  // ---------------- helpers ----------------
 
   private async findMatchingRefreshToken(
     refreshToken: string,
@@ -210,6 +249,8 @@ export class AuthService {
     return this.jwtService.signAsync(payload);
   }
 }
+
+// ---------------- utilities ----------------
 
 class MissingDefaultAudienceRoleError extends Error {}
 

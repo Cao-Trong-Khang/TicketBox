@@ -276,6 +276,32 @@ test('public concert detail throws not found when no published concert exists', 
   );
 });
 
+test('public concert detail hides cancelled concerts because only published concerts are queryable', async () => {
+  const findFirstCalls: PrismaConcertFindFirstArgs[] = [];
+  const service = new ConcertsService(
+    {
+      concert: {
+        findFirst: async (args: PrismaConcertFindFirstArgs) => {
+          findFirstCalls.push(args);
+          return null;
+        },
+      },
+    } as never,
+    {
+      get: async () => null,
+      set: async () => undefined,
+      del: async () => undefined,
+    } as never,
+  );
+
+  await assert.rejects(
+    () => service.findPublishedConcertDetail('33333333-3333-4333-8333-333333333334'),
+    NotFoundException,
+  );
+  assert.equal(findFirstCalls.length, 1);
+  assert.equal(findFirstCalls[0].where.status, ConcertStatus.PUBLISHED);
+});
+
 test('public concert ticket types maps active ticket types with computed availability and short cache TTL', async () => {
   const concertId = '44444444-4444-4444-8444-444444444444';
   const saleStartAt = new Date('2026-06-01T13:00:00.000Z');
@@ -428,5 +454,35 @@ test('public concert ticket types throws not found when no published concert exi
   await assert.rejects(
     () => service.findPublishedConcertTicketTypes('66666666-6666-4666-8666-666666666666'),
     NotFoundException,
+  );
+});
+
+test('public concert ticket types hide cancelled concerts because only published concerts can expose ticket types', async () => {
+  const findFirstCalls: PrismaConcertFindFirstTicketTypesArgs[] = [];
+  const service = new ConcertsService(
+    {
+      concert: {
+        findFirst: async (args: PrismaConcertFindFirstTicketTypesArgs) => {
+          findFirstCalls.push(args);
+          return null;
+        },
+      },
+    } as never,
+    {
+      get: async () => null,
+      set: async () => undefined,
+      del: async () => undefined,
+    } as never,
+  );
+
+  await assert.rejects(
+    () => service.findPublishedConcertTicketTypes('66666666-6666-4666-8666-666666666667'),
+    NotFoundException,
+  );
+  assert.equal(findFirstCalls.length, 1);
+  assert.equal(findFirstCalls[0].where.status, ConcertStatus.PUBLISHED);
+  assert.equal(
+    findFirstCalls[0].select.ticketTypes.where.status,
+    TicketTypeStatus.ACTIVE,
   );
 });

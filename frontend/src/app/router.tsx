@@ -4,6 +4,10 @@ import { LoginPage } from '../features/auth/pages/LoginPage';
 import { ArtistBioAdminPage } from '../features/artist-bio/pages/ArtistBioAdminPage';
 import { ConcertDetailPage } from '../features/concerts/pages/ConcertDetailPage';
 import { ConcertsListPage } from '../features/concerts/pages/ConcertsListPage';
+import { OrganizerConcertCreatePage } from '../features/organizer-concerts/pages/OrganizerConcertCreatePage';
+import { OrganizerConcertDashboardPage } from '../features/organizer-concerts/pages/OrganizerConcertDashboardPage';
+import { OrganizerConcertEditPage } from '../features/organizer-concerts/pages/OrganizerConcertEditPage';
+import { OrganizerTicketTypeManagementPage } from '../features/organizer-concerts/pages/OrganizerTicketTypeManagementPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { OrderPendingPage } from '../features/orders/pages/OrderPendingPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
@@ -19,6 +23,34 @@ export function AppRouter() {
       <Route path="/" element={<Navigate to="/concerts" replace />} />
       <Route path="/concerts" element={<ConcertsListPage />} />
       <Route path="/concerts/:id" element={<ConcertDetailPage />} />
+      <Route
+        path="/organizer/concerts"
+        element={
+          <RequireOrganizer>
+            <OrganizerConcertDashboardPage />
+          </RequireOrganizer>
+        }
+      />
+      <Route
+        path="/organizer/concerts/new"
+        element={
+          <RequireOrganizer>
+            <OrganizerConcertCreatePage />
+          </RequireOrganizer>
+        }
+      />
+      <Route
+        path="/organizer/concerts/:id/edit"
+        element={
+          <RequireOrganizer>
+            <OrganizerConcertEditPage />
+          </RequireOrganizer>
+        }
+      />
+      <Route
+        path="/organizer/concerts/:concertId/ticket-types"
+        element={<OrganizerTicketTypeManagementPage />}
+      />
       <Route path="/orders/:orderId" element={<OrderPendingPage />} />
       <Route
         path="/admin/dashboard"

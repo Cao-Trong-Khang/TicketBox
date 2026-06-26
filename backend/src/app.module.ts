@@ -9,6 +9,7 @@ import { CheckInModule } from './modules/check-in/check-in.module';
 import { ConcertsModule } from './modules/concerts/concerts.module';
 import { HealthModule } from './modules/health/health.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { RateLimitModule } from './modules/rate-limit/rate-limit.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
 import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
@@ -30,6 +31,7 @@ import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
     ConcertsModule,
     VipImportsModule,
     OrdersModule,
+    RateLimitModule,
     HealthModule,
   ],
 })

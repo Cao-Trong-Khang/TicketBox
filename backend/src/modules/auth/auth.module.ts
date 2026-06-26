@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import type { SignOptions } from 'jsonwebtoken';
 import { getJwtConfig } from '../../config/app.config';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { RateLimitModule } from '../rate-limit/rate-limit.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
@@ -12,6 +13,7 @@ import { JwtStrategy } from './jwt.strategy';
 @Module({
   imports: [
     PrismaModule,
+    RateLimitModule,
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],

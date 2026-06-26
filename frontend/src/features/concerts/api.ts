@@ -13,7 +13,15 @@ export function getConcertTicketTypes(id: string): Promise<TicketType[]> {
   return apiFetch<TicketType[]>(`/concerts/${id}/ticket-types`);
 }
 
-export function formatConcertDate(isoString: string): string {
+export function formatConcertDate(isoString?: string | null): string {
+  if (!isoString) return 'Đang cập nhật';
+
+  const date = new Date(isoString);
+
+  if (isNaN(date.getTime())) {
+    return 'Đang cập nhật';
+  }
+
   return new Intl.DateTimeFormat('vi-VN', {
     year: 'numeric',
     month: 'long',
@@ -21,7 +29,7 @@ export function formatConcertDate(isoString: string): string {
     hour: '2-digit',
     minute: '2-digit',
     timeZone: 'Asia/Ho_Chi_Minh',
-  }).format(new Date(isoString));
+  }).format(date);
 }
 
 export function formatPrice(priceVnd: number | null): string {

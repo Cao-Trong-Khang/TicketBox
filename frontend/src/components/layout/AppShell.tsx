@@ -34,6 +34,7 @@ export function AppShell({ children }: AppShellProps) {
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('userRoles');
+
     window.dispatchEvent(new Event('ticketbox-auth-changed'));
     navigate('/login');
   };
@@ -48,11 +49,25 @@ export function AppShell({ children }: AppShellProps) {
 
         <nav className="nav-links" aria-label="Primary">
           <NavLink to="/concerts">Concerts</NavLink>
-          {authState.isOrganizer && <NavLink to="/admin/dashboard">Admin</NavLink>}
-          {!authState.hasToken && <NavLink to="/login">Đăng nhập</NavLink>}
-          {!authState.hasToken && <NavLink to="/register">Đăng ký</NavLink>}
+
+          {authState.isOrganizer && (
+            <NavLink to="/organizer/concerts">Kênh organizer</NavLink>
+          )}
+
+          {!authState.hasToken && (
+            <NavLink to="/login">Đăng nhập</NavLink>
+          )}
+
+          {!authState.hasToken && (
+            <NavLink to="/register">Đăng ký</NavLink>
+          )}
+
           {authState.hasToken && (
-            <button className="nav-button" type="button" onClick={handleLogout}>
+            <button
+              className="nav-button"
+              type="button"
+              onClick={handleLogout}
+            >
               <LogOut size={18} aria-hidden="true" />
               <span>Đăng xuất</span>
             </button>

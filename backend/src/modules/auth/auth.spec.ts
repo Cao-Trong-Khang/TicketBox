@@ -9,6 +9,7 @@ import request from 'supertest';
 import { RbacModule } from '../rbac/rbac.module';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { AuthModule } from './auth.module';
 
 type TestState = {
@@ -102,6 +103,7 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
       status: storedUser.status,
       roles: [ROLE_CODES.audience],
     });
+    
     const refreshResponse = await request(app.getHttpServer())
       .post('/auth/refresh')
       .send({ refreshToken: audienceLogin.body.refreshToken })
@@ -183,6 +185,8 @@ async function createTestApp(prisma: Partial<PrismaService>): Promise<INestAppli
   })
     .overrideProvider(PrismaService)
     .useValue(prisma)
+    .overrideProvider(RedisCacheService)
+    .useValue(createRedisCacheMock())
     .compile();
 
   const app = moduleRef.createNestApplication();
@@ -404,31 +408,55 @@ function createPrismaDelegates(state: TestState) {
         state.userRoles.push(userRole);
         return userRole;
       },
-      findMany: async ({ where }: { where: Prisma.UserRoleWhereInput }) => {
+      findMany: async ({
+        where,
+        include,
+        select,
+      }: {
+        where: Prisma.UserRoleWhereInput;
+        include?: Prisma.UserRoleInclude;
+        select?: Prisma.UserRoleSelect;
+      }) => {
         return state.userRoles
           .filter((userRole) => !where.userId || userRole.userId === where.userId)
           .map((userRole) => {
             const role = state.roles.find((candidate) => candidate.id === userRole.roleId);
             assert.ok(role);
 
+            if (select?.role) {
+              return {
+                ...userRole,
+                role: {
+                  code: role.code,
+                },
+              };
+            }
+
+            if (include?.role) {
+              return {
+                ...userRole,
+                role: {
+                  ...role,
+                  rolePermissions: state.rolePermissions
+                    .filter((rolePermission) => rolePermission.roleId === role.id)
+                    .map((rolePermission) => {
+                      const permission = state.permissions.find(
+                        (candidate) => candidate.id === rolePermission.permissionId,
+                      );
+                      assert.ok(permission);
+
+                      return {
+                        ...rolePermission,
+                        permission,
+                      };
+                    }),
+                },
+              };
+            }
+
             return {
               ...userRole,
-              role: {
-                ...role,
-                rolePermissions: state.rolePermissions
-                  .filter((rolePermission) => rolePermission.roleId === role.id)
-                  .map((rolePermission) => {
-                    const permission = state.permissions.find(
-                      (candidate) => candidate.id === rolePermission.permissionId,
-                    );
-                    assert.ok(permission);
-
-                    return {
-                      ...rolePermission,
-                      permission,
-                    };
-                  }),
-              },
+              role,
             };
           });
       },
@@ -477,4 +505,11 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
   }
 
   return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
+}
+
+function createRedisCacheMock() {
+  return {
+    incrementWithTtl: async () => 1,
+    getTtlSeconds: async () => 60,
+  } satisfies Partial<RedisCacheService>;
 }
