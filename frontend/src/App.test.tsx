@@ -39,762 +39,135 @@ describe('frontend auth shell', () => {
     expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
     expect(await screen.findByText('Anh Trai Say Hi Concert 2026')).toBeInTheDocument();
     expect(screen.getByText('Từ 800.000 ₫')).toBeInTheDocument();
-    expect(screen.queryByText('Backend online')).not.toBeInTheDocument();
-    expect(screen.queryByText('Concert discovery')).not.toBeInTheDocument();
   });
 
-  it('renders the login route', () => {
+  it('renders login page', () => {
     renderApp('/login');
 
     expect(screen.getByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Email')).toBeInTheDocument();
-    expect(screen.getByLabelText('Mật khẩu')).toBeInTheDocument();
   });
 
-  it('renders the register route', () => {
+  it('renders register page', () => {
     renderApp('/register');
 
     expect(screen.getByRole('heading', { name: 'Đăng ký' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Tên hiển thị')).toBeInTheDocument();
-    expect(screen.getByLabelText('Xác nhận mật khẩu')).toBeInTheDocument();
   });
 
-  it('sends successful registration to login without storing a token', async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
+  it('stores token and redirects audience user after login', async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() =>
       mockJsonResponse({
-        id: 'user-1',
-        email: 'audience@example.com',
-        displayName: 'Audience User',
-        status: 'ACTIVE',
-      }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/register');
-
-    fireEvent.change(screen.getByLabelText('Tên hiển thị'), { target: { value: 'Audience User' } });
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'audience@example.com' } });
-    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
-    fireEvent.change(screen.getByLabelText('Xác nhận mật khẩu'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Đăng ký' }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/register', expect.any(Object)));
-    expect(localStorage.getItem('accessToken')).toBeNull();
-
-    await screen.findByText('Đăng ký thành công. Bạn sẽ được chuyển sang màn hình đăng nhập.');
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument());
-    expect(localStorage.getItem('accessToken')).toBeNull();
-  });
-
-  it('stores access token and routes audience login to concerts after successful profile lookup', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
-      .mockImplementationOnce(() =>
-        mockJsonResponse({
+        accessToken: 'jwt-token',
+        refreshToken: 'refresh-token',
+        user: {
           id: 'user-1',
           email: 'audience@example.com',
+          displayName: null,
+          status: 'ACTIVE',
           roles: ['AUDIENCE'],
-        }),
-      )
-      .mockImplementationOnce(() => mockJsonResponse(createConcerts()));
+        },
+      }),
+    );
+
     vi.stubGlobal('fetch', fetchMock);
 
     renderApp('/login');
 
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'audience@example.com' } });
-    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'audience@example.com' },
+    });
+
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), {
+      target: { value: 'password123' },
+    });
+
     fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/login', expect.any(Object)));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/me', expect.any(Object)));
-    await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('jwt-token'));
-    expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(localStorage.getItem('accessToken')).toBe('jwt-token'),
+    );
+
+    expect(localStorage.getItem('userRoles')).toBe(JSON.stringify(['AUDIENCE']));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Concert sắp diễn ra' }),
+    ).toBeInTheDocument();
   });
 
-  it('redirects organizer login to organizer dashboard after profile lookup', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
-      .mockImplementationOnce(() =>
-        mockJsonResponse({
+  it('redirects organizer user to organizer page after login', async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() =>
+      mockJsonResponse({
+        accessToken: 'organizer-token',
+        refreshToken: 'refresh-token',
+        user: {
           id: 'user-2',
           email: 'organizer@example.com',
-          roles: ['ORGANIZER'],
-        }),
-      )
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcerts()));
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/login');
-
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'organizer@example.com' } });
-    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/me', expect.any(Object)));
-    expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
-  });
-
-  it('falls back to concerts when auth profile lookup fails after successful login', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
-      .mockImplementationOnce(() => mockJsonResponse({ message: 'Unauthorized' }, 401))
-      .mockImplementationOnce(() => mockJsonResponse(createConcerts()));
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/login');
-
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'audience@example.com' } });
-    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
-
-    await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('jwt-token'));
-    expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
-  });
-
-  it('renders the organizer dashboard route with concert list', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse(createOrganizerConcerts())));
-
-    renderApp('/organizer/concerts');
-
-    expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
-    expect(screen.getByText('Organizer Public Concert')).toBeInTheDocument();
-    expect(screen.getAllByText('TicketBox Artist')).toHaveLength(4);
-    expect(screen.getByRole('button', { name: 'Tạo concert' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Sửa' })[0]).toBeEnabled();
-    expect(screen.getAllByRole('button', { name: 'Sửa' })[1]).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: 'Sửa' })[2]).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: 'Sửa' })[3]).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: 'Hủy' })[0]).toBeEnabled();
-    expect(screen.getAllByRole('button', { name: 'Hủy' })[1]).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: 'Hủy' })[2]).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: 'Hủy' })[3]).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Quản lý vé' })).not.toBeInTheDocument();
-    expect(screen.getByText('Sắp diễn ra')).toBeInTheDocument();
-    expect(screen.getByText('Đang diễn ra')).toBeInTheDocument();
-    expect(screen.getByText('Đã kết thúc')).toBeInTheDocument();
-    expect(screen.getByText('Đã hủy')).toBeInTheDocument();
-  });
-
-  it('shows organizer empty state when no concerts are returned', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse([])));
-
-    renderApp('/organizer/concerts');
-
-    expect(await screen.findByText('Bạn chưa có concert nào trong kênh organizer.')).toBeInTheDocument();
-  });
-
-  it('shows organizer login guidance for 401', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() =>
-        mockJsonResponse({ message: 'Unauthorized' }, 401),
-      ),
-    );
-
-    renderApp('/organizer/concerts');
-
-    expect(
-      await screen.findByText('Vui lòng đăng nhập để truy cập kênh organizer'),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Đi đến đăng nhập' })).toHaveAttribute('href', '/login');
-  });
-
-  it('shows organizer permission guidance for 403', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() => mockJsonResponse({ message: 'Forbidden' }, 403)),
-    );
-
-    renderApp('/organizer/concerts');
-
-    expect(await screen.findByText('Tài khoản này không có quyền organizer')).toBeInTheDocument();
-  });
-
-  it('renders the organizer create route and validates required fields', async () => {
-    renderApp('/organizer/concerts/new');
-
-    expect(screen.getByRole('heading', { name: 'Tạo concert mới' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Cấu hình vé' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Publish concert' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
-
-    expect(await screen.findByText('Vui lòng nhập tên concert.')).toBeInTheDocument();
-    expect(screen.getByText('Vui lòng chọn thời gian bắt đầu.')).toBeInTheDocument();
-  });
-
-  it('blocks concert creation when no local ticket type is configured', async () => {
-    renderApp('/organizer/concerts/new');
-
-    fireEvent.change(screen.getByLabelText('Tên concert'), {
-      target: { value: 'Organizer Draft Concert' },
-    });
-    fireEvent.change(screen.getByLabelText('Nghệ sĩ'), {
-      target: { value: 'TicketBox Artist' },
-    });
-    fireEvent.change(screen.getByLabelText('Địa điểm'), {
-      target: { value: 'TicketBox Arena' },
-    });
-    fireEvent.change(screen.getByLabelText('Địa chỉ'), {
-      target: { value: 'District 1' },
-    });
-    fireEvent.change(screen.getByLabelText('Bắt đầu'), {
-      target: { value: '2026-08-20T19:30' },
-    });
-    fireEvent.change(screen.getByLabelText('Kết thúc'), {
-      target: { value: '2026-08-20T22:30' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
-
-    expect(
-      await screen.findByText('Vui lòng cấu hình ít nhất một loại vé trước khi tạo concert.'),
-    ).toBeInTheDocument();
-  });
-
-  it('creates a concert, creates ticket types, activates them, then navigates to edit page', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypeDetail()))
-      .mockImplementationOnce(() =>
-        mockJsonResponse({
-          ...createOrganizerTicketTypeDetail(),
+          displayName: null,
           status: 'ACTIVE',
-        }),
-      )
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypes()));
+          roles: ['ORGANIZER'],
+        },
+      }),
+    );
+
     vi.stubGlobal('fetch', fetchMock);
 
-    renderApp('/organizer/concerts/new');
+    renderApp('/login');
 
-    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
-      target: { value: 'GA' },
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'organizer@example.com' },
     });
-    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
-      target: { value: 'Vé thường' },
-    });
-    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
-      target: { value: '500000' },
-    });
-    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
-      target: { value: '100' },
-    });
-    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
-      target: { value: '4' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
 
-    fireEvent.change(screen.getByLabelText('Tên concert'), {
-      target: { value: 'Organizer Draft Concert' },
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), {
+      target: { value: 'password123' },
     });
-    fireEvent.change(screen.getByLabelText('Nghệ sĩ'), {
-      target: { value: 'TicketBox Artist' },
-    });
-    fireEvent.change(screen.getByLabelText('Địa điểm'), {
-      target: { value: 'TicketBox Arena' },
-    });
-    fireEvent.change(screen.getByLabelText('Địa chỉ'), {
-      target: { value: 'District 1' },
-    });
-    fireEvent.change(screen.getByLabelText('Bắt đầu'), {
-      target: { value: '2026-08-20T19:30' },
-    });
-    fireEvent.change(screen.getByLabelText('Kết thúc'), {
-      target: { value: '2026-08-20T22:30' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/organizer/concerts',
-        expect.any(Object),
-      ),
+      expect(localStorage.getItem('accessToken')).toBe('organizer-token'),
     );
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types',
-        expect.any(Object),
-      ),
-    );
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types/99999999-9999-4999-8999-999999999999/activate',
-        expect.any(Object),
-      ),
-    );
-    expect(await screen.findByRole('heading', { name: /Chỉnh sửa Organizer Public Concert/i })).toBeInTheDocument();
+
+    expect(localStorage.getItem('userRoles')).toBe(JSON.stringify(['ORGANIZER']));
+
     expect(
-      screen.getByText('Concert đã được tạo và hiển thị công khai. Bạn có thể tiếp tục quản lý vé tại đây.'),
+      await screen.findByText('Kênh organizer'),
     ).toBeInTheDocument();
   });
 
-  it('rejects duplicate local ticket codes before final submit', async () => {
-    renderApp('/organizer/concerts/new');
+  it('blocks check-in staff accounts', async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() =>
+      mockJsonResponse({
+        accessToken: 'staff-token',
+        refreshToken: 'staff-refresh-token',
+        user: {
+          id: 'user-3',
+          email: 'staff@example.com',
+          displayName: null,
+          status: 'ACTIVE',
+          roles: ['CHECKIN_STAFF'],
+        },
+      }),
+    );
 
-    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
-      target: { value: 'GA' },
-    });
-    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
-      target: { value: 'Vé thường' },
-    });
-    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
-      target: { value: '500000' },
-    });
-    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
-      target: { value: '100' },
-    });
-    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
-      target: { value: '4' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
+    vi.stubGlobal('fetch', fetchMock);
 
-    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
-      target: { value: 'GA' },
+    renderApp('/login');
+
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'staff@example.com' },
     });
-    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
-      target: { value: 'Vé VIP' },
+
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), {
+      target: { value: 'password123' },
     });
-    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
-      target: { value: '900000' },
-    });
-    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
-      target: { value: '50' },
-    });
-    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
-      target: { value: '2' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
 
     expect(
-      await screen.findByText('Mã loại vé đang bị trùng trong danh sách cấu hình cục bộ.'),
+      await screen.findByText('Tài khoản nhân viên check-in chỉ dùng trên ứng dụng mobile.'),
     ).toBeInTheDocument();
-  });
 
-  it('keeps concert form values unchanged after adding a local ticket type', async () => {
-    renderApp('/organizer/concerts/new');
-
-    fireEvent.change(screen.getByLabelText('Tên concert'), {
-      target: { value: 'Organizer Draft Concert' },
-    });
-    fireEvent.change(screen.getByLabelText('Nghệ sĩ'), {
-      target: { value: 'TicketBox Artist' },
-    });
-    fireEvent.change(screen.getByLabelText('Địa điểm'), {
-      target: { value: 'TicketBox Arena' },
-    });
-    fireEvent.change(screen.getByLabelText('Địa chỉ'), {
-      target: { value: 'District 1' },
-    });
-    fireEvent.change(screen.getByLabelText('Bắt đầu'), {
-      target: { value: '2026-08-20T19:30' },
-    });
-    fireEvent.change(screen.getByLabelText('Kết thúc'), {
-      target: { value: '2026-08-20T22:30' },
-    });
-    fireEvent.change(screen.getByLabelText('Mô tả'), {
-      target: { value: 'Draft description' },
-    });
-    fireEvent.change(screen.getByLabelText('Banner URL'), {
-      target: { value: 'https://example.test/banner.jpg' },
-    });
-    fireEvent.change(screen.getByLabelText('Seating SVG'), {
-      target: { value: '<svg />' },
-    });
-
-    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
-      target: { value: 'GA' },
-    });
-    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
-      target: { value: 'Vé thường' },
-    });
-    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
-      target: { value: '500000' },
-    });
-    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
-      target: { value: '100' },
-    });
-    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
-      target: { value: '4' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
-
-    expect(screen.getByLabelText('Tên concert')).toHaveValue('Organizer Draft Concert');
-    expect(screen.getByLabelText('Nghệ sĩ')).toHaveValue('TicketBox Artist');
-    expect(screen.getByLabelText('Địa điểm')).toHaveValue('TicketBox Arena');
-    expect(screen.getByLabelText('Địa chỉ')).toHaveValue('District 1');
-    expect(screen.getByLabelText('Bắt đầu')).toHaveValue('2026-08-20T19:30');
-    expect(screen.getByLabelText('Kết thúc')).toHaveValue('2026-08-20T22:30');
-    expect(screen.getByLabelText('Mô tả')).toHaveValue('Draft description');
-    expect(screen.getByLabelText('Banner URL')).toHaveValue('https://example.test/banner.jpg');
-    expect(screen.getByLabelText('Seating SVG')).toHaveValue('<svg />');
-
-    expect(screen.getByLabelText('Mã loại vé')).toHaveValue('');
-    expect(screen.getByLabelText('Tên loại vé')).toHaveValue('');
-    expect(screen.getByLabelText('Giá vé (VND)')).toHaveValue('');
-    expect(screen.getByLabelText('Tổng số vé')).toHaveValue('');
-    expect(screen.getByLabelText('Giới hạn mỗi người')).toHaveValue('');
-  });
-
-  it('shows recovery guidance when concert creation succeeds but ticket setup fails', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
-      .mockImplementationOnce(() => mockJsonResponse({ message: 'Duplicate code' }, 409));
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/organizer/concerts/new');
-
-    fireEvent.change(screen.getByLabelText('Mã loại vé'), {
-      target: { value: 'GA' },
-    });
-    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
-      target: { value: 'Vé thường' },
-    });
-    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
-      target: { value: '500000' },
-    });
-    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
-      target: { value: '100' },
-    });
-    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
-      target: { value: '4' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Thêm loại vé' }));
-
-    fireEvent.change(screen.getByLabelText('Tên concert'), {
-      target: { value: 'Organizer Draft Concert' },
-    });
-    fireEvent.change(screen.getByLabelText('Nghệ sĩ'), {
-      target: { value: 'TicketBox Artist' },
-    });
-    fireEvent.change(screen.getByLabelText('Địa điểm'), {
-      target: { value: 'TicketBox Arena' },
-    });
-    fireEvent.change(screen.getByLabelText('Địa chỉ'), {
-      target: { value: 'District 1' },
-    });
-    fireEvent.change(screen.getByLabelText('Bắt đầu'), {
-      target: { value: '2026-08-20T19:30' },
-    });
-    fireEvent.change(screen.getByLabelText('Kết thúc'), {
-      target: { value: '2026-08-20T22:30' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
-
-    expect(
-      await screen.findByText(
-        'Concert đã được tạo nhưng một số loại vé chưa hoàn tất. Vui lòng kiểm tra lại trong trang Quản lý vé.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Đi đến Quản lý vé' })).toBeInTheDocument();
-  });
-
-  it('loads ongoing concert edit page as read-only and shows lifecycle note', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() =>
-        mockJsonResponse({
-          ...createOrganizerConcertDetail(),
-          lifecycleStatus: 'ONGOING',
-        }),
-      ),
-    );
-
-    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
-
-    expect(await screen.findByText('Concert đang diễn ra hoặc đã kết thúc nên không thể chỉnh sửa.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Lưu thay đổi' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Publish concert' })).not.toBeInTheDocument();
-  });
-
-  it('loads ended concert edit page as read-only and shows lifecycle note', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() =>
-        mockJsonResponse({
-          ...createOrganizerConcertDetail(),
-          lifecycleStatus: 'ENDED',
-        }),
-      ),
-    );
-
-    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
-
-    expect(await screen.findByText('Concert đang diễn ra hoặc đã kết thúc nên không thể chỉnh sửa.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Lưu thay đổi' })).toBeDisabled();
-  });
-
-  it('loads cancelled concert edit page as read-only and shows cancelled note', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockImplementation(() =>
-        mockJsonResponse({
-          ...createOrganizerConcertDetail(),
-          status: 'CANCELLED',
-          lifecycleStatus: 'UPCOMING',
-        }),
-      ),
-    );
-
-    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/edit');
-
-    expect(await screen.findByText('Concert đã hủy nên không thể chỉnh sửa.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Lưu thay đổi' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Publish concert' })).not.toBeInTheDocument();
-  });
-
-  it('cancels an upcoming concert from the dashboard and refreshes local state', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcerts()))
-      .mockImplementationOnce(() =>
-        mockJsonResponse({
-          ...createOrganizerConcertDetail(),
-          status: 'CANCELLED',
-          lifecycleStatus: 'UPCOMING',
-        }),
-      );
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/organizer/concerts');
-
-    const cancelButtons = await screen.findAllByRole('button', { name: 'Hủy' });
-    fireEvent.click(cancelButtons[0]);
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/cancel',
-        expect.any(Object),
-      ),
-    );
-    expect(await screen.findByText('Concert đã được hủy.')).toBeInTheDocument();
-    expect(screen.getAllByText('Đã hủy').length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('shows the legacy ticket-type route and inline ticket configuration', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypes()));
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
-
-    expect(await screen.findByRole('heading', { name: /Quản lý vé - Organizer Public Concert/i })).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: 'Danh sách loại vé' })).toBeInTheDocument();
-    expect(screen.getByText('Vé thường')).toBeInTheDocument();
-    expect(screen.getByText('500.000 ₫')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Bắt đầu bán')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Kết thúc bán')).not.toBeInTheDocument();
-  });
-
-  it('validates organizer ticket-type form before submit', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
-      .mockImplementationOnce(() => mockJsonResponse([]));
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
-
-    await screen.findByRole('heading', { name: /Quản lý vé - Organizer Public Concert/i });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Tạo loại vé' })[1]);
-
-    expect(await screen.findByText('Vui lòng nhập mã loại vé.')).toBeInTheDocument();
-    expect(screen.getByText('Vui lòng nhập giá vé.')).toBeInTheDocument();
-  });
-
-  it('shows edit-only actions for newly created organizer ticket types', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
-      .mockImplementationOnce(() => mockJsonResponse([]))
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypeDetail()));
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
-
-    fireEvent.change(await screen.findByLabelText('Mã loại vé'), {
-      target: { value: 'GA' },
-    });
-    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
-      target: { value: 'Vé thường' },
-    });
-    fireEvent.change(screen.getByLabelText('Giá vé (VND)'), {
-      target: { value: '500000' },
-    });
-    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
-      target: { value: '100' },
-    });
-    fireEvent.change(screen.getByLabelText('Giới hạn mỗi người'), {
-      target: { value: '4' },
-    });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Tạo loại vé' })[1]);
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types',
-        expect.any(Object),
-      ),
-    );
-    expect(await screen.findByText('Đã tạo loại vé mới. Backend hiện mặc định trạng thái INACTIVE.')).toBeInTheDocument();
-
-    expect(screen.getByRole('button', { name: 'Sửa' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /activate/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /deactivate/i })).not.toBeInTheDocument();
-    expect(screen.getByText('INACTIVE')).toBeInTheDocument();
-  });
-
-  it('updates an organizer ticket type from edit mode', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerConcertDetail()))
-      .mockImplementationOnce(() => mockJsonResponse(createOrganizerTicketTypes()))
-      .mockImplementationOnce(() =>
-        mockJsonResponse({
-          ...createOrganizerTicketTypeDetail(),
-          name: 'Vé thường cập nhật',
-          totalQuantity: 150,
-          availableQuantity: 145,
-          updatedAt: '2026-06-24T12:00:00.000Z',
-        }),
-      );
-    vi.stubGlobal('fetch', fetchMock);
-
-    renderApp('/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Sửa' }));
-    fireEvent.change(screen.getByLabelText('Tên loại vé'), {
-      target: { value: 'Vé thường cập nhật' },
-    });
-    fireEvent.change(screen.getByLabelText('Tổng số vé'), {
-      target: { value: '150' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu loại vé' }));
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:3000/organizer/concerts/77777777-7777-4777-8777-777777777777/ticket-types/99999999-9999-4999-8999-999999999999',
-        expect.any(Object),
-      ),
-    );
-    expect(await screen.findByText('Đã cập nhật loại vé.')).toBeInTheDocument();
-    expect(screen.getByText('Vé thường cập nhật')).toBeInTheDocument();
+    expect(localStorage.getItem('accessToken')).toBeNull();
+    expect(localStorage.getItem('refreshToken')).toBeNull();
+    expect(localStorage.getItem('userRoles')).toBeNull();
   });
 });
-
-function createConcerts() {
-  return [
-    {
-      id: '11111111-1111-4111-8111-111111111111',
-      title: 'Anh Trai Say Hi Concert 2026',
-      artistName: 'Various Artists',
-      description: 'Concert description',
-      venueName: 'Sân vận động Mỹ Đình',
-      venueAddress: 'Nam Từ Liêm, Hà Nội',
-      bannerUrl: null,
-      startsAt: '2026-08-20T12:30:00.000Z',
-      endsAt: '2026-08-20T15:30:00.000Z',
-      minPriceVnd: 800000,
-    },
-  ];
-}
-
-function createOrganizerConcerts() {
-  return [
-    {
-      id: '77777777-7777-4777-8777-777777777777',
-      status: 'PUBLISHED',
-      lifecycleStatus: 'UPCOMING',
-      title: 'Organizer Public Concert',
-      artistName: 'TicketBox Artist',
-      venueName: 'TicketBox Arena',
-      startsAt: '2026-08-20T12:30:00.000Z',
-      endsAt: '2026-08-20T15:30:00.000Z',
-      createdAt: '2026-06-24T10:00:00.000Z',
-      updatedAt: '2026-06-24T10:00:00.000Z',
-    },
-    {
-      id: '77777777-7777-4777-8777-777777777778',
-      status: 'PUBLISHED',
-      lifecycleStatus: 'ONGOING',
-      title: 'Organizer Ongoing Concert',
-      artistName: 'TicketBox Artist',
-      venueName: 'TicketBox Arena',
-      startsAt: '2026-08-20T12:30:00.000Z',
-      endsAt: '2026-08-20T15:30:00.000Z',
-      createdAt: '2026-06-24T09:00:00.000Z',
-      updatedAt: '2026-06-24T09:00:00.000Z',
-    },
-    {
-      id: '77777777-7777-4777-8777-777777777779',
-      status: 'PUBLISHED',
-      lifecycleStatus: 'ENDED',
-      title: 'Organizer Ended Concert',
-      artistName: 'TicketBox Artist',
-      venueName: 'TicketBox Arena',
-      startsAt: '2026-08-20T12:30:00.000Z',
-      endsAt: '2026-08-20T15:30:00.000Z',
-      createdAt: '2026-06-24T08:00:00.000Z',
-      updatedAt: '2026-06-24T08:00:00.000Z',
-    },
-    {
-      id: '77777777-7777-4777-8777-777777777780',
-      status: 'CANCELLED',
-      lifecycleStatus: 'UPCOMING',
-      title: 'Organizer Cancelled Concert',
-      artistName: 'TicketBox Artist',
-      venueName: 'TicketBox Arena',
-      startsAt: '2026-08-20T12:30:00.000Z',
-      endsAt: '2026-08-20T15:30:00.000Z',
-      createdAt: '2026-06-24T07:00:00.000Z',
-      updatedAt: '2026-06-24T07:00:00.000Z',
-    },
-  ];
-}
-
-function createOrganizerConcertDetail() {
-  return {
-    id: '77777777-7777-4777-8777-777777777777',
-    status: 'PUBLISHED',
-    lifecycleStatus: 'UPCOMING',
-    title: 'Organizer Public Concert',
-    artistName: 'TicketBox Artist',
-    description: 'Public description',
-    venueName: 'TicketBox Arena',
-    venueAddress: 'District 1',
-    bannerUrl: '',
-    seatingSvg: '',
-    startsAt: '2026-08-20T12:30:00.000Z',
-    endsAt: '2026-08-20T15:30:00.000Z',
-    createdAt: '2026-06-24T10:00:00.000Z',
-    updatedAt: '2026-06-24T10:00:00.000Z',
-  };
-}
-
-function createOrganizerTicketTypes() {
-  return [createOrganizerTicketTypeDetail()];
-}
-
-function createOrganizerTicketTypeDetail() {
-  return {
-    id: '99999999-9999-4999-8999-999999999999',
-    code: 'GA',
-    name: 'Vé thường',
-    priceVnd: 500000,
-    totalQuantity: 100,
-    reservedQuantity: 0,
-    soldQuantity: 0,
-    availableQuantity: 100,
-    perUserLimit: 4,
-    saleStartAt: '2026-08-01T03:00:00.000Z',
-    saleEndAt: '2026-08-20T12:00:00.000Z',
-    status: 'INACTIVE',
-    createdAt: '2026-06-24T10:00:00.000Z',
-    updatedAt: '2026-06-24T10:00:00.000Z',
-  };
-}

@@ -162,6 +162,7 @@ test('public concert detail maps published concert metadata and caches the DTO r
           seatingSvg: '<svg />',
           startsAt,
           endsAt,
+          aiArtistBios: [{ generatedBio: 'Latest completed biography' }]
         };
       },
     },
@@ -200,6 +201,7 @@ test('public concert detail maps published concert metadata and caches the DTO r
     seatingSvg: '<svg />',
     startsAt: startsAt.toISOString(),
     endsAt: endsAt.toISOString(),
+    artist_bio: 'Latest completed biography',
   });
 
   const cachedResponse = await service.findPublishedConcertDetail(concertId);

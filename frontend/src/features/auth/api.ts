@@ -1,5 +1,10 @@
 import { apiFetch } from '../../lib/api-client';
-import { AuthProfile, LoginInput, LoginResponse, RegisterInput, RegisteredUser } from './types';
+import {
+  LoginInput,
+  LoginResponse,
+  RegisterInput,
+  RegisteredUser,
+} from './types';
 
 export function login(input: LoginInput) {
   return apiFetch<LoginResponse>('/auth/login', {
@@ -13,8 +18,4 @@ export function register(input: RegisterInput) {
     method: 'POST',
     body: JSON.stringify(input),
   });
-}
-
-export function getAuthProfile() {
-  return apiFetch<AuthProfile>('/auth/me');
 }

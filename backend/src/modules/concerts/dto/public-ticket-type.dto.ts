@@ -6,6 +6,4 @@ export type PublicTicketTypeDto = {
   totalQuantity: number;
   availableQuantity: number;
   perUserLimit: number;
-  saleStartAt: string;
-  saleEndAt: string | null;
 };

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import { Permission, Prisma, Role, RolePermission, User, UserRole, UserStatus } from '@prisma/client';
+import { Permission, Prisma, RefreshToken, Role, RolePermission, User, UserRole, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import { RbacModule } from '../rbac/rbac.module';
@@ -18,6 +18,7 @@ type TestState = {
   permissions: Permission[];
   userRoles: UserRole[];
   rolePermissions: RolePermission[];
+  refreshTokens: RefreshToken[];
 };
 
 test('auth and RBAC endpoints use database permissions without JWT role claims', async () => {
@@ -66,6 +67,12 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
       .expect(201);
 
     assert.equal(typeof audienceLogin.body.accessToken, 'string');
+    assert.equal(typeof audienceLogin.body.refreshToken, 'string');
+    assert.deepEqual(audienceLogin.body.user.roles, [ROLE_CODES.audience]);
+    assert.equal(state.refreshTokens.length, 1);
+    assert.equal(state.refreshTokens[0].userId, storedUser.id);
+    assert.notEqual(state.refreshTokens[0].tokenHash, audienceLogin.body.refreshToken);
+    assert.equal(await bcrypt.compare(audienceLogin.body.refreshToken, state.refreshTokens[0].tokenHash), true);
 
     const payload = decodeJwtPayload(audienceLogin.body.accessToken);
     assert.equal(payload.sub, storedUser.id);
@@ -92,8 +99,40 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
     assert.deepEqual(meResponse.body, {
       id: storedUser.id,
       email: storedUser.email,
+      displayName: storedUser.displayName,
+      status: storedUser.status,
       roles: [ROLE_CODES.audience],
     });
+    
+    const refreshResponse = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({ refreshToken: audienceLogin.body.refreshToken })
+      .expect(201);
+
+    assert.equal(typeof refreshResponse.body.accessToken, 'string');
+    assert.equal(typeof refreshResponse.body.refreshToken, 'string');
+    assert.deepEqual(refreshResponse.body.user.roles, [ROLE_CODES.audience]);
+    assert.notEqual(refreshResponse.body.refreshToken, audienceLogin.body.refreshToken);
+    assert.ok(state.refreshTokens[0].revokedAt);
+    assert.equal(state.refreshTokens.length, 2);
+
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({ refreshToken: audienceLogin.body.refreshToken })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${refreshResponse.body.accessToken}`)
+      .send({ refreshToken: refreshResponse.body.refreshToken })
+      .expect(204);
+
+    assert.ok(state.refreshTokens[1].revokedAt);
+
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({ refreshToken: refreshResponse.body.refreshToken })
+      .expect(401);
 
     await request(app.getHttpServer()).get('/rbac-test/concert-create').expect(401);
 
@@ -111,6 +150,7 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
     replaceUserRoles(state, organizer.id, [ROLE_CODES.organizer]);
 
     const organizerLogin = await login(app, 'organizer@example.com');
+    assert.deepEqual(organizerLogin.user.roles, [ROLE_CODES.organizer]);
 
     await request(app.getHttpServer())
       .get('/rbac-test/concert-create')
@@ -173,7 +213,7 @@ async function createRegisteredUser(app: INestApplication, email: string): Promi
   return response.body as User;
 }
 
-async function login(app: INestApplication, email: string): Promise<{ accessToken: string }> {
+async function login(app: INestApplication, email: string): Promise<{ accessToken: string; refreshToken: string; user: { roles: string[] } }> {
   const response = await request(app.getHttpServer())
     .post('/auth/login')
     .send({
@@ -182,7 +222,7 @@ async function login(app: INestApplication, email: string): Promise<{ accessToke
     })
     .expect(201);
 
-  return response.body as { accessToken: string };
+  return response.body as { accessToken: string; refreshToken: string; user: { roles: string[] } };
 }
 
 function createSeededState(): TestState {
@@ -227,6 +267,7 @@ function createSeededState(): TestState {
     permissions,
     userRoles: [],
     rolePermissions,
+    refreshTokens: [],
   };
 }
 
@@ -302,6 +343,58 @@ function createPrismaDelegates(state: TestState) {
     role: {
       findUnique: async ({ where }: { where: Prisma.RoleWhereUniqueInput }) => {
         return state.roles.find((role) => role.code === where.code || role.id === where.id) ?? null;
+      },
+    },
+    refreshToken: {
+      create: async ({ data }: { data: Prisma.RefreshTokenUncheckedCreateInput }) => {
+        const refreshToken: RefreshToken = {
+          id: `refresh-token-${state.refreshTokens.length + 1}`,
+          userId: data.userId,
+          tokenHash: data.tokenHash,
+          expiresAt: data.expiresAt instanceof Date ? data.expiresAt : new Date(data.expiresAt),
+          revokedAt: null,
+          createdAt: new Date(),
+        };
+
+        state.refreshTokens.push(refreshToken);
+        return refreshToken;
+      },
+      findMany: async ({ where }: { where: Prisma.RefreshTokenWhereInput }) => {
+        return state.refreshTokens.filter((refreshToken) => {
+          if (where.userId && refreshToken.userId !== where.userId) {
+            return false;
+          }
+          if (where.revokedAt === null && refreshToken.revokedAt !== null) {
+            return false;
+          }
+          if (
+            typeof where.expiresAt === 'object' &&
+            where.expiresAt !== null &&
+            'gt' in where.expiresAt &&
+            where.expiresAt.gt instanceof Date &&
+            refreshToken.expiresAt <= where.expiresAt.gt
+          ) {
+            return false;
+          }
+
+          return true;
+        });
+      },
+      update: async ({
+        where,
+        data,
+      }: {
+        where: Prisma.RefreshTokenWhereUniqueInput;
+        data: Prisma.RefreshTokenUpdateInput;
+      }) => {
+        const refreshToken = state.refreshTokens.find((candidate) => candidate.id === where.id);
+        assert.ok(refreshToken);
+
+        if (data.revokedAt instanceof Date) {
+          refreshToken.revokedAt = data.revokedAt;
+        }
+
+        return refreshToken;
       },
     },
     userRole: {

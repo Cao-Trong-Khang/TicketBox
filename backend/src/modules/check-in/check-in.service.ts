@@ -602,6 +602,20 @@ export class CheckInService {
     });
   }
 
+  async assertCheckInStaffAssigned(userId: string, concertId: string): Promise<void> {
+    const assignment = await this.prisma.checkInStaffAssignment.findFirst({
+      where: {
+        userId,
+        concertId,
+      },
+      select: { id: true },
+    });
+
+    if (!assignment) {
+      throw new ForbiddenException('Check-in Staff is not assigned to this concert');
+    }
+  }
+
   private async assertAssignedCheckInStaff(
     userId: string,
     concertId: string,
@@ -609,32 +623,29 @@ export class CheckInService {
     sourceDeviceId?: string,
   ): Promise<AssignmentAccess[]> {
     await this.assertCheckInStaffWithPermissions(userId, requiredPermissions);
+    await this.assertCheckInStaffAssigned(userId, concertId);
 
-    const assignments = await this.prisma.checkInAssignment.findMany({
+    const assignments = await this.prisma.checkInStaffAssignment.findMany({
       where: {
-        staffUserId: userId,
+        userId,
         concertId,
-        active: true,
-        ...(sourceDeviceId
-          ? {
-              OR: [{ sourceDeviceId: null }, { sourceDeviceId }],
-            }
-          : {}),
       },
       select: {
         id: true,
-        gateName: true,
-        sourceDeviceId: true,
+        gateLabel: true,
       },
     });
 
     if (assignments.length === 0) {
-      throw new ForbiddenException('Check-in staff is not assigned to this concert or device');
+      throw new ForbiddenException('Check-in Staff is not assigned to this concert');
     }
 
-    return assignments;
+    return assignments.map((assignment) => ({
+      id: assignment.id,
+      gateName: assignment.gateLabel,
+      sourceDeviceId: sourceDeviceId ?? null,
+    }));
   }
-
   private async assertCheckInStaffWithPermissions(
     userId: string,
     requiredPermissions: string[],

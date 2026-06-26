@@ -1,10 +1,11 @@
-import { CalendarDays, MapPin, Music2 } from 'lucide-react';
+import { CalendarDays, FileText, MapPin, Music2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
 import { createOrder } from '../../orders/api';
+import { userHasRole } from '../../auth/session';
 import { formatConcertDate, getConcertDetail, getConcertTicketTypes } from '../api';
 import { TicketTypeCard } from '../components/TicketTypeCard';
 import { TicketSelectionSummary } from '../components/TicketSelectionSummary';
@@ -184,6 +185,7 @@ export function ConcertDetailPage() {
   }
 
   const shouldShowBanner = Boolean(concertDetail.bannerUrl) && !hasBannerError;
+  const isOrganizer = userHasRole('ORGANIZER');
 
   return (
     <section className="concert-detail-page" aria-labelledby="concert-detail-title">
@@ -223,6 +225,20 @@ export function ConcertDetailPage() {
           </div>
         </div>
 
+        {isOrganizer && id && (
+          <section className="concert-admin-tools" aria-label="Công cụ Organizer">
+            <div>
+              <p className="eyebrow">Organizer tools</p>
+              <h2>AI Artist Bio</h2>
+              <p>Upload press kit PDF để tạo hoặc cập nhật tiểu sử nghệ sĩ cho concert này.</p>
+            </div>
+            <Button type="button" onClick={() => navigate(`/admin/concerts/${id}/artist-bio`)}>
+              <FileText size={18} aria-hidden="true" />
+              Quản lý AI Artist Bio
+            </Button>
+          </section>
+        )}
+
         {concertDetail.description && (
           <section className="concert-description" aria-label="Mô tả sự kiện">
             <h2>Thông tin sự kiện</h2>
@@ -230,6 +246,12 @@ export function ConcertDetailPage() {
           </section>
         )}
 
+        {concertDetail.artist_bio && (
+          <section className="concert-description artist-biography" aria-label="Tiểu sử nghệ sĩ">
+            <h2>Tiểu sử nghệ sĩ</h2>
+            <p>{concertDetail.artist_bio}</p>
+          </section>
+        )}
         <section aria-label="Sơ đồ chỗ ngồi">
           <h2>Sơ đồ chỗ ngồi</h2>
           {concertDetail.seatingSvg ? (
