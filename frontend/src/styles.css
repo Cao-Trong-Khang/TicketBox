@@ -230,3 +230,250 @@ h1 {
     gap: 10px;
   }
 }
+
+/* ---- Nav tabs ---- */
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.nav-tab:hover {
+  background: #f0f6fa;
+  color: var(--accent-strong);
+  border-color: var(--accent);
+}
+.nav-tab-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.nav-tab-active:hover {
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+/* ---- API panel ---- */
+.api-panel {
+  padding: 0 clamp(20px, 5vw, 64px) 28px;
+}
+.api-panel-inner {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 28px 32px;
+  max-width: 560px;
+}
+.api-panel-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 24px;
+  color: var(--accent-strong);
+}
+.api-panel-header h2 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+.api-panel-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* ---- Form ---- */
+.api-form {
+  display: grid;
+  gap: 16px;
+}
+.field {
+  display: grid;
+  gap: 6px;
+}
+.field label {
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.field input,
+.field select {
+  padding: 9px 12px;
+  background: #f7f9fc;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  color: var(--ink);
+  width: 100%;
+  transition: border-color 0.15s;
+}
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+/* ---- Checkbox group ---- */
+.checkbox-group {
+  display: flex;
+  gap: 16px;
+}
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.92rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* ---- Buttons ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 7px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  margin-top: 8px;
+}
+.btn-ghost:hover {
+  background: #f0f6fa;
+  color: var(--ink);
+}
+
+/* ---- Spinner ---- */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 0.75s linear infinite;
+}
+
+/* ---- Form error ---- */
+.form-error {
+  margin: 0;
+  padding: 10px 12px;
+  background: #fff0f0;
+  border: 1px solid #f5c0c0;
+  border-radius: 6px;
+  color: #b22020;
+  font-size: 0.88rem;
+}
+
+/* ---- Result cards ---- */
+.result-card {
+  display: grid;
+  gap: 10px;
+}
+.result-card h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--success);
+}
+.result-label {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.result-value {
+  display: block;
+  padding: 8px 10px;
+  background: #f0f6fa;
+  border-radius: 5px;
+  font-size: 0.85rem;
+  word-break: break-all;
+  color: var(--ink);
+}
+.result-link {
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* ---- Notification result rows ---- */
+.notif-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f7f9fc;
+  border: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+.notif-result.notif-sent {
+  border-color: #c4e2d2;
+  background: #edf8f3;
+}
+.notif-result.notif-failed {
+  border-color: #f5c0c0;
+  background: #fff5f5;
+}
+.notif-channel {
+  font-weight: 700;
+  color: var(--ink);
+  text-transform: capitalize;
+}
+.notif-status {
+  font-size: 0.8rem;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-weight: 700;
+  background: #dde4ef;
+  color: var(--muted);
+}
+.notif-result.notif-sent .notif-status {
+  background: #c4e2d2;
+  color: #157f54;
+}
+.notif-result.notif-failed .notif-status {
+  background: #f5c0c0;
+  color: #b22020;
+}
+.notif-id {
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.notif-err {
+  color: #b22020;
+  font-size: 0.82rem;
+}

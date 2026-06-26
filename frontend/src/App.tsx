@@ -1,5 +1,7 @@
-import { Activity, CalendarDays, Gauge, Settings, ShieldCheck, Ticket } from 'lucide-react';
+import { Activity, Bell, CalendarDays, CreditCard, Gauge, Settings, ShieldCheck, Ticket } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { NotificationForm } from './components/NotificationForm';
+import { PaymentForm } from './components/PaymentForm';
 
 type HealthState = {
   service: string;
@@ -31,6 +33,31 @@ const organizerRoutes = [
 
 export function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>({ state: 'checking' });
+  const [activePanel, setActivePanel] = useState<'payment' | 'notification' | null>(null);
+
+  // Xử lý returnUrl sau khi thanh toán VNPAY/MoMo xong
+  if (window.location.pathname === '/payments/success') {
+    const params = new URLSearchParams(window.location.search);
+    const vnpResponseCode = params.get('vnp_ResponseCode');
+    const momoResultCode = params.get('resultCode');
+    const orderId = params.get('vnp_TxnRef') || params.get('orderId');
+    
+    const isSuccess = vnpResponseCode === '00' || momoResultCode === '0';
+    
+    return (
+      <main className="app-shell" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '100px' }}>
+        <div style={{ textAlign: 'center', padding: '40px', background: 'white', borderRadius: '8px', color: 'black', width: '100%', maxWidth: '400px' }}>
+          {isSuccess ? (
+            <h2 style={{ color: '#16a34a', marginBottom: '16px' }}>Thanh toán thành công! ✓</h2>
+          ) : (
+            <h2 style={{ color: '#dc2626', marginBottom: '16px' }}>Thanh toán thất bại ✗</h2>
+          )}
+          <p>Mã đơn hàng: <strong>{orderId}</strong></p>
+          <a href="/" className="btn btn-primary" style={{ display: 'inline-block', marginTop: '24px' }}>Về trang chủ</a>
+        </div>
+      </main>
+    );
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,6 +106,20 @@ export function App() {
           <a href="#audience">Audience</a>
           <a href="#organizer">Organizer</a>
           <a href="#status">Status</a>
+          <button
+            className={`nav-tab${activePanel === 'payment' ? ' nav-tab-active' : ''}`}
+            onClick={() => setActivePanel(activePanel === 'payment' ? null : 'payment')}
+          >
+            <CreditCard size={15} aria-hidden="true" />
+            Payment
+          </button>
+          <button
+            className={`nav-tab${activePanel === 'notification' ? ' nav-tab-active' : ''}`}
+            onClick={() => setActivePanel(activePanel === 'notification' ? null : 'notification')}
+          >
+            <Bell size={15} aria-hidden="true" />
+            Notification
+          </button>
         </div>
       </nav>
 
@@ -101,6 +142,36 @@ export function App() {
           </div>
         </div>
       </section>
+
+      {activePanel === 'payment' && (
+        <section className="api-panel" aria-label="Payment">
+          <div className="api-panel-inner">
+            <div className="api-panel-header">
+              <CreditCard size={22} aria-hidden="true" />
+              <div>
+                <h2>Create payment</h2>
+                <p>Calls <code>POST /payments</code> on the backend — choose VNPay or MoMo.</p>
+              </div>
+            </div>
+            <PaymentForm />
+          </div>
+        </section>
+      )}
+
+      {activePanel === 'notification' && (
+        <section className="api-panel" aria-label="Notification">
+          <div className="api-panel-inner">
+            <div className="api-panel-header">
+              <Bell size={22} aria-hidden="true" />
+              <div>
+                <h2>Send notification</h2>
+                <p>Calls <code>POST /notifications</code> — email and/or push channels.</p>
+              </div>
+            </div>
+            <NotificationForm />
+          </div>
+        </section>
+      )}
 
       <section className="route-grid" aria-label="Application areas">
         <RouteGroup

@@ -28,6 +28,13 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       KAFKA_BROKERS: kafka:29092
+      EMAIL_HOST: mailhog
+      EMAIL_PORT: 1025
+      EMAIL_USER: ''
+      EMAIL_PASSWORD: ''
+      EMAIL_FROM: noreply@ticketbox.local
+      FCM_SERVER_KEY: ''
+      FCM_PROJECT_ID: ticketbox
     ports:
       - "3000:3000"
     volumes:
