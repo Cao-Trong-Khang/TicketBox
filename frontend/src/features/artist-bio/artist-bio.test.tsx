@@ -15,6 +15,8 @@ describe('AI artist biography UI', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
 
   it('renders artist_bio only when supplied by public detail', async () => {
+    localStorage.setItem('accessToken', 'audience-token');
+    localStorage.setItem('userRoles', JSON.stringify(['AUDIENCE']));
     vi.stubGlobal('fetch', vi.fn((url: string) => url.endsWith('/ticket-types') ? json([]) : json({
       id: '11111111-1111-4111-8111-111111111111', title: 'Concert', artistName: 'Artist', description: null,
       venueName: 'Venue', venueAddress: null, bannerUrl: null, seatingSvg: null,

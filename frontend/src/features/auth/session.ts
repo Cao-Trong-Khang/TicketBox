@@ -1,5 +1,9 @@
 const ORGANIZER_ROLE = 'ORGANIZER';
 
+export function isAuthenticated(): boolean {
+  return Boolean(localStorage.getItem('accessToken'));
+}
+
 export function getPostLoginRedirect(roles: string[]): string {
   return roles.includes(ORGANIZER_ROLE) ? '/admin/dashboard' : '/concerts';
 }
