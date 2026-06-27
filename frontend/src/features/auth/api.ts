@@ -1,5 +1,10 @@
 import { apiFetch } from '../../lib/api-client';
-import { LoginInput, LoginResponse, RegisterInput, RegisteredUser } from './types';
+import {
+  LoginInput,
+  LoginResponse,
+  RegisterInput,
+  RegisteredUser,
+} from './types';
 
 export function login(input: LoginInput) {
   return apiFetch<LoginResponse>('/auth/login', {

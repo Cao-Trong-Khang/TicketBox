@@ -43,6 +43,35 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 3
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ticketbox
+      MINIO_ROOT_PASSWORD: ticketbox-minio-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        mc alias set ticketbox http://minio:9000 ticketbox ticketbox-minio-secret &&
+        mc mb --ignore-existing ticketbox/artist-documents &&
+        mc anonymous set none ticketbox/artist-documents
 
   backend:
     build:
@@ -61,6 +90,21 @@ services:
       REDIS_PORT: 6379
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
+      AI_BIO_TOPIC: ai.bio.requested
+      AI_BIO_GROUP_ID: ticketbox-ai-bio-worker
+      AI_PROVIDER: mock
+      AI_MODEL: mock-biography-v1
+      AI_TIMEOUT_MS: 30000
+      AI_RATE_LIMIT_RETRY_MS: 60000
+      AI_TEXT_MAX_CHARS: 4000
+      PDF_MIN_TEXT_CHARS: 50
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ticketbox
+      MINIO_SECRET_KEY: ticketbox-minio-secret
+      MINIO_BUCKET: artist-documents
+      MINIO_TIMEOUT_MS: 10000
       JWT_ACCESS_SECRET: local-development-jwt-secret
       JWT_ACCESS_TOKEN_TTL: 1h
       CHECK_IN_QR_HMAC_SECRET: local-development-check-in-qr-secret-1234567890
@@ -82,6 +126,44 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+
+  ai-bio-worker:
+    restart: on-failure
+    build:
+      context: ./backend
+    command: npm run ai-bio:worker
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://ticketbox:ticketbox@postgres:5432/ticketbox?schema=public
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+      AI_BIO_TOPIC: ai.bio.requested
+      AI_BIO_GROUP_ID: ticketbox-ai-bio-worker
+      AI_PROVIDER: gemini          
+      AI_MODEL: gemini-2.5-flash
+      AI_API_KEY: ${GEMINI_API_KEY}
+      AI_TIMEOUT_MS: 30000
+      AI_RATE_LIMIT_RETRY_MS: 60000
+      AI_TEXT_MAX_CHARS: 4000
+      PDF_MIN_TEXT_CHARS: 50
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ticketbox
+      MINIO_SECRET_KEY: ticketbox-minio-secret
+      MINIO_BUCKET: artist-documents
+      MINIO_TIMEOUT_MS: 10000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
 
   vip-import-worker:
     build:
@@ -120,3 +202,4 @@ services:
 
 volumes:
   postgres_data_18:
+  minio_data:

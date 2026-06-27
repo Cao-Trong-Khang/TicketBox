@@ -1,9 +1,11 @@
-import { CalendarDays, MapPin, Music2 } from 'lucide-react';
+import { CalendarDays, FileText, MapPin, Music2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
+import { createOrder } from '../../orders/api';
+import { userHasRole } from '../../auth/session';
 import { formatConcertDate, getConcertDetail, getConcertTicketTypes } from '../api';
 import { TicketTypeCard } from '../components/TicketTypeCard';
 import { TicketSelectionSummary } from '../components/TicketSelectionSummary';
@@ -13,6 +15,7 @@ type SelectionState = Record<string, number>;
 
 export function ConcertDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [concertDetail, setConcertDetail] = useState<ConcertDetail | null>(null);
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -20,7 +23,8 @@ export function ConcertDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [hasBannerError, setHasBannerError] = useState(false);
   const [selections, setSelections] = useState<SelectionState>({});
-  const [showContinueMessage, setShowContinueMessage] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -97,6 +101,7 @@ export function ConcertDetailPage() {
 
       return { ...prev, [ticketTypeId]: currentQty + 1 };
     });
+    setSubmissionError(null);
   };
 
   const handleDecrease = (ticketTypeId: string) => {
@@ -106,11 +111,35 @@ export function ConcertDetailPage() {
 
       return { ...prev, [ticketTypeId]: currentQty - 1 };
     });
+    setSubmissionError(null);
   };
 
-  const handleContinue = () => {
-    setShowContinueMessage(true);
-    setTimeout(() => setShowContinueMessage(false), 4000);
+  const handleContinue = async () => {
+    if (!id || isSubmitting) return;
+
+    const idempotencyKey = crypto.randomUUID();
+    const items = ticketTypes
+      .filter(t => selections[t.id] && selections[t.id] > 0)
+      .map(t => ({
+        ticketTypeId: t.id,
+        quantity: selections[t.id],
+      }));
+
+    setIsSubmitting(true);
+    setSubmissionError(null);
+
+    try {
+      const response = await createOrder({
+        concertId: id,
+        idempotencyKey,
+        items,
+      });
+      navigate(`/orders/${response.orderId}`, { state: { order: response } });
+    } catch (err: unknown) {
+      const apiError = toApiError(err);
+      setSubmissionError(apiError);
+      setIsSubmitting(false);
+    }
   };
 
   const getSelectedItems = () => {
@@ -156,6 +185,7 @@ export function ConcertDetailPage() {
   }
 
   const shouldShowBanner = Boolean(concertDetail.bannerUrl) && !hasBannerError;
+  const isOrganizer = userHasRole('ORGANIZER');
 
   return (
     <section className="concert-detail-page" aria-labelledby="concert-detail-title">
@@ -195,6 +225,20 @@ export function ConcertDetailPage() {
           </div>
         </div>
 
+        {isOrganizer && id && (
+          <section className="concert-admin-tools" aria-label="Công cụ Organizer">
+            <div>
+              <p className="eyebrow">Organizer tools</p>
+              <h2>AI Artist Bio</h2>
+              <p>Upload press kit PDF để tạo hoặc cập nhật tiểu sử nghệ sĩ cho concert này.</p>
+            </div>
+            <Button type="button" onClick={() => navigate(`/admin/concerts/${id}/artist-bio`)}>
+              <FileText size={18} aria-hidden="true" />
+              Quản lý AI Artist Bio
+            </Button>
+          </section>
+        )}
+
         {concertDetail.description && (
           <section className="concert-description" aria-label="Mô tả sự kiện">
             <h2>Thông tin sự kiện</h2>
@@ -202,6 +246,12 @@ export function ConcertDetailPage() {
           </section>
         )}
 
+        {concertDetail.artist_bio && (
+          <section className="concert-description artist-biography" aria-label="Tiểu sử nghệ sĩ">
+            <h2>Tiểu sử nghệ sĩ</h2>
+            <p>{concertDetail.artist_bio}</p>
+          </section>
+        )}
         <section aria-label="Sơ đồ chỗ ngồi">
           <h2>Sơ đồ chỗ ngồi</h2>
           {concertDetail.seatingSvg ? (
@@ -236,8 +286,28 @@ export function ConcertDetailPage() {
           )}
         </section>
 
-        {showContinueMessage && (
-          <Alert tone="success">Tạo đơn hàng sẽ được triển khai ở bước tiếp theo.</Alert>
+        {submissionError && (
+          <div className="order-error-container">
+            {submissionError.status === 401 ? (
+              <div>
+                <Alert tone="error">{submissionError.message || 'Vui lòng đăng nhập để đặt vé'}</Alert>
+                <Button
+                  type="button"
+                  className="alert-action"
+                  onClick={() => navigate('/login')}
+                >
+                  Đăng nhập
+                </Button>
+              </div>
+            ) : submissionError.status === 409 ? (
+              <div>
+                <Alert tone="error">{submissionError.message}</Alert>
+                <p className="order-error-hint">Vui lòng làm mới để xem tính khả dụng mới nhất.</p>
+              </div>
+            ) : (
+              <Alert tone="error">{submissionError.message || 'Có lỗi xảy ra'}</Alert>
+            )}
+          </div>
         )}
 
         <TicketSelectionSummary
@@ -245,6 +315,7 @@ export function ConcertDetailPage() {
           totalQuantity={getTotalQuantity()}
           totalAmount={getTotalAmount()}
           onContinue={handleContinue}
+          isSubmitting={isSubmitting}
         />
       </div>
     </section>

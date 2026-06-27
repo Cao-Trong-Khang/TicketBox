@@ -4,7 +4,9 @@ import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { FormField } from '../../../components/ui/FormField';
 import { ApiError } from '../../../lib/api-client';
+
 import { login } from '../api';
+import { getPostLoginRedirect } from '../session';
 import { AuthLayout } from '../../../components/layout/AuthLayout';
 
 export function LoginPage() {
@@ -21,12 +23,32 @@ export function LoginPage() {
 
     try {
       const data = await login({ email, password });
+
+      const roles = data.user.roles;
+
+      const isWebRole =
+        roles.includes('AUDIENCE') || roles.includes('ORGANIZER');
+
+      if (!isWebRole) {
+        setError('Tài khoản nhân viên check-in chỉ dùng trên ứng dụng mobile.');
+        return;
+      }
+
       localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('userRoles', JSON.stringify(roles));
+
       window.dispatchEvent(new Event('ticketbox-auth-changed'));
-      navigate('/home');
+
+      navigate(getPostLoginRedirect(roles), { replace: true });
     } catch (err: unknown) {
       const apiError = err as ApiError;
-      setError(apiError.status === 401 ? 'Email hoặc mật khẩu không đúng.' : apiError.message || 'Không thể đăng nhập lúc này.');
+
+      setError(
+        apiError.status === 401
+          ? 'Email hoặc mật khẩu không đúng.'
+          : apiError.message || 'Không thể đăng nhập lúc này.'
+      );
     } finally {
       setIsSubmitting(false);
     }

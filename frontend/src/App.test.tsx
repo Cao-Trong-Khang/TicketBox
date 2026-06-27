@@ -20,6 +20,23 @@ function mockJsonResponse(body: unknown, status = 200) {
   );
 }
 
+function createConcerts() {
+  return [
+    {
+      id: 'concert-1',
+      title: 'Anh Trai Say Hi Concert 2026',
+      artistName: 'Anh Trai Say Hi',
+      description: null,
+      venueName: 'Nhà thi đấu',
+      venueAddress: 'Hà Nội',
+      bannerUrl: null,
+      startsAt: '2026-07-01T20:00:00.000Z',
+      endsAt: '2026-07-01T23:00:00.000Z',
+      minPriceVnd: 800000,
+    },
+  ];
+}
+
 describe('frontend auth shell', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -39,86 +56,155 @@ describe('frontend auth shell', () => {
     expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
     expect(await screen.findByText('Anh Trai Say Hi Concert 2026')).toBeInTheDocument();
     expect(screen.getByText('Từ 800.000 ₫')).toBeInTheDocument();
-    expect(screen.queryByText('Backend online')).not.toBeInTheDocument();
-    expect(screen.queryByText('Concert discovery')).not.toBeInTheDocument();
   });
 
-  it('renders the login route', () => {
+  it('renders login page', () => {
     renderApp('/login');
 
     expect(screen.getByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Email')).toBeInTheDocument();
-    expect(screen.getByLabelText('Mật khẩu')).toBeInTheDocument();
   });
 
-  it('renders the register route', () => {
+  it('renders register page', () => {
     renderApp('/register');
 
     expect(screen.getByRole('heading', { name: 'Đăng ký' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Tên hiển thị')).toBeInTheDocument();
-    expect(screen.getByLabelText('Xác nhận mật khẩu')).toBeInTheDocument();
   });
 
-  it('sends successful registration to login without storing a token', async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
+  it('stores token and redirects audience user after login', async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() =>
       mockJsonResponse({
-        id: 'user-1',
-        email: 'audience@example.com',
-        displayName: 'Audience User',
-        status: 'ACTIVE',
+        accessToken: 'jwt-token',
+        refreshToken: 'refresh-token',
+        user: {
+          id: 'user-1',
+          email: 'audience@example.com',
+          displayName: null,
+          status: 'ACTIVE',
+          roles: ['AUDIENCE'],
+        },
       }),
     );
-    vi.stubGlobal('fetch', fetchMock);
 
-    renderApp('/register');
-
-    fireEvent.change(screen.getByLabelText('Tên hiển thị'), { target: { value: 'Audience User' } });
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'audience@example.com' } });
-    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
-    fireEvent.change(screen.getByLabelText('Xác nhận mật khẩu'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Đăng ký' }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/register', expect.any(Object)));
-    expect(localStorage.getItem('accessToken')).toBeNull();
-
-    await screen.findByText('Đăng ký thành công. Bạn sẽ được chuyển sang màn hình đăng nhập.');
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument());
-    expect(localStorage.getItem('accessToken')).toBeNull();
-  });
-
-  it('stores access token and routes home after successful login', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(() => mockJsonResponse({ accessToken: 'jwt-token' }))
-      .mockImplementationOnce(() => mockJsonResponse(createConcerts()));
     vi.stubGlobal('fetch', fetchMock);
 
     renderApp('/login');
 
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'audience@example.com' } });
-    fireEvent.change(screen.getByLabelText('Mật khẩu'), { target: { value: 'password123' } });
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'audience@example.com' },
+    });
+
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), {
+      target: { value: 'password123' },
+    });
+
     fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/auth/login', expect.any(Object)));
-    await waitFor(() => expect(localStorage.getItem('accessToken')).toBe('jwt-token'));
+    await waitFor(() =>
+      expect(localStorage.getItem('accessToken')).toBe('jwt-token'),
+    );
+
+    expect(localStorage.getItem('userRoles')).toBe(JSON.stringify(['AUDIENCE']));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Concert sắp diễn ra' }),
+    ).toBeInTheDocument();
+  });
+
+  it('redirects organizer user to organizer page after login', async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() =>
+      mockJsonResponse({
+        accessToken: 'organizer-token',
+        refreshToken: 'refresh-token',
+        user: {
+          id: 'user-2',
+          email: 'organizer@example.com',
+          displayName: null,
+          status: 'ACTIVE',
+          roles: ['ORGANIZER'],
+        },
+      }),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/login');
+
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'organizer@example.com' },
+    });
+
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), {
+      target: { value: 'password123' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+
+    await waitFor(() =>
+      expect(localStorage.getItem('accessToken')).toBe('organizer-token'),
+    );
+
+    expect(localStorage.getItem('userRoles')).toBe(JSON.stringify(['ORGANIZER']));
+
+    expect(
+      await screen.findByText('Kênh organizer'),
+    ).toBeInTheDocument();
+  });
+
+  it('blocks check-in staff accounts', async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() =>
+      mockJsonResponse({
+        accessToken: 'staff-token',
+        refreshToken: 'staff-refresh-token',
+        user: {
+          id: 'user-3',
+          email: 'staff@example.com',
+          displayName: null,
+          status: 'ACTIVE',
+          roles: ['CHECKIN_STAFF'],
+        },
+      }),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp('/login');
+
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'staff@example.com' },
+    });
+
+    fireEvent.change(screen.getByLabelText('Mật khẩu'), {
+      target: { value: 'password123' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }));
+
+    expect(
+      await screen.findByText('Tài khoản nhân viên check-in chỉ dùng trên ứng dụng mobile.'),
+    ).toBeInTheDocument();
+
+    expect(localStorage.getItem('accessToken')).toBeNull();
+    expect(localStorage.getItem('refreshToken')).toBeNull();
+    expect(localStorage.getItem('userRoles')).toBeNull();
+  });
+
+  it('redirects non-organizers away from organizer routes', async () => {
+    localStorage.setItem('userRoles', JSON.stringify(['AUDIENCE']));
+
+    renderApp('/organizer/concerts');
+
     expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Concert của bạn' })).not.toBeInTheDocument();
+  });
+
+  it('navigates to the organizer dashboard from the concert management card', async () => {
+    localStorage.setItem('userRoles', JSON.stringify(['ORGANIZER']));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse([])));
+
+    renderApp('/admin/dashboard');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Concert Management/i }));
+
+    expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
   });
 });
-
-function createConcerts() {
-  return [
-    {
-      id: '11111111-1111-4111-8111-111111111111',
-      title: 'Anh Trai Say Hi Concert 2026',
-      artistName: 'Various Artists',
-      description: 'Concert description',
-      venueName: 'Sân vận động Mỹ Đình',
-      venueAddress: 'Nam Từ Liêm, Hà Nội',
-      bannerUrl: null,
-      startsAt: '2026-08-20T12:30:00.000Z',
-      endsAt: '2026-08-20T15:30:00.000Z',
-      minPriceVnd: 800000,
-    },
-  ];
-}

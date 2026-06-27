@@ -37,6 +37,13 @@ type TestState = {
     sourceDeviceId: string | null;
     active: boolean;
   }[];
+  checkInStaffAssignments: {
+    id: string;
+    userId: string;
+    concertId: string;
+    gateLabel: string;
+    assignedAt: Date;
+  }[];
   concerts: {
     id: string;
     title: string;
@@ -107,7 +114,7 @@ test('preload returns signed QR tokens for ticket and VIP guests, not raw creden
   const preload = await service.preloadEvent(
     { id: 'staff-1', email: 'staff@example.test' },
     'concert-1',
-    'assignment-a',
+    'staff-assignment-a',
   );
 
   assert.notEqual(preload.tickets[0].qrHash, state.tickets[0].qrHash);
@@ -191,7 +198,7 @@ test('preload includes completed imported VIP guests for assigned Check-in Staff
   const preload = await service.preloadEvent(
     { id: 'staff-1', email: 'staff@example.test' },
     'concert-1',
-    'assignment-a',
+    'staff-assignment-a',
   );
 
   assert.deepEqual(
@@ -244,12 +251,12 @@ test('preload scopes VIP guests to the selected gate assignment', async () => {
   const preload = await service.preloadEvent(
     { id: 'staff-1', email: 'staff@example.test' },
     'concert-1',
-    'assignment-a',
+    'staff-assignment-a',
   );
 
   assert.deepEqual(
     preload.assignments.map((assignment) => assignment.assignmentId),
-    ['assignment-a'],
+    ['staff-assignment-a'],
   );
   assert.deepEqual(
     preload.vipGuests.map((guest) => guest.id).sort(),
@@ -718,6 +725,15 @@ function createHarness(
         active: true,
       },
     ],
+    checkInStaffAssignments: [
+      {
+        id: 'staff-assignment-a',
+        userId: 'staff-1',
+        concertId: 'concert-1',
+        gateLabel: 'Gate A',
+        assignedAt: new Date('2026-06-01T00:00:00.000Z'),
+      },
+    ],
     concerts: [
       {
         id: 'concert-1',
@@ -834,7 +850,20 @@ function createPrismaMock(state: TestState) {
               : {}),
           })),
     },
-    concert: {
+    checkInStaffAssignment: {
+      findFirst: async ({ where }: { where: { userId: string; concertId: string } }) =>
+        state.checkInStaffAssignments.find(
+          (assignment) =>
+            assignment.userId === where.userId && assignment.concertId === where.concertId,
+        ) ?? null,
+      findMany: async ({ where }: { where: { userId: string; concertId: string; id?: string } }) =>
+        state.checkInStaffAssignments.filter(
+          (assignment) =>
+            assignment.userId === where.userId &&
+            assignment.concertId === where.concertId &&
+            (!where.id || assignment.id === where.id),
+        ),
+    },    concert: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         state.concerts.find((concert) => concert.id === where.id) ?? null,
     },

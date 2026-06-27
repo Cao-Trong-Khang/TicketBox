@@ -1,7 +1,11 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { LogoutDto } from './dto/logout.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
+import { RateLimit } from '../rate-limit/rate-limit.decorator';
+import { RateLimitGuard } from '../rate-limit/rate-limit.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { AuthenticatedUser } from './types';
 
@@ -14,18 +18,44 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: 'auth-register',
+    limit: 3,
+    ttlSeconds: 15 * 60,
+    identity: 'ip',
+  })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
   @Post('login')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({
+    keyPrefix: 'auth-login',
+    limit: 5,
+    ttlSeconds: 15 * 60,
+    identity: 'ip',
+  })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
+  @Post('refresh')
+  refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto.refreshToken);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  logout(@Req() request: AuthenticatedRequest, @Body() dto: LogoutDto): Promise<void> {
+    return this.authService.logout(request.user.id, dto.refreshToken);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  me(@Req() request: AuthenticatedRequest): AuthenticatedUser {
-    return request.user;
+  me(@Req() request: AuthenticatedRequest) {
+    return this.authService.getUserProfile(request.user.id);
   }
 }

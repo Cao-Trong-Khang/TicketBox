@@ -98,12 +98,11 @@ export class CheckInService {
   async listAssignments(user: AuthenticatedUser): Promise<CheckInAssignmentDto[]> {
     await this.assertCheckInStaffWithPermissions(user.id, [PERMISSION_CODES.checkinPreload]);
 
-    const assignments = await this.prisma.checkInAssignment.findMany({
+    const assignments = await this.prisma.checkInStaffAssignment.findMany({
       where: {
-        staffUserId: user.id,
-        active: true,
+        userId: user.id,
       },
-      orderBy: [{ concert: { startsAt: 'asc' } }, { gateName: 'asc' }],
+      orderBy: [{ concert: { startsAt: 'asc' } }, { gateLabel: 'asc' }],
       include: {
         concert: {
           select: {
@@ -124,8 +123,8 @@ export class CheckInService {
       title: assignment.concert.title,
       venueName: assignment.concert.venueName,
       status: assignment.concert.status,
-      gateName: assignment.gateName,
-      sourceDeviceId: assignment.sourceDeviceId,
+      gateName: assignment.gateLabel,
+      sourceDeviceId: null,
       startsAt: assignment.concert.startsAt.toISOString(),
       endsAt: assignment.concert.endsAt?.toISOString() ?? null,
     }));
@@ -1056,6 +1055,20 @@ export class CheckInService {
     return { valid: true, timing };
   }
 
+  async assertCheckInStaffAssigned(userId: string, concertId: string): Promise<void> {
+    const assignment = await this.prisma.checkInStaffAssignment.findFirst({
+      where: {
+        userId,
+        concertId,
+      },
+      select: { id: true },
+    });
+
+    if (!assignment) {
+      throw new ForbiddenException('Check-in Staff is not assigned to this concert');
+    }
+  }
+
   private async assertAssignedCheckInStaff(
     userId: string,
     concertId: string,
@@ -1066,31 +1079,29 @@ export class CheckInService {
     } = {},
   ): Promise<AssignmentAccess[]> {
     await this.assertCheckInStaffWithPermissions(userId, requiredPermissions);
+    await this.assertCheckInStaffAssigned(userId, concertId);
 
-    const assignments = await this.prisma.checkInAssignment.findMany({
+    const assignments = await this.prisma.checkInStaffAssignment.findMany({
       where: {
-        staffUserId: userId,
+        userId,
         concertId,
-        active: true,
         ...(options.assignmentId ? { id: options.assignmentId } : {}),
-        ...(options.sourceDeviceId
-          ? {
-              OR: [{ sourceDeviceId: null }, { sourceDeviceId: options.sourceDeviceId }],
-            }
-          : {}),
       },
       select: {
         id: true,
-        gateName: true,
-        sourceDeviceId: true,
+        gateLabel: true,
       },
     });
 
     if (assignments.length === 0) {
-      throw new ForbiddenException('Check-in staff is not assigned to this concert or device');
+      throw new ForbiddenException('Check-in Staff is not assigned to this concert');
     }
 
-    return assignments;
+    return assignments.map((assignment) => ({
+      id: assignment.id,
+      gateName: assignment.gateLabel,
+      sourceDeviceId: options.sourceDeviceId ?? null,
+    }));
   }
 
   private isVipGuestAllowedAtAssignedGate(

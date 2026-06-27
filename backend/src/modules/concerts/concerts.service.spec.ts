@@ -162,6 +162,7 @@ test('public concert detail maps published concert metadata and caches the DTO r
           seatingSvg: '<svg />',
           startsAt,
           endsAt,
+          aiArtistBios: [{ generatedBio: 'Latest completed biography' }]
         };
       },
     },
@@ -200,6 +201,7 @@ test('public concert detail maps published concert metadata and caches the DTO r
     seatingSvg: '<svg />',
     startsAt: startsAt.toISOString(),
     endsAt: endsAt.toISOString(),
+    artist_bio: 'Latest completed biography',
   });
 
   const cachedResponse = await service.findPublishedConcertDetail(concertId);
@@ -272,6 +274,32 @@ test('public concert detail throws not found when no published concert exists', 
     () => service.findPublishedConcertDetail('33333333-3333-4333-8333-333333333333'),
     NotFoundException,
   );
+});
+
+test('public concert detail hides cancelled concerts because only published concerts are queryable', async () => {
+  const findFirstCalls: PrismaConcertFindFirstArgs[] = [];
+  const service = new ConcertsService(
+    {
+      concert: {
+        findFirst: async (args: PrismaConcertFindFirstArgs) => {
+          findFirstCalls.push(args);
+          return null;
+        },
+      },
+    } as never,
+    {
+      get: async () => null,
+      set: async () => undefined,
+      del: async () => undefined,
+    } as never,
+  );
+
+  await assert.rejects(
+    () => service.findPublishedConcertDetail('33333333-3333-4333-8333-333333333334'),
+    NotFoundException,
+  );
+  assert.equal(findFirstCalls.length, 1);
+  assert.equal(findFirstCalls[0].where.status, ConcertStatus.PUBLISHED);
 });
 
 test('public concert ticket types maps active ticket types with computed availability and short cache TTL', async () => {
@@ -426,5 +454,35 @@ test('public concert ticket types throws not found when no published concert exi
   await assert.rejects(
     () => service.findPublishedConcertTicketTypes('66666666-6666-4666-8666-666666666666'),
     NotFoundException,
+  );
+});
+
+test('public concert ticket types hide cancelled concerts because only published concerts can expose ticket types', async () => {
+  const findFirstCalls: PrismaConcertFindFirstTicketTypesArgs[] = [];
+  const service = new ConcertsService(
+    {
+      concert: {
+        findFirst: async (args: PrismaConcertFindFirstTicketTypesArgs) => {
+          findFirstCalls.push(args);
+          return null;
+        },
+      },
+    } as never,
+    {
+      get: async () => null,
+      set: async () => undefined,
+      del: async () => undefined,
+    } as never,
+  );
+
+  await assert.rejects(
+    () => service.findPublishedConcertTicketTypes('66666666-6666-4666-8666-666666666667'),
+    NotFoundException,
+  );
+  assert.equal(findFirstCalls.length, 1);
+  assert.equal(findFirstCalls[0].where.status, ConcertStatus.PUBLISHED);
+  assert.equal(
+    findFirstCalls[0].select.ticketTypes.where.status,
+    TicketTypeStatus.ACTIVE,
   );
 });
