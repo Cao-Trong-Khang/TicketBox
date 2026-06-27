@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { ImportErrorType, ImportStatus, VipGuestStatus } from '@prisma/client';
+import { ImportErrorType, ImportStatus, Prisma, VipGuestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { sha256 } from './vip-csv';
 import { VipImportWorkerService } from './vip-import-worker.service';
 
 type TestImport = {
@@ -72,9 +74,49 @@ type TestState = {
   imports: TestImport[];
   guests: TestGuest[];
   errors: TestError[];
-  auditLogs: { action: string; importId: string | null; metadata: unknown }[];
+  auditLogs: {
+    action: string;
+    importId: string | null;
+    entityType: string;
+    entityId: string;
+    metadata: unknown;
+  }[];
   guestCreateAttempts: number;
   failOnGuestCreateAttempt?: number;
+  claimConflictStatus?: ImportStatus;
+  concurrentGuestCreateConflict?: Partial<TestGuest>;
+};
+
+type TransactionContext = {
+  aborted: boolean;
+};
+
+type FindManyImportArgs = {
+  where?: {
+    status?: {
+      in?: ImportStatus[];
+    };
+  };
+  take?: number;
+};
+
+type UpdateManyImportArgs = {
+  where: {
+    id?: string;
+    status?: {
+      in?: ImportStatus[];
+    };
+  };
+  data: Partial<TestImport>;
+};
+
+type VipGuestWhere = {
+  concertId?: string;
+  sponsorSource?: string | { in: string[] };
+  externalGuestKey?: string | null;
+  normalizedIdentityKey?: string | null;
+  qrHash?: string | null;
+  status?: VipGuestStatus | { in: VipGuestStatus[] };
 };
 
 test('worker imports valid unique VIP guests and marks the import completed', async () => {
@@ -110,6 +152,42 @@ test('worker imports valid unique VIP guests and marks the import completed', as
   });
 });
 
+test('worker rejects a queued import when the source file fingerprint changed', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Queued Guest,queued@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-002,Overwritten Guest,overwritten@example.test,+84900000002',
+      ]),
+      'utf8',
+    );
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'SOURCE_FINGERPRINT_MISMATCH');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.equal(state.guests.length, 0);
+    assert.notEqual(
+      (state.errors[0].metadata as { actualFingerprint: string }).actualFingerprint,
+      state.imports[0].sourceFingerprint,
+    );
+  });
+});
+
 test('worker stores file-level errors without deleting existing accepted VIP guests', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(
@@ -132,6 +210,246 @@ test('worker stores file-level errors without deleting existing accepted VIP gue
     assert.equal(state.errors[0].type, ImportErrorType.FILE);
     assert.equal(state.guests.length, 1);
     assert.equal(state.guests[0].id, 'existing-vip');
+  });
+});
+
+test('worker rejects duplicate normalized CSV headers as a file-level error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,Full Name,email',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest,Duplicate Guest,demo@example.test',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'DUPLICATE_HEADERS');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.deepEqual(state.errors[0].metadata, { duplicateHeaders: ['full_name'] });
+    assert.equal(state.guests.length, 0);
+  });
+});
+
+test('worker rejects unsupported CSV headers as a file-level error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,vip_level',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest,demo@example.test,Gold',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'UNSUPPORTED_COLUMNS');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.deepEqual(
+      (state.errors[0].metadata as { unsupportedColumns: string[] }).unsupportedColumns,
+      ['vip_level'],
+    );
+    assert.equal(state.guests.length, 0);
+  });
+});
+
+test('worker requires an identity column in the CSV header', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,full_name,guest_type',
+        'Demo Concert,LOCAL_DEMO,Demo Guest,Press',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'MISSING_IDENTITY_COLUMNS');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.deepEqual(state.errors[0].metadata, {
+      identityColumns: ['external_guest_key', 'email', 'phone'],
+    });
+    assert.equal(state.guests.length, 0);
+  });
+});
+
+test('worker fails oversized CSV files before parsing rows', async () => {
+  await withEnv('VIP_IMPORT_MAX_FILE_SIZE_BYTES', '32', async () => {
+    await withTempCsv(async (sourcePath) => {
+      await writeFile(
+        sourcePath,
+        csv([
+          'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+          'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest,demo@example.test,+84900000001',
+        ]),
+        'utf8',
+      );
+      const state = createState(sourcePath);
+      const worker = createWorker(state);
+
+      const result = await worker.processImport('import-1');
+
+      assert.equal(result.status, ImportStatus.FAILED);
+      assert.equal(state.imports[0].failureCode, 'VIP_IMPORT_FILE_TOO_LARGE');
+      assert.equal(state.errors.length, 1);
+      assert.equal(state.errors[0].type, ImportErrorType.FILE);
+      assert.equal(state.guests.length, 0);
+    });
+  });
+});
+
+test('worker fails CSV files that exceed the configured max row count', async () => {
+  await withEnv('VIP_IMPORT_MAX_ROWS', '1', async () => {
+    await withTempCsv(async (sourcePath) => {
+      await writeFile(
+        sourcePath,
+        csv([
+          'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+          'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest One,one@example.test,+84900000001',
+          'Demo Concert,LOCAL_DEMO,VIP-002,Demo Guest Two,two@example.test,+84900000002',
+        ]),
+        'utf8',
+      );
+      const state = createState(sourcePath);
+      const worker = createWorker(state);
+
+      const result = await worker.processImport('import-1');
+
+      assert.equal(result.status, ImportStatus.FAILED);
+      assert.equal(state.imports[0].failureCode, 'VIP_IMPORT_TOO_MANY_ROWS');
+      assert.equal(state.errors.length, 1);
+      assert.equal(state.errors[0].type, ImportErrorType.FILE);
+      assert.equal(state.guests.length, 0);
+    });
+  });
+});
+
+test('worker validates VIP row phone, external key, and field lengths', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone,notes',
+        'Demo Concert,LOCAL_DEMO,VIP-PHONE,Bad Phone,phone@example.test,call-me,',
+        'Demo Concert,LOCAL_DEMO,BAD KEY,Bad Key,badkey@example.test,+84900000001,',
+        `Demo Concert,LOCAL_DEMO,VIP-LONG,${'A'.repeat(129)},long@example.test,+84900000002,`,
+        'Demo Concert,LOCAL_DEMO,VIP-GOOD,Valid Guest,valid@example.test,+84900000003,ok',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.totalRows, 4);
+    assert.equal(result.acceptedRows, 1);
+    assert.equal(result.rejectedRows, 3);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].externalGuestKey, 'VIP-GOOD');
+    assert.deepEqual(
+      state.errors.map((error) => error.code).sort(),
+      ['EXTERNAL_GUEST_KEY_INVALID', 'FIELD_TOO_LONG', 'PHONE_INVALID'],
+    );
+  });
+});
+
+test('worker records unsupported delimiter as a file-level import error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title;sponsor_source;external_guest_key;full_name;email;phone',
+        'Demo Concert;LOCAL_DEMO;VIP-001;Demo Guest;demo@example.test;+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'UNSUPPORTED_DELIMITER');
+    assert.match(state.imports[0].failureMessage ?? '', /comma-delimited CSV/);
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.equal(state.errors[0].code, 'UNSUPPORTED_DELIMITER');
+    assert.deepEqual(state.errors[0].metadata, {
+      detectedDelimiter: ';',
+      detectedDelimiterName: 'semicolon (;)',
+      supportedDelimiter: ',',
+    });
+    assert.equal(state.guests.length, 0);
+  });
+});
+
+test('worker records invalid UTF-8 as a file-level import error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(sourcePath, invalidUtf8VipCsv());
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'INVALID_ENCODING');
+    assert.match(state.imports[0].failureMessage ?? '', /valid UTF-8/);
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.equal(state.errors[0].code, 'INVALID_ENCODING');
+    assert.deepEqual(state.errors[0].metadata, {
+      requiredEncoding: 'UTF-8',
+    });
+    assert.equal(state.guests.length, 0);
+  });
+});
+
+test('worker records malformed CSV syntax as a file-level import error', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,"Broken Guest,demo@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'MALFORMED_CSV');
+    assert.match(state.imports[0].failureMessage ?? '', /Unclosed quoted field/);
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.equal(state.errors[0].code, 'MALFORMED_CSV');
+    assert.equal((state.errors[0].metadata as { rowNumber: number }).rowNumber, 2);
+    assert.equal(
+      (state.errors[0].metadata as { reason: string }).reason,
+      'Unclosed quoted field',
+    );
+    assert.equal(state.guests.length, 0);
   });
 });
 
@@ -191,6 +509,287 @@ test('worker deduplicates by external key first and normalized identity fallback
   });
 });
 
+test('worker refreshes existing VIP guests from newer sponsor snapshots', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone,sponsor_company,invited_by,guest_type,allowed_gate,notes',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Updated Guest,new@example.test,+84900000099,Updated Sponsor,Updated Host,Updated Type,Gate B,Updated notes',
+      ]),
+      'utf8',
+    );
+    const checkedInAt = new Date('2026-06-16T10:00:00.000Z');
+    const state = createState(sourcePath);
+    state.guests.push(
+      createGuest({
+        id: 'existing-vip',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-001',
+        fullName: 'Old Guest',
+        email: 'old@example.test',
+        phone: '+84900000001',
+        sponsorCompany: 'Old Sponsor',
+        invitedBy: 'Old Host',
+        guestType: 'Old Type',
+        allowedGate: 'Gate A',
+        notes: 'Old notes',
+        status: VipGuestStatus.CHECKED_IN,
+        checkedInAt,
+      }),
+    );
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.acceptedRows, 1);
+    assert.equal(result.duplicateRows, 0);
+    assert.equal(state.errors.length, 0);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].importId, 'import-1');
+    assert.equal(state.guests[0].fullName, 'Updated Guest');
+    assert.equal(state.guests[0].email, 'new@example.test');
+    assert.equal(state.guests[0].phone, '+84900000099');
+    assert.equal(state.guests[0].guestType, 'Updated Type');
+    assert.equal(state.guests[0].allowedGate, 'Gate B');
+    assert.equal(state.guests[0].status, VipGuestStatus.CHECKED_IN);
+    assert.equal(state.guests[0].checkedInAt, checkedInAt);
+
+    const updateAudit = state.auditLogs.find(
+      (entry) => entry.action === 'vip_import.guest_snapshot_updated',
+    );
+    assert.ok(updateAudit);
+    assert.equal(updateAudit.entityType, 'vip_guest');
+    assert.equal(updateAudit.entityId, 'existing-vip');
+    assert.deepEqual(
+      (updateAudit.metadata as { changedFields: string[] }).changedFields.sort(),
+      [
+        'allowedGate',
+        'email',
+        'fullName',
+        'guestType',
+        'invitedBy',
+        'notes',
+        'phone',
+        'sponsorCompany',
+      ].sort(),
+    );
+  });
+});
+
+test('worker refreshes concurrently created VIP guests for snapshot imports by externalGuestKey', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-RACE-001,Race Guest,race@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.concurrentGuestCreateConflict = {
+      id: 'guest-created-by-other-import',
+      importId: 'other-import',
+    };
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.acceptedRows, 1);
+    assert.equal(result.duplicateRows, 0);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].importId, 'import-1');
+    assert.equal(state.errors.length, 0);
+    assert.ok(
+      state.auditLogs.some((entry) => entry.action === 'vip_import.guest_snapshot_updated'),
+    );
+  });
+});
+
+test('worker refreshes concurrently created VIP guests for snapshot imports by normalized identity', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,Race Guest,race@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.concurrentGuestCreateConflict = {
+      id: 'guest-created-by-other-import',
+      importId: 'other-import',
+      externalGuestKey: null,
+    };
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.acceptedRows, 1);
+    assert.equal(result.duplicateRows, 0);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].externalGuestKey, null);
+    assert.equal(state.guests[0].importId, 'import-1');
+    assert.equal(state.errors.length, 0);
+  });
+});
+
+test('worker handles concurrent unique conflict without marking the import retryable failed', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-RACE-002,Race Guest,race@example.test,+84900000002',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.concurrentGuestCreateConflict = {
+      id: 'guest-created-by-other-import',
+      importId: 'other-import',
+    };
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(state.imports[0].status, ImportStatus.COMPLETED);
+    assert.equal(state.imports[0].failureCode, null);
+    assert.equal(state.imports[0].failureMessage, null);
+    assert.equal(state.errors.length, 0);
+  });
+});
+
+test('worker preserves CHECKED_IN state when concurrent snapshot update resolves a unique conflict', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone,sponsor_company,invited_by,guest_type,allowed_gate,notes',
+        'Demo Concert,LOCAL_DEMO,VIP-RACE-CHECKIN,Updated Guest,new@example.test,+84900000009,Updated Sponsor,Updated Host,Updated Type,Gate B,Updated notes',
+      ]),
+      'utf8',
+    );
+    const checkedInAt = new Date('2026-06-16T10:00:00.000Z');
+    const state = createState(sourcePath);
+    state.concurrentGuestCreateConflict = {
+      id: 'guest-created-by-other-import',
+      importId: 'other-import',
+      status: VipGuestStatus.CHECKED_IN,
+      checkedInAt,
+    };
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(state.guests.length, 1);
+    assert.equal(state.guests[0].status, VipGuestStatus.CHECKED_IN);
+    assert.equal(state.guests[0].checkedInAt, checkedInAt);
+    assert.equal(state.guests[0].fullName, 'Updated Guest');
+    assert.equal(state.guests[0].importId, 'import-1');
+  });
+});
+
+test('worker cancels active VIP guests missing from a successful sponsor snapshot', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-KEEP,Kept Guest,keep@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const checkedInAt = new Date('2026-06-16T10:00:00.000Z');
+    const state = createState(sourcePath);
+    state.guests.push(
+      createGuest({
+        id: 'guest-keep',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-KEEP',
+      }),
+      createGuest({
+        id: 'guest-remove',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-REMOVE',
+      }),
+      createGuest({
+        id: 'guest-checked-in',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-CHECKED-IN',
+        status: VipGuestStatus.CHECKED_IN,
+        checkedInAt,
+      }),
+    );
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(state.guests.find((guest) => guest.id === 'guest-keep')?.status, VipGuestStatus.ACTIVE);
+    assert.equal(state.guests.find((guest) => guest.id === 'guest-keep')?.importId, 'import-1');
+    assert.equal(
+      state.guests.find((guest) => guest.id === 'guest-remove')?.status,
+      VipGuestStatus.CANCELLED,
+    );
+    assert.equal(state.guests.find((guest) => guest.id === 'guest-remove')?.importId, 'import-1');
+    assert.equal(
+      state.guests.find((guest) => guest.id === 'guest-checked-in')?.status,
+      VipGuestStatus.CHECKED_IN,
+    );
+    assert.equal(
+      state.guests.find((guest) => guest.id === 'guest-checked-in')?.checkedInAt,
+      checkedInAt,
+    );
+    assert.ok(
+      state.auditLogs.some((entry) => entry.action === 'vip_import.guest_snapshot_cancelled'),
+    );
+  });
+});
+
+test('worker does not cancel existing VIP guests when snapshot rows have errors', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-KEEP,Kept Guest,keep@example.test,+84900000001',
+        'Demo Concert,LOCAL_DEMO,VIP-BAD,,bad@example.test,+84900000002',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.guests.push(
+      createGuest({
+        id: 'guest-remove',
+        importId: 'previous-import',
+        externalGuestKey: 'VIP-REMOVE',
+      }),
+    );
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.COMPLETED);
+    assert.equal(result.rejectedRows, 1);
+    assert.equal(
+      state.guests.find((guest) => guest.id === 'guest-remove')?.status,
+      VipGuestStatus.ACTIVE,
+    );
+    assert.equal(
+      state.auditLogs.some((entry) => entry.action === 'vip_import.guest_snapshot_cancelled'),
+      false,
+    );
+  });
+});
+
 test('worker retry is idempotent for an already processed import', async () => {
   await withTempCsv(async (sourcePath) => {
     await writeFile(
@@ -211,6 +810,41 @@ test('worker retry is idempotent for an already processed import', async () => {
     assert.equal(retry.status, ImportStatus.COMPLETED);
     assert.equal(retry.acceptedRows, 2);
     assert.equal(state.guests.length, 2);
+  });
+});
+
+test('worker skips processing when another worker already claimed the import', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Demo Guest One,one@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+    state.claimConflictStatus = ImportStatus.PROCESSING;
+    state.errors.push({
+      id: 'existing-error',
+      importId: 'import-1',
+      type: ImportErrorType.ROW,
+      rowNumber: 2,
+      field: 'email',
+      code: 'EXISTING_ERROR',
+      message: 'Existing error',
+      rawRow: null,
+      metadata: null,
+      createdAt: new Date('2026-06-15T12:00:00.000Z'),
+    });
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.PROCESSING);
+    assert.equal(state.guests.length, 0);
+    assert.equal(state.errors.length, 1);
+    assert.deepEqual(state.auditLogs, []);
   });
 });
 
@@ -268,7 +902,7 @@ function createState(sourcePath: string): TestState {
         sourceName: 'LOCAL_DEMO',
         fileName: 'vip.csv',
         sourcePath,
-        sourceFingerprint: 'fingerprint',
+        sourceFingerprint: sha256(readFileSync(sourcePath)),
         status: ImportStatus.QUEUED,
         totalRows: 0,
         acceptedRows: 0,
@@ -291,103 +925,230 @@ function createState(sourcePath: string): TestState {
 }
 
 function createPrismaMock(state: TestState) {
-  const tx = {
-    vipGuestImport: {
-      findMany: async () =>
-        state.imports.filter((importRecord) => {
-          const processableStatuses: ImportStatus[] = [
-            ImportStatus.PENDING,
-            ImportStatus.QUEUED,
-            ImportStatus.RETRYABLE_FAILED,
-          ];
+  const createTransactionClient = (context: TransactionContext) => {
+    const ensureActive = () => {
+      assert.equal(context.aborted, false, 'transaction client was used after it was aborted');
+    };
 
-          return processableStatuses.includes(importRecord.status);
-        }),
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        state.imports.find((importRecord) => importRecord.id === where.id) ?? null,
-      update: async ({ where, data }: { where: { id: string }; data: Partial<TestImport> }) => {
-        const importRecord = state.imports.find((candidate) => candidate.id === where.id);
-        assert.ok(importRecord);
-        Object.assign(importRecord, data, { updatedAt: new Date() });
-        return importRecord;
-      },
-    },
-    vipGuestImportError: {
-      deleteMany: async ({ where }: { where: { importId: string } }) => {
-        state.errors = state.errors.filter((error) => error.importId !== where.importId);
-        return { count: 0 };
-      },
-      create: async ({ data }: { data: Partial<TestError> }) => {
-        const error: TestError = {
-          id: `error-${state.errors.length + 1}`,
-          importId: data.importId ?? 'import-1',
-          type: data.type ?? ImportErrorType.ROW,
-          rowNumber: data.rowNumber ?? null,
-          field: data.field ?? null,
-          code: data.code ?? 'ERROR',
-          message: data.message ?? 'Error',
-          rawRow: data.rawRow,
-          metadata: data.metadata,
-          createdAt: new Date(),
-        };
+    return {
+      vipGuestImport: {
+        findMany: async ({ where, take }: FindManyImportArgs = {}) => {
+          ensureActive();
+          const statuses = where?.status?.in;
+          const imports = statuses
+            ? state.imports.filter((importRecord) => statuses.includes(importRecord.status))
+            : state.imports;
 
-        state.errors.push(error);
-        return error;
-      },
-    },
-    vipGuest: {
-      findFirst: async ({
-        where,
-      }: {
-        where: {
-          concertId: string;
-          sponsorSource: string;
-          externalGuestKey?: string | null;
-          normalizedIdentityKey?: string | null;
-        };
-      }) =>
-        state.guests.find(
-          (guest) =>
-            guest.concertId === where.concertId &&
-            guest.sponsorSource === where.sponsorSource &&
-            (where.externalGuestKey
-              ? guest.externalGuestKey === where.externalGuestKey
-              : guest.normalizedIdentityKey === where.normalizedIdentityKey),
-        ) ?? null,
-      create: async ({ data }: { data: Partial<TestGuest> }) => {
-        state.guestCreateAttempts += 1;
+          return typeof take === 'number' ? imports.slice(0, take) : imports;
+        },
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          ensureActive();
+          return state.imports.find((importRecord) => importRecord.id === where.id) ?? null;
+        },
+        updateMany: async ({ where, data }: UpdateManyImportArgs) => {
+          ensureActive();
+          const importRecord = state.imports.find(
+            (candidate) => !where.id || candidate.id === where.id,
+          );
 
-        if (state.failOnGuestCreateAttempt === state.guestCreateAttempts) {
-          throw new Error('Simulated database write failure');
-        }
+          if (!importRecord) {
+            return { count: 0 };
+          }
 
-        const guest = createGuest({
-          ...data,
-          id: `guest-${state.guests.length + 1}`,
-        });
+          if (state.claimConflictStatus && data.status === ImportStatus.PROCESSING) {
+            Object.assign(importRecord, {
+              status: state.claimConflictStatus,
+              updatedAt: new Date(),
+            });
+            state.claimConflictStatus = undefined;
 
-        state.guests.push(guest);
-        return guest;
+            return { count: 0 };
+          }
+
+          if (where.status?.in && !where.status.in.includes(importRecord.status)) {
+            return { count: 0 };
+          }
+
+          Object.assign(importRecord, data, { updatedAt: new Date() });
+
+          return { count: 1 };
+        },
+        update: async ({ where, data }: { where: { id: string }; data: Partial<TestImport> }) => {
+          ensureActive();
+          const importRecord = state.imports.find((candidate) => candidate.id === where.id);
+          assert.ok(importRecord);
+          Object.assign(importRecord, data, { updatedAt: new Date() });
+          return importRecord;
+        },
       },
-      update: async ({ where, data }: { where: { id: string }; data: Partial<TestGuest> }) => {
-        const guest = state.guests.find((candidate) => candidate.id === where.id);
-        assert.ok(guest);
-        Object.assign(guest, data, { updatedAt: new Date() });
-        return guest;
+      vipGuestImportError: {
+        deleteMany: async ({ where }: { where: { importId: string } }) => {
+          ensureActive();
+          state.errors = state.errors.filter((error) => error.importId !== where.importId);
+          return { count: 0 };
+        },
+        create: async ({ data }: { data: Partial<TestError> }) => {
+          ensureActive();
+          const error: TestError = {
+            id: `error-${state.errors.length + 1}`,
+            importId: data.importId ?? 'import-1',
+            type: data.type ?? ImportErrorType.ROW,
+            rowNumber: data.rowNumber ?? null,
+            field: data.field ?? null,
+            code: data.code ?? 'ERROR',
+            message: data.message ?? 'Error',
+            rawRow: data.rawRow,
+            metadata: data.metadata,
+            createdAt: new Date(),
+          };
+
+          state.errors.push(error);
+          return error;
+        },
       },
-    },
-    auditLog: {
-      create: async ({ data }: { data: { action: string; importId: string | null; metadata: unknown } }) => {
-        state.auditLogs.push(data);
-        return data;
+      vipGuest: {
+        findFirst: async ({
+          where,
+        }: {
+          where: VipGuestWhere;
+        }) => {
+          ensureActive();
+          return state.guests.find((guest) => matchesGuestWhere(guest, where)) ?? null;
+        },
+        findMany: async ({ where }: { where: VipGuestWhere }) => {
+          ensureActive();
+          return state.guests.filter((guest) => matchesGuestWhere(guest, where));
+        },
+        create: async ({ data }: { data: Partial<TestGuest> }) => {
+          ensureActive();
+          state.guestCreateAttempts += 1;
+
+          if (state.failOnGuestCreateAttempt === state.guestCreateAttempts) {
+            throw new Error('Simulated database write failure');
+          }
+
+          if (state.concurrentGuestCreateConflict) {
+            const guest = createGuest({
+              ...data,
+              ...state.concurrentGuestCreateConflict,
+              id:
+                state.concurrentGuestCreateConflict.id ??
+                `guest-${state.guests.length + 1}`,
+            });
+
+            state.guests.push(guest);
+            state.concurrentGuestCreateConflict = undefined;
+            context.aborted = true;
+
+            throw new Prisma.PrismaClientKnownRequestError(
+              'Unique constraint failed on VIP guest identity',
+              {
+                code: 'P2002',
+                clientVersion: 'test',
+                meta: {
+                  target: ['concertId', 'sponsorSource', 'externalGuestKey'],
+                },
+              },
+            );
+          }
+
+          const guest = createGuest({
+            ...data,
+            id: `guest-${state.guests.length + 1}`,
+          });
+
+          state.guests.push(guest);
+          return guest;
+        },
+        update: async ({ where, data }: { where: { id: string }; data: Partial<TestGuest> }) => {
+          ensureActive();
+          const guest = state.guests.find((candidate) => candidate.id === where.id);
+          assert.ok(guest);
+          Object.assign(guest, data, { updatedAt: new Date() });
+          return guest;
+        },
+        updateMany: async ({ where, data }: { where: VipGuestWhere; data: Partial<TestGuest> }) => {
+          ensureActive();
+          const guests = state.guests.filter((guest) => matchesGuestWhere(guest, where));
+
+          for (const guest of guests) {
+            Object.assign(guest, data, { updatedAt: new Date() });
+          }
+
+          return { count: guests.length };
+        },
       },
-    },
+      auditLog: {
+        create: async ({
+          data,
+        }: {
+          data: {
+            action: string;
+            importId: string | null;
+            entityType: string;
+            entityId: string;
+            metadata: unknown;
+          };
+        }) => {
+          ensureActive();
+          state.auditLogs.push(data);
+          return data;
+        },
+      },
+    };
   };
+
+  const tx = createTransactionClient({ aborted: false });
 
   return {
     ...tx,
-    $transaction: async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
+    $transaction: async (callback: (transaction: ReturnType<typeof createTransactionClient>) => Promise<unknown>) => {
+      const transaction = createTransactionClient({ aborted: false });
+      return callback(transaction);
+    },
   };
+}
+
+function matchesGuestWhere(guest: TestGuest, where: VipGuestWhere): boolean {
+  if (where.concertId && guest.concertId !== where.concertId) {
+    return false;
+  }
+
+  if (typeof where.sponsorSource === 'string' && guest.sponsorSource !== where.sponsorSource) {
+    return false;
+  }
+
+  if (
+    typeof where.sponsorSource === 'object' &&
+    !where.sponsorSource.in.includes(guest.sponsorSource)
+  ) {
+    return false;
+  }
+
+  if (where.externalGuestKey !== undefined && guest.externalGuestKey !== where.externalGuestKey) {
+    return false;
+  }
+
+  if (
+    where.normalizedIdentityKey !== undefined &&
+    guest.normalizedIdentityKey !== where.normalizedIdentityKey
+  ) {
+    return false;
+  }
+
+  if (where.qrHash !== undefined && guest.qrHash !== where.qrHash) {
+    return false;
+  }
+
+  if (typeof where.status === 'string' && guest.status !== where.status) {
+    return false;
+  }
+
+  if (typeof where.status === 'object' && !where.status.in.includes(guest.status)) {
+    return false;
+  }
+
+  return true;
 }
 
 function createGuest(input: Partial<TestGuest>): TestGuest {
@@ -434,4 +1195,33 @@ async function withTempCsv(callback: (sourcePath: string) => Promise<void>): Pro
 
 function csv(lines: string[]): string {
   return lines.join('\n');
+}
+
+function invalidUtf8VipCsv(): Buffer {
+  return Buffer.concat([
+    Buffer.from(
+      [
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Nguy',
+      ].join('\n'),
+      'utf8',
+    ),
+    Buffer.from([0xea]),
+    Buffer.from('n Van A,nguyen@example.test,+84900000001', 'utf8'),
+  ]);
+}
+
+async function withEnv(name: string, value: string, callback: () => Promise<void>): Promise<void> {
+  const previous = process.env[name];
+  process.env[name] = value;
+
+  try {
+    await callback();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = previous;
+    }
+  }
 }

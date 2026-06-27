@@ -680,10 +680,16 @@ private class UiFakeDao(
         vipGuests.value.firstOrNull {
             it.concertId == concertId && (it.qrHash == qrHash || it.externalGuestKey == qrHash)
         }
-    override fun observeVipGuestsForConcert(concertId: String): Flow<List<PreloadedVipGuestEntity>> =
-        MutableStateFlow(vipGuests.value.filter { it.concertId == concertId })
-    override suspend fun vipGuestListForConcert(concertId: String): List<PreloadedVipGuestEntity> =
-        vipGuests.value.filter { it.concertId == concertId }
+    override fun observeVipGuestsForConcert(
+        concertId: String,
+        gateName: String?,
+    ): Flow<List<PreloadedVipGuestEntity>> =
+        MutableStateFlow(vipGuests.value.filter { it.concertId == concertId && it.isVisibleAtGate(gateName) })
+    override suspend fun vipGuestListForConcert(
+        concertId: String,
+        gateName: String?,
+    ): List<PreloadedVipGuestEntity> =
+        vipGuests.value.filter { it.concertId == concertId && it.isVisibleAtGate(gateName) }
     override suspend fun acceptedLocalScanCount(concertId: String, qrHash: String): Int =
         scanLogs.value.count {
             it.concertId == concertId &&
@@ -743,7 +749,7 @@ private object UiUnusedApiService : CheckInApiService {
     override suspend fun login(request: ApiLoginRequest): ApiLoginResponse = error("Not used")
     override suspend fun me(): ApiStaffUser = error("Not used")
     override suspend fun assignments(): List<ApiAssignment> = error("Not used")
-    override suspend fun preload(concertId: String): ApiPreloadResponse = error("Not used")
+    override suspend fun preload(concertId: String, assignmentId: String?): ApiPreloadResponse = error("Not used")
     override suspend fun sync(concertId: String, request: ApiSyncRequest): ApiSyncResponse = error("Not used")
 }
 
@@ -758,3 +764,6 @@ private class UiFakeSession : StaffSession {
     override fun setSourceDeviceId(sourceDeviceId: String) = Unit
     override fun clearSessionCredentials() = Unit
 }
+
+private fun PreloadedVipGuestEntity.isVisibleAtGate(gateName: String?): Boolean =
+    gateName == null || allowedGate == null || allowedGate.trim().equals(gateName.trim(), ignoreCase = true)

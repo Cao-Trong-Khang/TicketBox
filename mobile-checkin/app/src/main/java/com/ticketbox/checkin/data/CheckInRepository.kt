@@ -61,8 +61,8 @@ class CheckInRepository(
     fun observeTickets(concertId: String): Flow<List<PreloadedTicketEntity>> =
         dao.observeTicketsForConcert(concertId)
 
-    fun observeVipGuests(concertId: String): Flow<List<PreloadedVipGuestEntity>> =
-        dao.observeVipGuestsForConcert(concertId)
+    fun observeVipGuests(concertId: String, gateName: String? = null): Flow<List<PreloadedVipGuestEntity>> =
+        dao.observeVipGuestsForConcert(concertId, gateName)
 
     fun observeScanHistory(concertId: String): Flow<List<LocalScanLogEntity>> =
         dao.observeScanLogsForConcert(concertId)
@@ -119,8 +119,8 @@ class CheckInRepository(
         return assignments
     }
 
-    suspend fun preload(concertId: String): SnapshotEntity {
-        val response = api.preload(concertId)
+    suspend fun preload(concertId: String, assignmentId: String? = null): SnapshotEntity {
+        val response = api.preload(concertId, assignmentId)
         val storedAt = clock()
         val snapshot = SnapshotEntity(
             concertId = response.concert.id,
@@ -171,9 +171,9 @@ class CheckInRepository(
         return snapshot
     }
 
-    suspend fun dashboardSnapshot(concertId: String): DashboardSnapshot {
+    suspend fun dashboardSnapshot(concertId: String, gateName: String? = null): DashboardSnapshot {
         val tickets = dao.ticketListForConcert(concertId)
-        val vipGuests = dao.vipGuestListForConcert(concertId)
+        val vipGuests = dao.vipGuestListForConcert(concertId, gateName)
         val pending = dao.pendingScanCount(concertId)
         val localAccepted = dao.acceptedScanCountForConcert(concertId)
         val checkedIn = tickets.count { it.status == "USED" || it.checkedInAtIso != null } + localAccepted

@@ -15,11 +15,13 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main.js",
     "start:worker": "node dist/worker.js",
+    "start:worker:once": "node dist/worker.js --once",
     "start:ai-bio-worker": "node dist/ai-bio-worker.js",
     "ai-bio:worker": "ts-node src/ai-bio-worker.ts",
     "start:vip-import-scheduler": "node dist/vip-import-scheduler.js",
     "vip-imports:scan": "ts-node src/vip-import-scheduler.ts",
     "vip-imports:worker": "ts-node src/worker.ts",
+    "vip-imports:worker:once": "ts-node src/worker.ts --once",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "node --test -r ts-node/register \"src/**/*.spec.ts\""
   },

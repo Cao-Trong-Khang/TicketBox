@@ -3,7 +3,16 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import { ImportStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { getCsvValue, parseCsv, sha256 } from './vip-csv';
+import {
+  InvalidCsvEncodingError,
+  MalformedCsvError,
+  UnsupportedCsvDelimiterError,
+  decodeVipCsvContent,
+  getCsvValue,
+  parseCsv,
+  sha256,
+} from './vip-csv';
+import { VipImportLimitError, inspectVipImportFile } from './vip-import-limits';
 import { VipImportJobsPublisher } from './vip-import-jobs.publisher';
 import { VipImportScanResult } from './vip-imports.types';
 
@@ -48,8 +57,36 @@ export class VipImportSchedulerService {
         continue;
       }
 
+      try {
+        await inspectVipImportFile(sourcePath, { fileStat });
+      } catch (error) {
+        if (!(error instanceof VipImportLimitError)) {
+          throw error;
+        }
+
+        this.logger.warn(`Skipping ${entry}: ${error.message}`);
+        result.skipped += 1;
+        continue;
+      }
+
       const buffer = await readFile(sourcePath);
-      const metadata = await this.resolveCsvMetadata(buffer.toString('utf8'));
+      let metadata: ResolvedCsvMetadata | null;
+
+      try {
+        metadata = await this.resolveCsvMetadata(decodeVipCsvContent(buffer));
+      } catch (error) {
+        if (
+          !(error instanceof UnsupportedCsvDelimiterError) &&
+          !(error instanceof InvalidCsvEncodingError) &&
+          !(error instanceof MalformedCsvError)
+        ) {
+          throw error;
+        }
+
+        this.logger.warn(`Skipping ${entry}: ${error.message}`);
+        result.skipped += 1;
+        continue;
+      }
 
       if (!metadata) {
         this.logger.warn(`Skipping ${entry}: no concert_id or concert_title metadata`);
@@ -110,12 +147,12 @@ export class VipImportSchedulerService {
           status: queued.status,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown Kafka publish error';
+        const message = error instanceof Error ? error.message : 'Unknown VIP import queue error';
         const failed = await this.prisma.vipGuestImport.update({
           where: { id: importRecord.id },
           data: {
             status: ImportStatus.FAILED_TO_ENQUEUE,
-            failureCode: 'KAFKA_ENQUEUE_FAILED',
+            failureCode: 'QUEUE_ENQUEUE_FAILED',
             failureMessage: message,
           },
         });
@@ -157,24 +194,44 @@ export class VipImportSchedulerService {
       return existing;
     }
 
-    const created = await this.prisma.vipGuestImport.create({
-      data: {
-        concertId: input.concertId,
-        sourceName: input.sourceName,
-        fileName: input.fileName,
-        sourcePath: input.sourcePath,
-        sourceFingerprint: input.sourceFingerprint,
-        status: ImportStatus.DETECTED,
-      },
-    });
+    try {
+      const created = await this.prisma.vipGuestImport.create({
+        data: {
+          concertId: input.concertId,
+          sourceName: input.sourceName,
+          fileName: input.fileName,
+          sourcePath: input.sourcePath,
+          sourceFingerprint: input.sourceFingerprint,
+          status: ImportStatus.DETECTED,
+        },
+      });
 
-    await this.auditImport(created.id, 'vip_import.detected', {
-      fileName: created.fileName,
-      sourceName: created.sourceName,
-      sourceFingerprint: created.sourceFingerprint,
-    });
+      await this.auditImport(created.id, 'vip_import.detected', {
+        fileName: created.fileName,
+        sourceName: created.sourceName,
+        sourceFingerprint: created.sourceFingerprint,
+      });
 
-    return created;
+      return created;
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      const concurrentImport = await this.prisma.vipGuestImport.findFirst({
+        where: {
+          concertId: input.concertId,
+          sourceName: input.sourceName,
+          sourceFingerprint: input.sourceFingerprint,
+        },
+      });
+
+      if (!concurrentImport) {
+        throw error;
+      }
+
+      return concurrentImport;
+    }
   }
 
   private async resolveCsvMetadata(content: string): Promise<ResolvedCsvMetadata | null> {
@@ -229,4 +286,8 @@ export class VipImportSchedulerService {
   private getSourceDir(): string {
     return process.env.VIP_CSV_SOURCE_DIR || join(process.cwd(), 'prisma', 'demo-sponsor-csv');
   }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }

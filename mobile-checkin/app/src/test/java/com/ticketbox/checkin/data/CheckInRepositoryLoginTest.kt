@@ -9,8 +9,10 @@ import com.ticketbox.checkin.data.local.SnapshotEntity
 import com.ticketbox.checkin.data.network.ApiAssignment
 import com.ticketbox.checkin.data.network.ApiLoginRequest
 import com.ticketbox.checkin.data.network.ApiLoginResponse
+import com.ticketbox.checkin.data.network.ApiPreloadConcert
 import com.ticketbox.checkin.data.network.ApiPreloadResponse
 import com.ticketbox.checkin.data.network.ApiStaffUser
+import com.ticketbox.checkin.data.network.ApiSnapshot
 import com.ticketbox.checkin.data.network.ApiSyncRequest
 import com.ticketbox.checkin.data.network.ApiSyncResponse
 import com.ticketbox.checkin.data.network.CheckInApiService
@@ -85,6 +87,18 @@ class CheckInRepositoryLoginTest {
         assertEquals(0, dao.localRecordMutations)
     }
 
+    @Test
+    fun preloadPassesSelectedAssignmentIdToApi() = runTest {
+        val api = FakeCheckInApiService()
+        val repository = CheckInRepository(FakeCheckInDao(), api, FakeStaffSession())
+
+        val snapshot = repository.preload("concert-1", "assignment-1")
+
+        assertEquals("concert-1", api.lastPreloadConcertId)
+        assertEquals("assignment-1", api.lastPreloadAssignmentId)
+        assertEquals("concert-1", snapshot.concertId)
+    }
+
     private fun httpError(code: Int): HttpException =
         HttpException(Response.error<Any>(code, "{}".toResponseBody(null)))
 }
@@ -122,6 +136,9 @@ private class FakeCheckInApiService(
     private val loginError: HttpException? = null,
     private val assignmentsError: HttpException? = null,
 ) : CheckInApiService {
+    var lastPreloadConcertId: String? = null
+    var lastPreloadAssignmentId: String? = null
+
     override suspend fun login(request: ApiLoginRequest): ApiLoginResponse {
         loginError?.let { throw it }
         return ApiLoginResponse(accessToken = "token-1")
@@ -147,8 +164,28 @@ private class FakeCheckInApiService(
         )
     }
 
-    override suspend fun preload(concertId: String): ApiPreloadResponse =
-        error("Not used")
+    override suspend fun preload(concertId: String, assignmentId: String?): ApiPreloadResponse {
+        lastPreloadConcertId = concertId
+        lastPreloadAssignmentId = assignmentId
+        return ApiPreloadResponse(
+            concert = ApiPreloadConcert(
+                id = concertId,
+                title = "TicketBox Live",
+                venueName = "Main Hall",
+                venueAddress = null,
+                status = "PUBLISHED",
+                startsAt = "2026-06-15T10:00:00Z",
+                endsAt = null,
+            ),
+            assignments = emptyList(),
+            snapshot = ApiSnapshot(
+                generatedAt = "2026-06-15T09:00:00Z",
+                version = "snapshot-1",
+            ),
+            tickets = emptyList(),
+            vipGuests = emptyList(),
+        )
+    }
 
     override suspend fun sync(concertId: String, request: ApiSyncRequest): ApiSyncResponse =
         error("Not used")
@@ -189,9 +226,15 @@ private class FakeCheckInDao : CheckInDao() {
     override suspend fun ticketListForConcert(concertId: String): List<PreloadedTicketEntity> =
         emptyList()
     override suspend fun vipGuestByQrHash(concertId: String, qrHash: String): PreloadedVipGuestEntity? = null
-    override fun observeVipGuestsForConcert(concertId: String): Flow<List<PreloadedVipGuestEntity>> =
+    override fun observeVipGuestsForConcert(
+        concertId: String,
+        gateName: String?,
+    ): Flow<List<PreloadedVipGuestEntity>> =
         MutableStateFlow(emptyList())
-    override suspend fun vipGuestListForConcert(concertId: String): List<PreloadedVipGuestEntity> =
+    override suspend fun vipGuestListForConcert(
+        concertId: String,
+        gateName: String?,
+    ): List<PreloadedVipGuestEntity> =
         emptyList()
     override suspend fun acceptedLocalScanCount(concertId: String, qrHash: String): Int = 0
     override suspend fun previousAcceptedLocalScan(

@@ -56,6 +56,8 @@ type PublicTicketTypeQueryResult = {
   reservedQuantity: number;
   soldQuantity: number;
   perUserLimit: number;
+  saleStartAt: Date;
+  saleEndAt: Date | null;
 };
 
 @Injectable()
@@ -205,6 +207,8 @@ export class ConcertsService {
             reservedQuantity: true,
             soldQuantity: true,
             perUserLimit: true,
+            saleStartAt: true,
+            saleEndAt: true,
           },
         },
       },
@@ -278,6 +282,8 @@ export class ConcertsService {
         t.totalQuantity - t.reservedQuantity - t.soldQuantity,
       ),
       perUserLimit: t.perUserLimit,
+      saleStartAt: t.saleStartAt.toISOString(),
+      saleEndAt: t.saleEndAt?.toISOString() ?? null,
     }));
   }
 

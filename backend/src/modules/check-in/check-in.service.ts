@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -12,6 +13,8 @@ import {
   CheckInStatus,
   CheckInSyncStatus,
   ImportStatus,
+  OrderStatus,
+  PaymentStatus,
   Prisma,
   TicketStatus,
   VipGuestStatus,
@@ -22,6 +25,11 @@ import { PermissionService } from '../rbac/permission.service';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { CheckInEventsPublisher } from './check-in-events.publisher';
+import {
+  CHECK_IN_QR_ENTITY_TYPES,
+  createCheckInQrToken,
+  verifyCheckInQrTokenForEntity,
+} from './check-in-qr-token';
 import {
   CheckInAssignmentDto,
   CheckInPreloadDto,
@@ -39,11 +47,40 @@ import {
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const PRELOAD_RATE_LIMIT = 120;
 const SYNC_RATE_LIMIT = 300;
+const DEFAULT_TICKET_QR_EXPIRATION_GRACE_SECONDS = 7 * 24 * 60 * 60;
+const DEFAULT_TICKET_QR_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+const DEFAULT_CLOCK_SKEW_SECONDS = 5 * 60;
+const DEFAULT_OFFLINE_GRACE_SECONDS = 24 * 60 * 60;
+
+export const CHECK_IN_NOW = 'CHECK_IN_NOW';
 
 type AssignmentAccess = {
   id: string;
   gateName: string | null;
   sourceDeviceId: string | null;
+};
+
+type ScanTiming = {
+  clientScannedAt: Date | null;
+  serverReceivedAt: Date;
+};
+
+type WinningCheckIn = Pick<
+  CheckIn,
+  'id' | 'sourceDeviceId' | 'serverCheckedInAt' | 'scannedAt'
+>;
+
+type TicketPurchaseContext = {
+  issuedAt: Date;
+  order: {
+    status: OrderStatus;
+    paidAt: Date | null;
+    totalAmountVnd: number;
+    payments: {
+      status: PaymentStatus;
+      amountVnd: number;
+    }[];
+  };
 };
 
 @Injectable()
@@ -55,17 +92,17 @@ export class CheckInService {
     private readonly permissionService: PermissionService,
     private readonly redisCache: RedisCacheService,
     private readonly eventsPublisher: CheckInEventsPublisher,
+    @Inject(CHECK_IN_NOW) private readonly now: () => Date,
   ) {}
 
   async listAssignments(user: AuthenticatedUser): Promise<CheckInAssignmentDto[]> {
     await this.assertCheckInStaffWithPermissions(user.id, [PERMISSION_CODES.checkinPreload]);
 
-    const assignments = await this.prisma.checkInAssignment.findMany({
+    const assignments = await this.prisma.checkInStaffAssignment.findMany({
       where: {
-        staffUserId: user.id,
-        active: true,
+        userId: user.id,
       },
-      orderBy: [{ concert: { startsAt: 'asc' } }, { gateName: 'asc' }],
+      orderBy: [{ concert: { startsAt: 'asc' } }, { gateLabel: 'asc' }],
       include: {
         concert: {
           select: {
@@ -86,17 +123,24 @@ export class CheckInService {
       title: assignment.concert.title,
       venueName: assignment.concert.venueName,
       status: assignment.concert.status,
-      gateName: assignment.gateName,
-      sourceDeviceId: assignment.sourceDeviceId,
+      gateName: assignment.gateLabel,
+      sourceDeviceId: null,
       startsAt: assignment.concert.startsAt.toISOString(),
       endsAt: assignment.concert.endsAt?.toISOString() ?? null,
     }));
   }
 
-  async preloadEvent(user: AuthenticatedUser, concertId: string): Promise<CheckInPreloadDto> {
-    const assignments = await this.assertAssignedCheckInStaff(user.id, concertId, [
-      PERMISSION_CODES.checkinPreload,
-    ]);
+  async preloadEvent(
+    user: AuthenticatedUser,
+    concertId: string,
+    assignmentId?: string,
+  ): Promise<CheckInPreloadDto> {
+    const assignments = await this.assertAssignedCheckInStaff(
+      user.id,
+      concertId,
+      [PERMISSION_CODES.checkinPreload],
+      { assignmentId },
+    );
 
     await this.rateLimitOrThrow(
       `check-in:preload:user:${user.id}:concert:${concertId}`,
@@ -147,12 +191,11 @@ export class CheckInService {
             where: {
               status: CheckInStatus.SUCCESS,
             },
-            orderBy: {
-              scannedAt: 'desc',
-            },
+            orderBy: [{ serverCheckedInAt: 'desc' }, { scannedAt: 'desc' }],
             take: 1,
             select: {
               scannedAt: true,
+              serverCheckedInAt: true,
               sourceDeviceId: true,
               staffUser: {
                 select: {
@@ -194,6 +237,9 @@ export class CheckInService {
       }),
     ]);
 
+    const scopedVipGuests = vipGuests.filter((guest) =>
+      this.isVipGuestAllowedAtAssignedGate(guest.allowedGate, assignments),
+    );
     const generatedAt = new Date();
 
     return {
@@ -218,7 +264,14 @@ export class CheckInService {
       tickets: tickets.map((ticket) => ({
         id: ticket.id,
         ticketCode: ticket.ticketCode,
-        qrHash: ticket.qrHash,
+        qrHash: createCheckInQrToken({
+          entityType: CHECK_IN_QR_ENTITY_TYPES.ticket,
+          entityId: ticket.id,
+          concertId,
+          nonce: ticket.qrHash,
+          issuedAt: ticket.issuedAt,
+          expiresAt: this.resolveTicketQrExpiresAt(concert.endsAt, generatedAt),
+        }),
         status: ticket.status,
         issuedAt: ticket.issuedAt.toISOString(),
         checkedInAt: ticket.checkedInAt?.toISOString() ?? null,
@@ -227,7 +280,9 @@ export class CheckInService {
         zoneOrSeat: ticket.ticketType.name,
         previousCheckIn: ticket.checkIns?.[0]
           ? {
-              scannedAt: ticket.checkIns[0].scannedAt.toISOString(),
+              scannedAt: (
+                ticket.checkIns[0].serverCheckedInAt ?? ticket.checkIns[0].scannedAt
+              ).toISOString(),
               gate: ticket.checkIns[0].sourceDeviceId,
               staffName:
                 ticket.checkIns[0].staffUser.displayName ?? ticket.checkIns[0].staffUser.email,
@@ -235,9 +290,16 @@ export class CheckInService {
           : null,
         ticketType: ticket.ticketType,
       })),
-      vipGuests: vipGuests.map((guest) => ({
+      vipGuests: scopedVipGuests.map((guest) => ({
         id: guest.id,
-        qrHash: guest.qrHash,
+        qrHash: createCheckInQrToken({
+          entityType: CHECK_IN_QR_ENTITY_TYPES.vipGuest,
+          entityId: guest.id,
+          concertId,
+          nonce: guest.qrHash ?? guest.id,
+          issuedAt: guest.checkedInAt ?? generatedAt,
+          expiresAt: this.resolveTicketQrExpiresAt(concert.endsAt, generatedAt),
+        }),
         externalGuestKey: guest.externalGuestKey,
         fullName: guest.fullName,
         email: guest.email,
@@ -259,10 +321,12 @@ export class CheckInService {
     concertId: string,
     dto: SyncCheckInDto,
   ): Promise<CheckInSyncResponseDto> {
-    await this.assertAssignedCheckInStaff(user.id, concertId, [
-      PERMISSION_CODES.checkinScan,
-      PERMISSION_CODES.checkinSync,
-    ], dto.sourceDeviceId);
+    const assignments = await this.assertAssignedCheckInStaff(
+      user.id,
+      concertId,
+      [PERMISSION_CODES.checkinScan, PERMISSION_CODES.checkinSync],
+      { sourceDeviceId: dto.sourceDeviceId },
+    );
 
     await this.rateLimitOrThrow(`check-in:sync:user:${user.id}:concert:${concertId}`, SYNC_RATE_LIMIT);
     await this.rateLimitOrThrow(
@@ -273,7 +337,9 @@ export class CheckInService {
     const outcomes: CheckInSyncOutcomeDto[] = [];
 
     for (const scan of dto.scans) {
-      outcomes.push(await this.syncOneScan(user.id, concertId, dto.sourceDeviceId, scan));
+      outcomes.push(
+        await this.syncOneScan(user.id, concertId, dto.sourceDeviceId, assignments, scan),
+      );
     }
 
     return {
@@ -288,17 +354,34 @@ export class CheckInService {
     staffUserId: string,
     concertId: string,
     sourceDeviceId: string,
+    assignments: AssignmentAccess[],
     scan: CheckInSyncScanDto,
   ): Promise<CheckInSyncOutcomeDto> {
+    const serverReceivedAt = this.now();
     const existing = await this.findIdempotentCheckIn(sourceDeviceId, scan.localScanId);
 
     if (existing) {
       return this.toOutcome(existing, true);
     }
 
+    const scanTiming = this.resolveScanTiming(scan, serverReceivedAt);
+
     try {
       const checkIn = await this.prisma.$transaction((tx) =>
-        this.processNewScan(tx, staffUserId, concertId, sourceDeviceId, scan),
+        scanTiming.valid
+          ? this.processNewScan(
+              tx,
+              staffUserId,
+              concertId,
+              sourceDeviceId,
+              assignments,
+              scan,
+              scanTiming.timing,
+            )
+          : this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, scanTiming.timing, {
+              status: CheckInStatus.INVALID_QR,
+              note: scanTiming.reason,
+            }),
       );
 
       await this.publishSafely(checkIn);
@@ -320,6 +403,7 @@ export class CheckInService {
           concertId,
           sourceDeviceId,
           scan,
+          scanTiming.timing,
         );
 
         await this.publishSafely(conflict);
@@ -336,13 +420,23 @@ export class CheckInService {
     staffUserId: string,
     concertId: string,
     sourceDeviceId: string,
+    assignments: AssignmentAccess[],
     scan: CheckInSyncScanDto,
+    timing: ScanTiming,
   ): Promise<CheckIn> {
     if (scan.entityType === CheckInScanEntityType.vipGuest) {
-      return this.processVipGuestScan(tx, staffUserId, concertId, sourceDeviceId, scan);
+      return this.processVipGuestScan(
+        tx,
+        staffUserId,
+        concertId,
+        sourceDeviceId,
+        assignments,
+        scan,
+        timing,
+      );
     }
 
-    return this.processTicketScan(tx, staffUserId, concertId, sourceDeviceId, scan);
+    return this.processTicketScan(tx, staffUserId, concertId, sourceDeviceId, scan, timing);
   }
 
   private async processTicketScan(
@@ -351,28 +445,73 @@ export class CheckInService {
     concertId: string,
     sourceDeviceId: string,
     scan: CheckInSyncScanDto,
+    timing: ScanTiming,
   ): Promise<CheckIn> {
-    const scannedAt = new Date(scan.scannedAt);
+    const verifiedTicketQr = verifyCheckInQrTokenForEntity(
+      scan.qrHash,
+      CHECK_IN_QR_ENTITY_TYPES.ticket,
+      timing.serverReceivedAt,
+    );
+
+    if (!verifiedTicketQr.valid) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        status: CheckInStatus.INVALID_QR,
+        note: verifiedTicketQr.reason,
+      });
+    }
+
     const ticket = await tx.ticket.findUnique({
-      where: { qrHash: scan.qrHash },
+      where: { id: verifiedTicketQr.payload.entityId },
       include: {
         concert: {
           select: {
             endsAt: true,
           },
         },
+        order: {
+          select: {
+            status: true,
+            paidAt: true,
+            totalAmountVnd: true,
+            payments: {
+              select: {
+                status: true,
+                amountVnd: true,
+              },
+            },
+          },
+        },
       },
     });
 
     if (!ticket) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         status: CheckInStatus.INVALID_QR,
-        note: 'QR hash was not found for any issued ticket',
+        note: 'QR token was not found for any issued ticket',
+      });
+    }
+
+    if (verifiedTicketQr.payload.concertId !== concertId) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        ticketId: ticket.id,
+        status: CheckInStatus.UNAUTHORIZED,
+        note: 'QR token belongs to a different concert',
+      });
+    }
+
+    if (
+      ticket.qrHash !== verifiedTicketQr.payload.nonce ||
+      ticket.concertId !== verifiedTicketQr.payload.concertId
+    ) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        ticketId: ticket.id,
+        status: CheckInStatus.INVALID_QR,
+        note: 'Ticket QR token does not match the issued ticket',
       });
     }
 
     if (ticket.concertId !== concertId) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         ticketId: ticket.id,
         status: CheckInStatus.UNAUTHORIZED,
         note: 'Ticket belongs to a different concert',
@@ -380,15 +519,25 @@ export class CheckInService {
     }
 
     if (ticket.status === TicketStatus.CANCELLED) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         ticketId: ticket.id,
         status: CheckInStatus.CANCELLED_TICKET,
         note: 'Ticket is cancelled',
       });
     }
 
-    if (this.isExpired(ticket.concert.endsAt, scannedAt)) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+    const purchaseError = this.validateTicketPurchaseContext(ticket, timing);
+
+    if (purchaseError) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        ticketId: ticket.id,
+        status: purchaseError.status,
+        note: purchaseError.note,
+      });
+    }
+
+    if (this.isExpired(ticket.concert.endsAt, timing)) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         ticketId: ticket.id,
         status: CheckInStatus.EXPIRED,
         note: 'Ticket was scanned after the concert ended',
@@ -400,28 +549,58 @@ export class CheckInService {
         ticketId: ticket.id,
         status: CheckInStatus.SUCCESS,
       },
-      select: { id: true },
+      orderBy: [{ serverCheckedInAt: 'asc' }, { scannedAt: 'asc' }],
+      select: {
+        id: true,
+        sourceDeviceId: true,
+        serverCheckedInAt: true,
+        scannedAt: true,
+      },
     });
 
+    if (this.isCrossDeviceWinner(existingSuccess, sourceDeviceId)) {
+      return this.createWinnerConflictCheckIn(
+        tx,
+        staffUserId,
+        concertId,
+        sourceDeviceId,
+        scan,
+        timing,
+        {
+          ticketId: ticket.id,
+          winningCheckIn: existingSuccess,
+          note: 'Ticket was already checked in on another device',
+        },
+      );
+    }
+
     if (existingSuccess || ticket.status === TicketStatus.USED || ticket.checkedInAt) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         ticketId: ticket.id,
         status: CheckInStatus.ALREADY_USED,
         note: 'Ticket already has a successful check-in',
       });
     }
 
-    const checkIn = await this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
-      ticketId: ticket.id,
-      status: CheckInStatus.SUCCESS,
-      note: scan.localResult ? `Local result: ${scan.localResult}` : null,
-    });
+    const checkIn = await this.createCheckIn(
+      tx,
+      staffUserId,
+      concertId,
+      sourceDeviceId,
+      scan,
+      timing,
+      {
+        ticketId: ticket.id,
+        status: CheckInStatus.SUCCESS,
+        note: scan.localResult ? `Local result: ${scan.localResult}` : null,
+      },
+    );
 
     await tx.ticket.update({
       where: { id: ticket.id },
       data: {
         status: TicketStatus.USED,
-        checkedInAt: checkIn.scannedAt,
+        checkedInAt: checkIn.serverCheckedInAt ?? timing.serverReceivedAt,
       },
     });
 
@@ -433,12 +612,26 @@ export class CheckInService {
     staffUserId: string,
     concertId: string,
     sourceDeviceId: string,
+    assignments: AssignmentAccess[],
     scan: CheckInSyncScanDto,
+    timing: ScanTiming,
   ): Promise<CheckIn> {
-    const scannedAt = new Date(scan.scannedAt);
+    const verifiedVipQr = verifyCheckInQrTokenForEntity(
+      scan.qrHash,
+      CHECK_IN_QR_ENTITY_TYPES.vipGuest,
+      timing.serverReceivedAt,
+    );
+
+    if (!verifiedVipQr.valid) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        status: CheckInStatus.INVALID_QR,
+        note: verifiedVipQr.reason,
+      });
+    }
+
     const guest = await tx.vipGuest.findFirst({
       where: {
-        OR: [{ qrHash: scan.qrHash }, { externalGuestKey: scan.qrHash }],
+        id: verifiedVipQr.payload.entityId,
         import: {
           status: ImportStatus.COMPLETED,
         },
@@ -453,30 +646,57 @@ export class CheckInService {
     });
 
     if (!guest) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         status: CheckInStatus.INVALID_QR,
-        note: 'QR hash was not found for any VIP guest',
+        note: 'QR token was not found for any VIP guest',
+      });
+    }
+
+    if (verifiedVipQr.payload.concertId !== concertId) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        vipGuestId: guest.id,
+        status: CheckInStatus.UNAUTHORIZED,
+        note: 'QR token belongs to a different concert',
+      });
+    }
+
+    if (
+      (guest.qrHash ?? guest.id) !== verifiedVipQr.payload.nonce ||
+      guest.concertId !== verifiedVipQr.payload.concertId
+    ) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        vipGuestId: guest.id,
+        status: CheckInStatus.INVALID_QR,
+        note: 'VIP guest QR token does not match the imported guest',
       });
     }
 
     if (guest.concertId !== concertId) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         vipGuestId: guest.id,
         status: CheckInStatus.UNAUTHORIZED,
         note: 'VIP guest belongs to a different concert',
       });
     }
 
+    if (!this.isVipGuestAllowedAtAssignedGate(guest.allowedGate, assignments)) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+        vipGuestId: guest.id,
+        status: CheckInStatus.UNAUTHORIZED,
+        note: `VIP guest is assigned to ${guest.allowedGate}`,
+      });
+    }
+
     if (guest.status === VipGuestStatus.CANCELLED) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         vipGuestId: guest.id,
         status: CheckInStatus.CANCELLED_TICKET,
         note: 'VIP guest entry is cancelled',
       });
     }
 
-    if (this.isExpired(guest.concert.endsAt, scannedAt)) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+    if (this.isExpired(guest.concert.endsAt, timing)) {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         vipGuestId: guest.id,
         status: CheckInStatus.EXPIRED,
         note: 'VIP guest was scanned after the concert ended',
@@ -488,28 +708,58 @@ export class CheckInService {
         vipGuestId: guest.id,
         status: CheckInStatus.SUCCESS,
       },
-      select: { id: true },
+      orderBy: [{ serverCheckedInAt: 'asc' }, { scannedAt: 'asc' }],
+      select: {
+        id: true,
+        sourceDeviceId: true,
+        serverCheckedInAt: true,
+        scannedAt: true,
+      },
     });
 
+    if (this.isCrossDeviceWinner(existingSuccess, sourceDeviceId)) {
+      return this.createWinnerConflictCheckIn(
+        tx,
+        staffUserId,
+        concertId,
+        sourceDeviceId,
+        scan,
+        timing,
+        {
+          vipGuestId: guest.id,
+          winningCheckIn: existingSuccess,
+          note: 'VIP guest was already checked in on another device',
+        },
+      );
+    }
+
     if (existingSuccess || guest.status === VipGuestStatus.CHECKED_IN || guest.checkedInAt) {
-      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
+      return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         vipGuestId: guest.id,
         status: CheckInStatus.ALREADY_USED,
         note: 'VIP guest already has a successful check-in',
       });
     }
 
-    const checkIn = await this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, {
-      vipGuestId: guest.id,
-      status: CheckInStatus.SUCCESS,
-      note: scan.localResult ? `Local result: ${scan.localResult}` : null,
-    });
+    const checkIn = await this.createCheckIn(
+      tx,
+      staffUserId,
+      concertId,
+      sourceDeviceId,
+      scan,
+      timing,
+      {
+        vipGuestId: guest.id,
+        status: CheckInStatus.SUCCESS,
+        note: scan.localResult ? `Local result: ${scan.localResult}` : null,
+      },
+    );
 
     await tx.vipGuest.update({
       where: { id: guest.id },
       data: {
         status: VipGuestStatus.CHECKED_IN,
-        checkedInAt: checkIn.scannedAt,
+        checkedInAt: checkIn.serverCheckedInAt ?? timing.serverReceivedAt,
       },
     });
 
@@ -522,10 +772,12 @@ export class CheckInService {
     concertId: string,
     sourceDeviceId: string,
     scan: CheckInSyncScanDto,
+    timing: ScanTiming,
     input: {
       ticketId?: string;
       vipGuestId?: string;
       status: CheckInStatus;
+      serverCheckedInAt?: Date | null;
       note?: string | null;
     },
   ): Promise<CheckIn> {
@@ -539,12 +791,40 @@ export class CheckInService {
       mode: scan.mode === CheckInClientMode.online ? CheckInMode.ONLINE : CheckInMode.OFFLINE,
       status: input.status,
       syncStatus: CheckInSyncStatus.SYNCED,
-      scannedAt: new Date(scan.scannedAt),
-      syncedAt: new Date(),
+      scannedAt: timing.serverReceivedAt,
+      clientScannedAt: timing.clientScannedAt,
+      serverReceivedAt: timing.serverReceivedAt,
+      serverCheckedInAt:
+        input.serverCheckedInAt ??
+        (input.status === CheckInStatus.SUCCESS ? timing.serverReceivedAt : null),
+      syncedAt: timing.serverReceivedAt,
       note: input.note,
     };
 
     return tx.checkIn.create({ data });
+  }
+
+  private createWinnerConflictCheckIn(
+    tx: Prisma.TransactionClient,
+    staffUserId: string,
+    concertId: string,
+    sourceDeviceId: string,
+    scan: CheckInSyncScanDto,
+    timing: ScanTiming,
+    input: {
+      ticketId?: string;
+      vipGuestId?: string;
+      winningCheckIn: WinningCheckIn;
+      note: string;
+    },
+  ): Promise<CheckIn> {
+    return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
+      ticketId: input.ticketId,
+      vipGuestId: input.vipGuestId,
+      status: CheckInStatus.CONFLICT,
+      serverCheckedInAt: this.getWinningServerCheckInAt(input.winningCheckIn),
+      note: input.note,
+    });
   }
 
   private async recordConflictAfterUniqueFailure(
@@ -552,25 +832,12 @@ export class CheckInService {
     concertId: string,
     sourceDeviceId: string,
     scan: CheckInSyncScanDto,
+    timing: ScanTiming,
   ): Promise<CheckIn> {
     const [ticket, vipGuest] =
       scan.entityType === CheckInScanEntityType.ticket
-        ? [
-            await this.prisma.ticket.findUnique({
-              where: { qrHash: scan.qrHash },
-              select: { id: true },
-            }),
-            null,
-          ]
-        : [
-            null,
-            await this.prisma.vipGuest.findFirst({
-              where: {
-                OR: [{ qrHash: scan.qrHash }, { externalGuestKey: scan.qrHash }],
-              },
-              select: { id: true },
-            }),
-          ];
+        ? [await this.findTicketFromSignedQrForConflict(scan.qrHash), null]
+        : [null, await this.findVipGuestFromSignedQrForConflict(scan.qrHash)];
 
     return this.prisma.checkIn.create({
       data: {
@@ -583,11 +850,83 @@ export class CheckInService {
         mode: scan.mode === CheckInClientMode.online ? CheckInMode.ONLINE : CheckInMode.OFFLINE,
         status: CheckInStatus.CONFLICT,
         syncStatus: CheckInSyncStatus.SYNCED,
-        scannedAt: new Date(scan.scannedAt),
-        syncedAt: new Date(),
+        scannedAt: timing.serverReceivedAt,
+        clientScannedAt: timing.clientScannedAt,
+        serverReceivedAt: timing.serverReceivedAt,
+        serverCheckedInAt:
+          ticket !== null
+            ? await this.findWinningServerCheckInAt({ ticketId: ticket.id })
+            : vipGuest !== null
+              ? await this.findWinningServerCheckInAt({ vipGuestId: vipGuest.id })
+              : null,
+        syncedAt: timing.serverReceivedAt,
         note: 'A successful check-in for this payload was recorded by another device first',
       },
     });
+  }
+
+  private async findTicketFromSignedQrForConflict(qrHash: string): Promise<{ id: string } | null> {
+    const verifiedTicketQr = verifyCheckInQrTokenForEntity(
+      qrHash,
+      CHECK_IN_QR_ENTITY_TYPES.ticket,
+    );
+
+    if (!verifiedTicketQr.valid) {
+      return null;
+    }
+
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: verifiedTicketQr.payload.entityId },
+      select: {
+        id: true,
+        concertId: true,
+        qrHash: true,
+      },
+    });
+
+    if (
+      !ticket ||
+      ticket.qrHash !== verifiedTicketQr.payload.nonce ||
+      ticket.concertId !== verifiedTicketQr.payload.concertId
+    ) {
+      return null;
+    }
+
+    return { id: ticket.id };
+  }
+
+  private async findVipGuestFromSignedQrForConflict(
+    qrHash: string,
+  ): Promise<{ id: string } | null> {
+    const verifiedVipQr = verifyCheckInQrTokenForEntity(
+      qrHash,
+      CHECK_IN_QR_ENTITY_TYPES.vipGuest,
+    );
+
+    if (!verifiedVipQr.valid) {
+      return null;
+    }
+
+    const guest = await this.prisma.vipGuest.findFirst({
+      where: {
+        id: verifiedVipQr.payload.entityId,
+      },
+      select: {
+        id: true,
+        concertId: true,
+        qrHash: true,
+      },
+    });
+
+    if (
+      !guest ||
+      (guest.qrHash ?? guest.id) !== verifiedVipQr.payload.nonce ||
+      guest.concertId !== verifiedVipQr.payload.concertId
+    ) {
+      return null;
+    }
+
+    return { id: guest.id };
   }
 
   private async findIdempotentCheckIn(
@@ -600,6 +939,120 @@ export class CheckInService {
         localScanId,
       },
     });
+  }
+
+  private isCrossDeviceWinner(
+    winningCheckIn: WinningCheckIn | null,
+    sourceDeviceId: string,
+  ): winningCheckIn is WinningCheckIn {
+    return winningCheckIn !== null && winningCheckIn.sourceDeviceId !== sourceDeviceId;
+  }
+
+  private getWinningServerCheckInAt(winningCheckIn: WinningCheckIn): Date {
+    return winningCheckIn.serverCheckedInAt ?? winningCheckIn.scannedAt;
+  }
+
+  private validateTicketPurchaseContext(
+    ticket: TicketPurchaseContext,
+    timing: ScanTiming,
+  ): { status: CheckInStatus; note: string } | null {
+    if (ticket.issuedAt.getTime() > timing.serverReceivedAt.getTime()) {
+      return {
+        status: CheckInStatus.INVALID_QR,
+        note: 'Ticket has not been issued by the server',
+      };
+    }
+
+    if (ticket.order.status === OrderStatus.CANCELLED) {
+      return {
+        status: CheckInStatus.CANCELLED_TICKET,
+        note: 'Ticket order is cancelled or refunded',
+      };
+    }
+
+    if (ticket.order.status !== OrderStatus.PAID || ticket.order.paidAt === null) {
+      return {
+        status: CheckInStatus.INVALID_QR,
+        note: 'Ticket order has not been paid',
+      };
+    }
+
+    const successfulPaymentAmount = ticket.order.payments
+      .filter((payment) => payment.status === PaymentStatus.SUCCESS)
+      .reduce((total, payment) => total + payment.amountVnd, 0);
+
+    if (ticket.order.totalAmountVnd > 0 && successfulPaymentAmount < ticket.order.totalAmountVnd) {
+      return {
+        status: CheckInStatus.INVALID_QR,
+        note: 'Ticket order does not have a successful payment',
+      };
+    }
+
+    return null;
+  }
+
+  private async findWinningServerCheckInAt(where: {
+    ticketId?: string;
+    vipGuestId?: string;
+  }): Promise<Date | null> {
+    const winningCheckIn = await this.prisma.checkIn.findFirst({
+      where: {
+        ...where,
+        status: CheckInStatus.SUCCESS,
+      },
+      orderBy: [{ serverCheckedInAt: 'asc' }, { scannedAt: 'asc' }],
+      select: {
+        serverCheckedInAt: true,
+        scannedAt: true,
+      },
+    });
+
+    return winningCheckIn?.serverCheckedInAt ?? winningCheckIn?.scannedAt ?? null;
+  }
+
+  private resolveScanTiming(
+    scan: CheckInSyncScanDto,
+    serverReceivedAt: Date,
+  ):
+    | { valid: true; timing: ScanTiming }
+    | { valid: false; timing: ScanTiming; reason: string } {
+    const parsedClientScannedAt = new Date(scan.scannedAt);
+    const timing: ScanTiming = {
+      clientScannedAt: Number.isNaN(parsedClientScannedAt.getTime())
+        ? null
+        : parsedClientScannedAt,
+      serverReceivedAt,
+    };
+
+    if (!timing.clientScannedAt) {
+      return {
+        valid: false,
+        timing,
+        reason: 'Client scannedAt timestamp is invalid',
+      };
+    }
+
+    const futureSkewMs = timing.clientScannedAt.getTime() - serverReceivedAt.getTime();
+
+    if (futureSkewMs > this.getClockSkewMs()) {
+      return {
+        valid: false,
+        timing,
+        reason: 'Client scannedAt is outside allowed clock skew',
+      };
+    }
+
+    const offlineAgeMs = serverReceivedAt.getTime() - timing.clientScannedAt.getTime();
+
+    if (offlineAgeMs > this.getOfflineGraceMs()) {
+      return {
+        valid: false,
+        timing,
+        reason: 'Offline scan is outside allowed grace window',
+      };
+    }
+
+    return { valid: true, timing };
   }
 
   async assertCheckInStaffAssigned(userId: string, concertId: string): Promise<void> {
@@ -620,7 +1073,10 @@ export class CheckInService {
     userId: string,
     concertId: string,
     requiredPermissions: string[],
-    sourceDeviceId?: string,
+    options: {
+      assignmentId?: string;
+      sourceDeviceId?: string;
+    } = {},
   ): Promise<AssignmentAccess[]> {
     await this.assertCheckInStaffWithPermissions(userId, requiredPermissions);
     await this.assertCheckInStaffAssigned(userId, concertId);
@@ -629,6 +1085,7 @@ export class CheckInService {
       where: {
         userId,
         concertId,
+        ...(options.assignmentId ? { id: options.assignmentId } : {}),
       },
       select: {
         id: true,
@@ -643,9 +1100,31 @@ export class CheckInService {
     return assignments.map((assignment) => ({
       id: assignment.id,
       gateName: assignment.gateLabel,
-      sourceDeviceId: sourceDeviceId ?? null,
+      sourceDeviceId: options.sourceDeviceId ?? null,
     }));
   }
+
+  private isVipGuestAllowedAtAssignedGate(
+    allowedGate: string | null,
+    assignments: AssignmentAccess[],
+  ): boolean {
+    if (!allowedGate) {
+      return true;
+    }
+
+    const normalizedAllowedGate = this.normalizeGateName(allowedGate);
+
+    return assignments.some(
+      (assignment) =>
+        assignment.gateName !== null &&
+        this.normalizeGateName(assignment.gateName) === normalizedAllowedGate,
+    );
+  }
+
+  private normalizeGateName(gateName: string): string {
+    return gateName.trim().toLowerCase();
+  }
+
   private async assertCheckInStaffWithPermissions(
     userId: string,
     requiredPermissions: string[],
@@ -683,6 +1162,52 @@ export class CheckInService {
     }
   }
 
+  private resolveTicketQrExpiresAt(concertEndsAt: Date | null, generatedAt: Date): Date {
+    if (concertEndsAt) {
+      return new Date(
+        concertEndsAt.getTime() +
+          this.readPositiveIntegerEnv(
+            'CHECK_IN_QR_EXPIRATION_GRACE_SECONDS',
+            DEFAULT_TICKET_QR_EXPIRATION_GRACE_SECONDS,
+          ) *
+            1000,
+      );
+    }
+
+    return new Date(
+      generatedAt.getTime() +
+        this.readPositiveIntegerEnv(
+          'CHECK_IN_QR_TOKEN_TTL_SECONDS',
+          DEFAULT_TICKET_QR_TOKEN_TTL_SECONDS,
+        ) *
+          1000,
+    );
+  }
+
+  private readPositiveIntegerEnv(name: string, fallback: number): number {
+    const value = Number(process.env[name]);
+
+    return Number.isInteger(value) && value > 0 ? value : fallback;
+  }
+
+  private getClockSkewMs(): number {
+    return (
+      this.readPositiveIntegerEnv(
+        'CHECK_IN_MAX_CLOCK_SKEW_SECONDS',
+        DEFAULT_CLOCK_SKEW_SECONDS,
+      ) * 1000
+    );
+  }
+
+  private getOfflineGraceMs(): number {
+    return (
+      this.readPositiveIntegerEnv(
+        'CHECK_IN_OFFLINE_GRACE_SECONDS',
+        DEFAULT_OFFLINE_GRACE_SECONDS,
+      ) * 1000
+    );
+  }
+
   private async publishSafely(checkIn: CheckIn): Promise<void> {
     try {
       await this.eventsPublisher.publishSyncOutcome(checkIn);
@@ -700,7 +1225,9 @@ export class CheckInService {
       status: checkIn.status,
       message: this.toMessage(checkIn.status),
       syncedAt: checkIn.syncedAt?.toISOString() ?? null,
-      serverCheckInAt: checkIn.scannedAt?.toISOString() ?? null,
+      serverCheckInAt:
+        checkIn.serverCheckedInAt?.toISOString() ??
+        (checkIn.status === CheckInStatus.SUCCESS ? checkIn.scannedAt.toISOString() : null),
       idempotent,
     };
   }
@@ -737,7 +1264,7 @@ export class CheckInService {
       case CheckInStatus.WRONG_CONCERT:
         return 'Scan is not authorized for this event';
       case CheckInStatus.CONFLICT:
-        return 'Another device synchronized a successful scan first';
+        return 'Ticket or guest was already checked in on another device';
       case CheckInStatus.CANCELLED_TICKET:
         return 'Ticket or guest entry is cancelled';
       case CheckInStatus.INVALID_QR:
@@ -746,8 +1273,22 @@ export class CheckInService {
     }
   }
 
-  private isExpired(endsAt: Date | null, scannedAt: Date): boolean {
-    return endsAt !== null && scannedAt.getTime() > endsAt.getTime();
+  private isExpired(endsAt: Date | null, timing: ScanTiming): boolean {
+    if (!endsAt) {
+      return false;
+    }
+
+    if (timing.serverReceivedAt.getTime() <= endsAt.getTime()) {
+      return false;
+    }
+
+    const offlineGraceEndsAt = endsAt.getTime() + this.getOfflineGraceMs();
+
+    if (timing.serverReceivedAt.getTime() > offlineGraceEndsAt) {
+      return true;
+    }
+
+    return !timing.clientScannedAt || timing.clientScannedAt.getTime() > endsAt.getTime();
   }
 }
 

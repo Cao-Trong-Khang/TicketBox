@@ -12,6 +12,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { RateLimitModule } from './modules/rate-limit/rate-limit.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
 import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
 
 @Module({
@@ -22,6 +23,7 @@ import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
     }),
     AppConfigModule,
     RedisCacheModule,
+    TicketsModule,
     ScheduleModule.forRoot(),
     AuditLogModule,
     AuthModule,

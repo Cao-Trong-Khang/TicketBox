@@ -4,13 +4,82 @@
 Define the scheduled one-way sponsor VIP CSV import workflow, reporting, and check-in availability rules.
 ## Requirements
 ### Requirement: Scheduled sponsor VIP CSV files are imported asynchronously
-TicketBox SHALL import sponsor VIP guest lists from scheduled CSV files through the Backend API, Kafka, Background Workers, and PostgreSQL without requiring a sponsor API or manual upload flow.
+TicketBox SHALL import sponsor VIP guest lists from scheduled CSV files through the Backend API, a PostgreSQL-backed import queue, a long-running Background Worker daemon, and PostgreSQL storage without requiring a sponsor API or manual upload flow.
+VIP CSV imports SHALL use `REPLACE_SNAPSHOT` semantics for each `concertId` and `sponsorSource`: a newer accepted row with the same natural guest key refreshes the existing VIP guest record instead of being treated as an append-only duplicate. The natural guest key is `external_guest_key` when present, otherwise the normalized identity fallback derived from the row identity fields.
 
 #### Scenario: Scheduled import completes without blocking live APIs
 - **GIVEN** a scheduled sponsor CSV file exists for a concert
-- **WHEN** the scheduler enqueues the import and the worker processes the file
+- **WHEN** the worker daemon scans the source directory, enqueues the import, claims it, and processes the file
 - **THEN** valid unique VIP guests are stored in PostgreSQL
 - **THEN** public browsing, checkout, payment, and check-in APIs remain available
+
+#### Scenario: Queued imports have a real consumer
+- **GIVEN** a sponsor CSV file is detected by the import scheduler
+- **WHEN** the import is marked `QUEUED`
+- **THEN** the long-running worker daemon polls the PostgreSQL import queue
+- **THEN** the worker claims queued or retryable imports atomically before processing
+- **THEN** local Docker Compose starts a `vip-import-worker` service for that daemon
+
+#### Scenario: Oversized sponsor files are rejected before full parsing
+- **GIVEN** a scheduled sponsor CSV file exceeds `VIP_IMPORT_MAX_FILE_SIZE_BYTES` or contains more than `VIP_IMPORT_MAX_ROWS` data rows
+- **WHEN** the scheduler scans the source directory
+- **THEN** the scheduler skips the file without marking it `QUEUED`
+- **WHEN** an already queued import references a file that exceeds either limit
+- **THEN** the worker records a file-level failure without reading the entire import into row processing
+
+#### Scenario: Alternate-delimited sponsor files are rejected clearly
+- **GIVEN** a scheduled sponsor CSV file uses semicolon, tab, or pipe as the delimiter
+- **WHEN** the scheduler scans the source directory
+- **THEN** the scheduler skips the file instead of parsing it as comma-delimited columns
+- **WHEN** an already queued import references that file
+- **THEN** the worker records a file-level `UNSUPPORTED_DELIMITER` failure
+
+#### Scenario: Non-UTF-8 sponsor files are rejected clearly
+- **GIVEN** a scheduled sponsor CSV file is not valid UTF-8
+- **WHEN** the scheduler scans the source directory
+- **THEN** the scheduler skips the file instead of decoding replacement characters
+- **WHEN** an already queued import references that file
+- **THEN** the worker records a file-level `INVALID_ENCODING` failure
+
+#### Scenario: Malformed sponsor CSV syntax is rejected clearly
+- **GIVEN** a scheduled sponsor CSV file contains malformed syntax such as an unclosed quote or unexpected content after a closing quote
+- **WHEN** the scheduler scans the source directory
+- **THEN** the scheduler skips the file instead of parsing shifted columns
+- **WHEN** an already queued import references that file
+- **THEN** the worker records a file-level `MALFORMED_CSV` failure
+
+#### Scenario: Sponsor CSV headers match the supported schema
+- **GIVEN** a scheduled sponsor CSV file contains duplicate headers, unsupported headers, or no identity column
+- **WHEN** the worker validates the file before row processing
+- **THEN** the worker records a file-level failure and does not create or update VIP guests
+- **AND** valid files require `full_name` and at least one of `external_guest_key`, `email`, or `phone`
+
+#### Scenario: Sponsor CSV rows enforce identity and field constraints
+- **GIVEN** a scheduled sponsor CSV file contains rows with invalid phone numbers, invalid external guest keys, or overlong fields
+- **WHEN** the worker processes the file
+- **THEN** each invalid row is rejected with a row-level error
+- **THEN** valid rows in the same syntactically valid file can still be imported
+
+#### Scenario: New sponsor snapshot refreshes an existing VIP guest
+- **GIVEN** a previous sponsor CSV import created a VIP guest for a concert and sponsor source
+- **WHEN** a newer sponsor CSV file contains the same natural guest key with updated name, email, phone, allowed gate, or guest type
+- **THEN** the worker updates the existing VIP guest record with the newer snapshot metadata
+- **THEN** the worker preserves the guest check-in state
+- **THEN** the worker records an audit entry for the snapshot refresh
+
+#### Scenario: New sponsor snapshot removes an active VIP guest
+- **GIVEN** a previous completed sponsor CSV import created an active VIP guest
+- **WHEN** a newer sponsor CSV snapshot for the same concert and sponsor source completes without row errors and omits that guest's natural key
+- **THEN** the worker marks the omitted active VIP guest as `CANCELLED`
+- **THEN** the worker does not hard delete the guest record
+- **THEN** the worker records an audit entry for the snapshot cancellation
+
+#### Scenario: Snapshot cleanup preserves checked-in and failed-import guests
+- **GIVEN** a previous completed sponsor CSV import created VIP guests
+- **WHEN** a newer sponsor CSV snapshot omits a guest who is already `CHECKED_IN`
+- **THEN** the worker preserves that guest's `CHECKED_IN` status and check-in timestamp
+- **WHEN** a newer sponsor CSV import fails file validation or has row-level snapshot errors
+- **THEN** the worker does not cancel guests from the previous completed import
 
 ### Requirement: Mobile VIP guest dashboard uses imported CSV guests
 The Check-in Mobile App SHALL provide a VIP Guest List dashboard for Check-in Staff using accepted VIP guests imported from scheduled CSV files and delivered through assignment-scoped preload data.

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthenticatedUser } from '../auth/types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Permissions } from '../rbac/permissions.decorator';
@@ -32,8 +32,9 @@ export class CheckInController {
   preloadEvent(
     @Req() request: AuthenticatedRequest,
     @Param('concertId', new ParseUUIDPipe({ version: '4' })) concertId: string,
+    @Query('assignmentId') assignmentId?: string,
   ): Promise<CheckInPreloadDto> {
-    return this.checkInService.preloadEvent(request.user, concertId);
+    return this.checkInService.preloadEvent(request.user, concertId, assignmentId);
   }
 
   @Post('events/:concertId/sync')

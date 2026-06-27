@@ -468,10 +468,13 @@ model CheckIn {
   status     CheckInStatus
   syncStatus CheckInSyncStatus @default(SYNCED) @map("sync_status")
 
-  scannedAt DateTime  @map("scanned_at")
-  syncedAt  DateTime? @map("synced_at")
-  note      String?   @db.Text
-  createdAt DateTime  @default(now()) @map("created_at")
+  scannedAt          DateTime  @map("scanned_at")
+  clientScannedAt    DateTime? @map("client_scanned_at")
+  serverReceivedAt   DateTime  @default(now()) @map("server_received_at")
+  serverCheckedInAt  DateTime? @map("server_checked_in_at")
+  syncedAt           DateTime? @map("synced_at")
+  note               String?   @db.Text
+  createdAt          DateTime  @default(now()) @map("created_at")
 
   ticket    Ticket?   @relation(fields: [ticketId], references: [id])
   vipGuest  VipGuest? @relation(fields: [vipGuestId], references: [id])
@@ -485,6 +488,8 @@ model CheckIn {
   @@index([sourceDeviceId])
   @@index([sourceDeviceId, localScanId])
   @@index([scannedAt])
+  @@index([serverReceivedAt])
+  @@index([serverCheckedInAt])
   @@map("check_ins")
 }
 

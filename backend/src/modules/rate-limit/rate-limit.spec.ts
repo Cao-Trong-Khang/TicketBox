@@ -3,7 +3,7 @@ import test from 'node:test';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import { Prisma, Role, User, UserRole, UserStatus } from '@prisma/client';
+import { Prisma, RefreshToken, Role, User, UserRole, UserStatus } from '@prisma/client';
 import request from 'supertest';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
@@ -20,6 +20,7 @@ type TestState = {
   roles: Role[];
   userRoles: UserRole[];
   users: User[];
+  refreshTokens: RefreshToken[];
 };
 
 test('rate limiting protects auth, orders, and organizer mutations with 429 responses', async () => {
@@ -370,6 +371,7 @@ function createSeededState(): TestState {
       },
     ],
     userRoles: [],
+    refreshTokens: [],
   };
 }
 
@@ -414,6 +416,21 @@ function createPrismaMock(state: TestState): Partial<PrismaService> {
     role: {
       findUnique: async ({ where }: { where: Prisma.RoleWhereUniqueInput }) => {
         return state.roles.find((role) => role.code === where.code || role.id === where.id) ?? null;
+      },
+    },
+    refreshToken: {
+      create: async ({ data }: { data: Prisma.RefreshTokenUncheckedCreateInput }) => {
+        const refreshToken: RefreshToken = {
+          id: `refresh-token-${state.refreshTokens.length + 1}`,
+          userId: data.userId,
+          tokenHash: data.tokenHash,
+          expiresAt: data.expiresAt instanceof Date ? data.expiresAt : new Date(data.expiresAt),
+          revokedAt: null,
+          createdAt: new Date(),
+        };
+
+        state.refreshTokens.push(refreshToken);
+        return refreshToken;
       },
     },
     userRole: {

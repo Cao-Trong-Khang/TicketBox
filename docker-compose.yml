@@ -88,6 +88,7 @@ services:
       DATABASE_URL: postgresql://ticketbox:ticketbox@postgres:5432/ticketbox?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
       AI_BIO_TOPIC: ai.bio.requested
       AI_BIO_GROUP_ID: ticketbox-ai-bio-worker
@@ -106,10 +107,14 @@ services:
       MINIO_TIMEOUT_MS: 10000
       JWT_ACCESS_SECRET: local-development-jwt-secret
       JWT_ACCESS_TOKEN_TTL: 1h
+      CHECK_IN_QR_HMAC_SECRET: local-development-check-in-qr-secret-1234567890
+      CHECK_IN_QR_ISSUER: ticketbox
       VIP_CSV_SOURCE_DIR: /app/prisma/demo-sponsor-csv
       VIP_CSV_DEFAULT_SOURCE_NAME: SPONSOR_CSV
+      VIP_IMPORT_MAX_FILE_SIZE_BYTES: 10485760
+      VIP_IMPORT_MAX_ROWS: 10000
       VIP_IMPORT_BATCH_SIZE: 100
-      VIP_IMPORT_KAFKA_FAIL: 0
+      VIP_IMPORT_QUEUE_FAIL: 0
     ports:
       - "3000:3000"
     volumes:
@@ -159,6 +164,41 @@ services:
         condition: service_started
       minio-init:
         condition: service_completed_successfully
+
+  vip-import-worker:
+    build:
+      context: ./backend
+    command: npm run vip-imports:worker -- --source-dir=/app/prisma/demo-sponsor-csv
+    environment:
+      NODE_ENV: development
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ticketbox
+      POSTGRES_PASSWORD: ticketbox
+      POSTGRES_DB: ticketbox
+      DATABASE_URL: postgresql://ticketbox:ticketbox@postgres:5432/ticketbox?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:29092
+      JWT_ACCESS_SECRET: local-development-jwt-secret
+      JWT_ACCESS_TOKEN_TTL: 1h
+      CHECK_IN_QR_HMAC_SECRET: local-development-check-in-qr-secret-1234567890
+      CHECK_IN_QR_ISSUER: ticketbox
+      VIP_CSV_SOURCE_DIR: /app/prisma/demo-sponsor-csv
+      VIP_CSV_DEFAULT_SOURCE_NAME: SPONSOR_CSV
+      VIP_IMPORT_MAX_FILE_SIZE_BYTES: 10485760
+      VIP_IMPORT_MAX_ROWS: 10000
+      VIP_IMPORT_BATCH_SIZE: 100
+      VIP_IMPORT_WORKER_BATCH_LIMIT: 10
+      VIP_IMPORT_SCAN_INTERVAL_MS: 60000
+      VIP_IMPORT_WORKER_POLL_INTERVAL_MS: 10000
+      VIP_IMPORT_QUEUE_FAIL: 0
+    volumes:
+      - ./backend/prisma/demo-sponsor-csv:/app/prisma/demo-sponsor-csv:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data_18:

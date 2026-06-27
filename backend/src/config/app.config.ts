@@ -26,6 +26,11 @@ export type ArtistBioConfig = {
   pdfMinTextChars: number;
 };
 
+export type CheckInQrConfig = {
+  issuer: string;
+  hmacSecret: string;
+};
+
 export function getHttpConfig(configService: ConfigService): HttpConfig {
   return { port: readNumber(configService, 'PORT', 3000), frontendOrigins: readList(configService, 'FRONTEND_ORIGIN', ['http://localhost:5173']) };
 }
@@ -70,6 +75,29 @@ export function getArtistBioConfig(configService: ConfigService): ArtistBioConfi
     aiRateLimitRetryMs: readPositiveNumber(configService, 'AI_RATE_LIMIT_RETRY_MS', 60_000),
     aiTextMaxChars: readPositiveNumber(configService, 'AI_TEXT_MAX_CHARS', 4_000),
     pdfMinTextChars: readPositiveNumber(configService, 'PDF_MIN_TEXT_CHARS', 50),
+  };
+}
+
+export function getCheckInQrConfig(configService: ConfigService): CheckInQrConfig {
+  const hmacSecret = configService.get<string>('CHECK_IN_QR_HMAC_SECRET', '');
+
+  if (!hmacSecret.trim()) {
+    throw new Error('Invalid empty environment value for CHECK_IN_QR_HMAC_SECRET');
+  }
+
+  if (hmacSecret.trim().length < 32) {
+    throw new Error('CHECK_IN_QR_HMAC_SECRET must be at least 32 characters long');
+  }
+
+  const issuer = configService.get<string>('CHECK_IN_QR_ISSUER', 'ticketbox');
+
+  if (!issuer.trim()) {
+    throw new Error('Invalid empty environment value for CHECK_IN_QR_ISSUER');
+  }
+
+  return {
+    issuer: issuer.trim(),
+    hmacSecret: hmacSecret.trim(),
   };
 }
 
