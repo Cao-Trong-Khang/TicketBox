@@ -288,7 +288,7 @@ private object InstrumentedUnusedApi : CheckInApiService {
     override suspend fun login(request: ApiLoginRequest): ApiLoginResponse = error("Not used")
     override suspend fun me(): ApiStaffUser = error("Not used")
     override suspend fun assignments(): List<ApiAssignment> = error("Not used")
-    override suspend fun preload(concertId: String): ApiPreloadResponse = error("Not used")
+    override suspend fun preload(concertId: String, assignmentId: String?): ApiPreloadResponse = error("Not used")
     override suspend fun sync(concertId: String, request: ApiSyncRequest): ApiSyncResponse = error("Not used")
 }
 

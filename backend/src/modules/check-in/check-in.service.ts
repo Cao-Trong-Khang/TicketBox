@@ -131,10 +131,17 @@ export class CheckInService {
     }));
   }
 
-  async preloadEvent(user: AuthenticatedUser, concertId: string): Promise<CheckInPreloadDto> {
-    const assignments = await this.assertAssignedCheckInStaff(user.id, concertId, [
-      PERMISSION_CODES.checkinPreload,
-    ]);
+  async preloadEvent(
+    user: AuthenticatedUser,
+    concertId: string,
+    assignmentId?: string,
+  ): Promise<CheckInPreloadDto> {
+    const assignments = await this.assertAssignedCheckInStaff(
+      user.id,
+      concertId,
+      [PERMISSION_CODES.checkinPreload],
+      { assignmentId },
+    );
 
     await this.rateLimitOrThrow(
       `check-in:preload:user:${user.id}:concert:${concertId}`,
@@ -231,6 +238,9 @@ export class CheckInService {
       }),
     ]);
 
+    const scopedVipGuests = vipGuests.filter((guest) =>
+      this.isVipGuestAllowedAtAssignedGate(guest.allowedGate, assignments),
+    );
     const generatedAt = new Date();
 
     return {
@@ -281,7 +291,7 @@ export class CheckInService {
           : null,
         ticketType: ticket.ticketType,
       })),
-      vipGuests: vipGuests.map((guest) => ({
+      vipGuests: scopedVipGuests.map((guest) => ({
         id: guest.id,
         qrHash: createCheckInQrToken({
           entityType: CHECK_IN_QR_ENTITY_TYPES.vipGuest,
@@ -312,10 +322,12 @@ export class CheckInService {
     concertId: string,
     dto: SyncCheckInDto,
   ): Promise<CheckInSyncResponseDto> {
-    const assignments = await this.assertAssignedCheckInStaff(user.id, concertId, [
-      PERMISSION_CODES.checkinScan,
-      PERMISSION_CODES.checkinSync,
-    ], dto.sourceDeviceId);
+    const assignments = await this.assertAssignedCheckInStaff(
+      user.id,
+      concertId,
+      [PERMISSION_CODES.checkinScan, PERMISSION_CODES.checkinSync],
+      { sourceDeviceId: dto.sourceDeviceId },
+    );
 
     await this.rateLimitOrThrow(`check-in:sync:user:${user.id}:concert:${concertId}`, SYNC_RATE_LIMIT);
     await this.rateLimitOrThrow(
@@ -1048,7 +1060,10 @@ export class CheckInService {
     userId: string,
     concertId: string,
     requiredPermissions: string[],
-    sourceDeviceId?: string,
+    options: {
+      assignmentId?: string;
+      sourceDeviceId?: string;
+    } = {},
   ): Promise<AssignmentAccess[]> {
     await this.assertCheckInStaffWithPermissions(userId, requiredPermissions);
 
@@ -1057,9 +1072,10 @@ export class CheckInService {
         staffUserId: userId,
         concertId,
         active: true,
-        ...(sourceDeviceId
+        ...(options.assignmentId ? { id: options.assignmentId } : {}),
+        ...(options.sourceDeviceId
           ? {
-              OR: [{ sourceDeviceId: null }, { sourceDeviceId }],
+              OR: [{ sourceDeviceId: null }, { sourceDeviceId: options.sourceDeviceId }],
             }
           : {}),
       },

@@ -30,8 +30,12 @@ class CheckInSyncWorker(
         )
 
         return try {
-            repository.syncPending(concertId)
-            Result.success()
+            val summary = repository.syncPending(concertId)
+            if (summary.retrying > 0) {
+                Result.retry()
+            } else {
+                Result.success()
+            }
         } catch (_: Exception) {
             Result.retry()
         }

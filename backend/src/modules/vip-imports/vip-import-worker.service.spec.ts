@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { ImportErrorType, ImportStatus, Prisma, VipGuestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { sha256 } from './vip-csv';
 import { VipImportWorkerService } from './vip-import-worker.service';
 
 type TestImport = {
@@ -146,6 +148,42 @@ test('worker imports valid unique VIP guests and marks the import completed', as
     assert.deepEqual(
       state.auditLogs.map((entry) => entry.action),
       ['vip_import.processing', 'vip_import.completed'],
+    );
+  });
+});
+
+test('worker rejects a queued import when the source file fingerprint changed', async () => {
+  await withTempCsv(async (sourcePath) => {
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-001,Queued Guest,queued@example.test,+84900000001',
+      ]),
+      'utf8',
+    );
+    const state = createState(sourcePath);
+
+    await writeFile(
+      sourcePath,
+      csv([
+        'concert_title,sponsor_source,external_guest_key,full_name,email,phone',
+        'Demo Concert,LOCAL_DEMO,VIP-002,Overwritten Guest,overwritten@example.test,+84900000002',
+      ]),
+      'utf8',
+    );
+    const worker = createWorker(state);
+
+    const result = await worker.processImport('import-1');
+
+    assert.equal(result.status, ImportStatus.FAILED);
+    assert.equal(state.imports[0].failureCode, 'SOURCE_FINGERPRINT_MISMATCH');
+    assert.equal(state.errors.length, 1);
+    assert.equal(state.errors[0].type, ImportErrorType.FILE);
+    assert.equal(state.guests.length, 0);
+    assert.notEqual(
+      (state.errors[0].metadata as { actualFingerprint: string }).actualFingerprint,
+      state.imports[0].sourceFingerprint,
     );
   });
 });
@@ -864,7 +902,7 @@ function createState(sourcePath: string): TestState {
         sourceName: 'LOCAL_DEMO',
         fileName: 'vip.csv',
         sourcePath,
-        sourceFingerprint: 'fingerprint',
+        sourceFingerprint: sha256(readFileSync(sourcePath)),
         status: ImportStatus.QUEUED,
         totalRows: 0,
         acceptedRows: 0,

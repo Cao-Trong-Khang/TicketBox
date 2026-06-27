@@ -110,7 +110,7 @@ class CheckInRepositoryScanFlowTest {
             clock = { 2_000L },
         )
 
-        val outcome = repository.recordScan("concert-1", "VIP-001", "Gate A")
+        val outcome = repository.recordScan("concert-1", "VIP-QR-001", "Gate A")
 
         assertEquals(LocalScanResult.Invalid, outcome.result)
         assertEquals("VIP guest is assigned to VIP Gate", outcome.message)
@@ -298,10 +298,16 @@ private class ScanFlowFakeDao(
         vipGuests.firstOrNull {
             it.concertId == concertId && it.qrHash == qrHash
         }
-    override fun observeVipGuestsForConcert(concertId: String): Flow<List<PreloadedVipGuestEntity>> =
-        MutableStateFlow(vipGuests.filter { it.concertId == concertId })
-    override suspend fun vipGuestListForConcert(concertId: String): List<PreloadedVipGuestEntity> =
-        vipGuests.filter { it.concertId == concertId }
+    override fun observeVipGuestsForConcert(
+        concertId: String,
+        gateName: String?,
+    ): Flow<List<PreloadedVipGuestEntity>> =
+        MutableStateFlow(vipGuests.filter { it.concertId == concertId && it.isVisibleAtGate(gateName) })
+    override suspend fun vipGuestListForConcert(
+        concertId: String,
+        gateName: String?,
+    ): List<PreloadedVipGuestEntity> =
+        vipGuests.filter { it.concertId == concertId && it.isVisibleAtGate(gateName) }
     override suspend fun acceptedLocalScanCount(concertId: String, qrHash: String): Int =
         scanLogs.value.count {
             it.concertId == concertId &&
@@ -357,7 +363,7 @@ private object UnusedCheckInApiService : CheckInApiService {
     override suspend fun login(request: ApiLoginRequest): ApiLoginResponse = error("Not used")
     override suspend fun me(): ApiStaffUser = error("Not used")
     override suspend fun assignments(): List<ApiAssignment> = error("Not used")
-    override suspend fun preload(concertId: String): ApiPreloadResponse = error("Not used")
+    override suspend fun preload(concertId: String, assignmentId: String?): ApiPreloadResponse = error("Not used")
     override suspend fun sync(concertId: String, request: ApiSyncRequest): ApiSyncResponse = error("Not used")
 }
 
@@ -372,3 +378,6 @@ private class ScanFlowFakeSession : StaffSession {
     override fun setSourceDeviceId(sourceDeviceId: String) = Unit
     override fun clearSessionCredentials() = Unit
 }
+
+private fun PreloadedVipGuestEntity.isVisibleAtGate(gateName: String?): Boolean =
+    gateName == null || allowedGate == null || allowedGate.trim().equals(gateName.trim(), ignoreCase = true)

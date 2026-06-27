@@ -28,6 +28,7 @@ import {
   normalizeName,
   normalizePhone,
   parseCsv,
+  sha256,
 } from './vip-csv';
 import { VipImportLimitError, inspectVipImportFile } from './vip-import-limits';
 import { VipImportProcessResult } from './vip-imports.types';
@@ -49,6 +50,10 @@ type PendingImportError = {
   message: string;
   rawRow?: Prisma.InputJsonValue;
   metadata?: Prisma.InputJsonValue;
+};
+
+type ValidatedImportFile = {
+  parsed?: ReturnType<typeof parseCsv>;
 };
 
 type AcceptedGuestInput = {
@@ -185,26 +190,18 @@ export class VipImportWorkerService {
 
     try {
       const sourcePath = this.resolveSourcePath(importRecord);
-      const fileFailure = await this.validateFile(importRecord, sourcePath);
+      const validatedFile: ValidatedImportFile = {};
+      const fileFailure = await this.validateFile(importRecord, sourcePath, validatedFile);
 
       if (fileFailure) {
         return this.markFileFailure(importRecord.id, fileFailure);
       }
 
-      let parsed: ReturnType<typeof parseCsv>;
-
-      try {
-        parsed = parseCsv(decodeVipCsvContent(await readFile(sourcePath)));
-      } catch (error) {
-        const csvContentFailure = this.toCsvContentFailure(error);
-
-        if (csvContentFailure) {
-          return this.markFileFailure(importRecord.id, csvContentFailure);
-        }
-
-        throw error;
+      if (!validatedFile.parsed) {
+        throw new Error('VIP import file validation did not produce parsed content');
       }
 
+      const parsed = validatedFile.parsed;
       counters.totalRows = parsed.rows.length;
       const seenGuestKeys = new Set<string>();
       const snapshotGuestKeys = new Map<string, SnapshotGuestKey>();
@@ -304,6 +301,7 @@ export class VipImportWorkerService {
   private async validateFile(
     importRecord: ImportRecord,
     sourcePath: string,
+    validatedFile: ValidatedImportFile,
   ): Promise<PendingImportError | null> {
     if (extname(sourcePath).toLowerCase() !== '.csv') {
       return {
@@ -344,6 +342,21 @@ export class VipImportWorkerService {
         code: 'UNREADABLE_FILE',
         message: error instanceof Error ? error.message : 'CSV file could not be read',
         metadata: { sourcePath },
+      };
+    }
+
+    const actualFingerprint = sha256(buffer);
+
+    if (actualFingerprint !== importRecord.sourceFingerprint) {
+      return {
+        type: ImportErrorType.FILE,
+        code: 'SOURCE_FINGERPRINT_MISMATCH',
+        message: 'VIP guest import source changed after it was queued',
+        metadata: {
+          sourcePath,
+          expectedFingerprint: importRecord.sourceFingerprint,
+          actualFingerprint,
+        },
       };
     }
 
@@ -432,6 +445,7 @@ export class VipImportWorkerService {
       };
     }
 
+    validatedFile.parsed = parsed;
     return null;
   }
 

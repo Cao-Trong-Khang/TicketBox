@@ -88,11 +88,39 @@ abstract class CheckInDao {
     )
     abstract suspend fun vipGuestByQrHash(concertId: String, qrHash: String): PreloadedVipGuestEntity?
 
-    @Query("SELECT * FROM preloaded_vip_guests WHERE concertId = :concertId ORDER BY fullName ASC")
-    abstract fun observeVipGuestsForConcert(concertId: String): Flow<List<PreloadedVipGuestEntity>>
+    @Query(
+        """
+        SELECT * FROM preloaded_vip_guests
+        WHERE concertId = :concertId
+          AND (
+            :gateName IS NULL
+            OR allowedGate IS NULL
+            OR LOWER(TRIM(allowedGate)) = LOWER(TRIM(:gateName))
+          )
+        ORDER BY fullName ASC
+        """,
+    )
+    abstract fun observeVipGuestsForConcert(
+        concertId: String,
+        gateName: String?,
+    ): Flow<List<PreloadedVipGuestEntity>>
 
-    @Query("SELECT * FROM preloaded_vip_guests WHERE concertId = :concertId ORDER BY fullName ASC")
-    abstract suspend fun vipGuestListForConcert(concertId: String): List<PreloadedVipGuestEntity>
+    @Query(
+        """
+        SELECT * FROM preloaded_vip_guests
+        WHERE concertId = :concertId
+          AND (
+            :gateName IS NULL
+            OR allowedGate IS NULL
+            OR LOWER(TRIM(allowedGate)) = LOWER(TRIM(:gateName))
+          )
+        ORDER BY fullName ASC
+        """,
+    )
+    abstract suspend fun vipGuestListForConcert(
+        concertId: String,
+        gateName: String?,
+    ): List<PreloadedVipGuestEntity>
 
     @Query(
         """

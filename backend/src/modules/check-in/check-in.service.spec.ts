@@ -107,6 +107,7 @@ test('preload returns signed QR tokens for ticket and VIP guests, not raw creden
   const preload = await service.preloadEvent(
     { id: 'staff-1', email: 'staff@example.test' },
     'concert-1',
+    'assignment-a',
   );
 
   assert.notEqual(preload.tickets[0].qrHash, state.tickets[0].qrHash);
@@ -150,6 +151,24 @@ test('preload includes completed imported VIP guests for assigned Check-in Staff
       notes: null,
     },
     {
+      id: 'vip-gate-b',
+      qrHash: 'vip-qr-gate-b',
+      externalGuestKey: 'VIP-GATE-B',
+      concertId: 'concert-1',
+      fullName: 'Gate B Guest',
+      email: 'gateb@example.test',
+      phone: '+84903333333',
+      sponsorSource: 'LOCAL_DEMO',
+      sponsorCompany: 'Gate B Sponsor',
+      invitedBy: 'Sponsor Desk',
+      guestType: 'Guest',
+      allowedGate: 'Gate B',
+      status: VipGuestStatus.ACTIVE,
+      importStatus: ImportStatus.COMPLETED,
+      checkedInAt: null,
+      notes: null,
+    },
+    {
       id: 'vip-cancelled',
       qrHash: 'vip-qr-cancelled',
       externalGuestKey: 'VIP-CANCELLED',
@@ -172,11 +191,69 @@ test('preload includes completed imported VIP guests for assigned Check-in Staff
   const preload = await service.preloadEvent(
     { id: 'staff-1', email: 'staff@example.test' },
     'concert-1',
+    'assignment-a',
   );
 
   assert.deepEqual(
     preload.vipGuests.map((guest) => guest.id),
     ['vip-1'],
+  );
+});
+
+test('preload scopes VIP guests to the selected gate assignment', async () => {
+  const { service, state } = createHarness();
+  state.vipGuests.push(
+    {
+      id: 'vip-any-gate',
+      qrHash: 'vip-qr-any-gate',
+      externalGuestKey: 'VIP-ANY',
+      concertId: 'concert-1',
+      fullName: 'Any Gate Guest',
+      email: 'any@example.test',
+      phone: '+84904444444',
+      sponsorSource: 'LOCAL_DEMO',
+      sponsorCompany: 'Any Gate Sponsor',
+      invitedBy: 'Sponsor Desk',
+      guestType: 'Guest',
+      allowedGate: null,
+      status: VipGuestStatus.ACTIVE,
+      importStatus: ImportStatus.COMPLETED,
+      checkedInAt: null,
+      notes: null,
+    },
+    {
+      id: 'vip-gate-b',
+      qrHash: 'vip-qr-gate-b',
+      externalGuestKey: 'VIP-GATE-B',
+      concertId: 'concert-1',
+      fullName: 'Gate B Guest',
+      email: 'gateb@example.test',
+      phone: '+84905555555',
+      sponsorSource: 'LOCAL_DEMO',
+      sponsorCompany: 'Gate B Sponsor',
+      invitedBy: 'Sponsor Desk',
+      guestType: 'Guest',
+      allowedGate: 'Gate B',
+      status: VipGuestStatus.ACTIVE,
+      importStatus: ImportStatus.COMPLETED,
+      checkedInAt: null,
+      notes: null,
+    },
+  );
+
+  const preload = await service.preloadEvent(
+    { id: 'staff-1', email: 'staff@example.test' },
+    'concert-1',
+    'assignment-a',
+  );
+
+  assert.deepEqual(
+    preload.assignments.map((assignment) => assignment.assignmentId),
+    ['assignment-a'],
+  );
+  assert.deepEqual(
+    preload.vipGuests.map((guest) => guest.id).sort(),
+    ['vip-1', 'vip-any-gate'],
   );
 });
 
@@ -378,6 +455,7 @@ test('sync rejects VIP raw external guest keys as QR credentials', async () => {
 
 test('sync rejects VIP guest scans at the wrong assignment gate', async () => {
   const { service, state } = createHarness();
+  state.vipGuests[0].allowedGate = 'VIP Gate';
 
   const response = await syncOne(service, 'concert-1', {
     localScanId: 'vip-wrong-gate',
@@ -689,7 +767,7 @@ function createHarness(
         sponsorCompany: 'TicketBox Partners',
         invitedBy: 'Sponsor Team',
         guestType: 'Artist Guest',
-        allowedGate: 'VIP Gate',
+        allowedGate: 'Gate A',
         status: VipGuestStatus.ACTIVE,
         importStatus: ImportStatus.COMPLETED,
         checkedInAt: null,
@@ -736,10 +814,11 @@ function createPrismaMock(state: TestState) {
         state.userRoles.filter((userRole) => userRole.userId === where.userId),
     },
     checkInAssignment: {
-      findMany: async ({ where, include }: { where: { staffUserId: string; concertId?: string; active: boolean; OR?: { sourceDeviceId: string | null }[] }; include?: unknown }) =>
+      findMany: async ({ where, include }: { where: { staffUserId: string; concertId?: string; active: boolean; id?: string; OR?: { sourceDeviceId: string | null }[] }; include?: unknown }) =>
         state.assignments
           .filter((assignment) => assignment.staffUserId === where.staffUserId)
           .filter((assignment) => !where.concertId || assignment.concertId === where.concertId)
+          .filter((assignment) => !where.id || assignment.id === where.id)
           .filter((assignment) => assignment.active === where.active)
           .filter(
             (assignment) =>
@@ -912,4 +991,3 @@ function syncOne(
     },
   );
 }
-

@@ -211,7 +211,7 @@ private fun StaffCheckInApp(
                 selectedTab = StaffTab.Dashboard
                 scope.launch {
                     statusMessage = runCatching {
-                        repository.preload(assignment.concertId)
+                        repository.preload(assignment.concertId, assignment.assignmentId)
                         "Event ready"
                     }.getOrElse { it.message ?: "Preload failed" }
                     step = AppStep.EventShell
@@ -644,7 +644,10 @@ internal fun DashboardScreen(
 ) {
     val scope = rememberCoroutineScope()
     val tickets by repository.observeTickets(assignment.concertId).collectAsState(initial = emptyList())
-    val vipGuests by repository.observeVipGuests(assignment.concertId).collectAsState(initial = emptyList())
+    val vipGuests by repository.observeVipGuests(
+        assignment.concertId,
+        assignment.gateName,
+    ).collectAsState(initial = emptyList())
     val history by repository.observeScanHistory(assignment.concertId).collectAsState(initial = emptyList())
     val pendingCount by repository.observePendingScanCount(assignment.concertId).collectAsState(initial = 0)
     val counts = deriveDashboardCounts(tickets, vipGuests, history)
@@ -694,8 +697,15 @@ internal fun DashboardScreen(
             StatusBanner(statusMessage)
         }
         item {
-            LaunchedEffect(assignment.concertId, tickets.size, vipGuests.size, history.size, pendingCount) {
-                runCatching { repository.dashboardSnapshot(assignment.concertId) }
+            LaunchedEffect(
+                assignment.concertId,
+                assignment.gateName,
+                tickets.size,
+                vipGuests.size,
+                history.size,
+                pendingCount,
+            ) {
+                runCatching { repository.dashboardSnapshot(assignment.concertId, assignment.gateName) }
             }
         }
     }
@@ -1093,7 +1103,10 @@ internal fun VipScreen(
     onNotFound: (String) -> Unit,
     updateStatus: (String) -> Unit,
 ) {
-    val guests by repository.observeVipGuests(assignment.concertId).collectAsState(initial = emptyList())
+    val guests by repository.observeVipGuests(
+        assignment.concertId,
+        assignment.gateName,
+    ).collectAsState(initial = emptyList())
     var query by remember { mutableStateOf("") }
     var sponsorFilter by remember { mutableStateOf<String?>(null) }
     var typeFilter by remember { mutableStateOf<String?>(null) }
