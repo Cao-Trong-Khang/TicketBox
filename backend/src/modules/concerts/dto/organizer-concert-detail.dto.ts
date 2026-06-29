@@ -11,6 +11,7 @@ export class OrganizerConcertDetailDto {
   seatingSvg!: string | null;
   startsAt!: string;
   endsAt!: string | null;
+  performanceStartAt!: string;
   createdAt!: string;
   updatedAt!: string;
 }

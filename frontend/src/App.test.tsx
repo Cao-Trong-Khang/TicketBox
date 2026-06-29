@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app/App';
@@ -20,23 +20,6 @@ function mockJsonResponse(body: unknown, status = 200) {
   );
 }
 
-function createConcerts() {
-  return [
-    {
-      id: 'concert-1',
-      title: 'Anh Trai Say Hi Concert 2026',
-      artistName: 'Anh Trai Say Hi',
-      description: null,
-      venueName: 'Nhà thi đấu',
-      venueAddress: 'Hà Nội',
-      bannerUrl: null,
-      startsAt: '2026-07-01T20:00:00.000Z',
-      endsAt: '2026-07-01T23:00:00.000Z',
-      minPriceVnd: 800000,
-    },
-  ];
-}
-
 describe('frontend auth shell', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -48,20 +31,32 @@ describe('frontend auth shell', () => {
     localStorage.clear();
   });
 
-  it('renders the concerts route from home redirect', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse(createConcerts())));
-
+  it('renders login page from the root route', () => {
     renderApp('/');
 
-    expect(await screen.findByRole('heading', { name: 'Concert sắp diễn ra' })).toBeInTheDocument();
-    expect(await screen.findByText('Anh Trai Say Hi Concert 2026')).toBeInTheDocument();
-    expect(screen.getByText('Từ 800.000 ₫')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument();
   });
 
   it('renders login page', () => {
     renderApp('/login');
 
     expect(screen.getByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument();
+  });
+
+  it('redirects unauthenticated users away from concerts page to login', async () => {
+    renderApp('/concerts');
+
+    expect(await screen.findByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument();
+  });
+
+  it('hides header navigation links before login', () => {
+    renderApp('/login');
+
+    const header = screen.getByRole('banner');
+
+    expect(within(header).queryByRole('link', { name: 'Concerts' })).not.toBeInTheDocument();
+    expect(within(header).queryByRole('link', { name: 'Đăng nhập' })).not.toBeInTheDocument();
+    expect(within(header).queryByRole('link', { name: 'Đăng ký' })).not.toBeInTheDocument();
   });
 
   it('renders register page', () => {
@@ -146,7 +141,7 @@ describe('frontend auth shell', () => {
     expect(localStorage.getItem('userRoles')).toBe(JSON.stringify(['ORGANIZER']));
 
     expect(
-      await screen.findByText('Kênh organizer'),
+      await screen.findByRole('heading', { name: 'Admin Dashboard' }),
     ).toBeInTheDocument();
   });
 
@@ -189,6 +184,7 @@ describe('frontend auth shell', () => {
   });
 
   it('redirects non-organizers away from organizer routes', async () => {
+    localStorage.setItem('accessToken', 'audience-token');
     localStorage.setItem('userRoles', JSON.stringify(['AUDIENCE']));
 
     renderApp('/organizer/concerts');
@@ -198,6 +194,7 @@ describe('frontend auth shell', () => {
   });
 
   it('navigates to the organizer dashboard from the concert management card', async () => {
+    localStorage.setItem('accessToken', 'organizer-token');
     localStorage.setItem('userRoles', JSON.stringify(['ORGANIZER']));
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse([])));
 

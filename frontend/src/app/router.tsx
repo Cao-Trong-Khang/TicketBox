@@ -11,18 +11,30 @@ import { OrganizerTicketTypeManagementPage } from '../features/organizer-concert
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { OrderPendingPage } from '../features/orders/pages/OrderPendingPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
-import { userHasRole } from '../features/auth/session';
+import { getPostLoginRedirect, getStoredRoles, isAuthenticated, userHasRole } from '../features/auth/session';
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
+function RedirectIfAuthenticated({ children }: { children: ReactNode }) {
+  return isAuthenticated() ? <Navigate to={getPostLoginRedirect(getStoredRoles())} replace /> : <>{children}</>;
+}
 
 function RequireOrganizer({ children }: { children: ReactNode }) {
+  if (!isAuthenticated()) {
+    return <Navigate to="/login" replace />;
+  }
+
   return userHasRole('ORGANIZER') ? <>{children}</> : <Navigate to="/concerts" replace />;
 }
 
 export function AppRouter() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/concerts" replace />} />
-      <Route path="/concerts" element={<ConcertsListPage />} />
-      <Route path="/concerts/:id" element={<ConcertDetailPage />} />
+      <Route path="/" element={<RedirectIfAuthenticated><Navigate to="/login" replace /></RedirectIfAuthenticated>} />
+      <Route path="/concerts" element={<RequireAuth><ConcertsListPage /></RequireAuth>} />
+      <Route path="/concerts/:id" element={<RequireAuth><ConcertDetailPage /></RequireAuth>} />
       <Route
         path="/organizer/concerts"
         element={
@@ -49,9 +61,13 @@ export function AppRouter() {
       />
       <Route
         path="/organizer/concerts/:concertId/ticket-types"
-        element={<OrganizerTicketTypeManagementPage />}
+        element={
+          <RequireOrganizer>
+            <OrganizerTicketTypeManagementPage />
+          </RequireOrganizer>
+        }
       />
-      <Route path="/orders/:orderId" element={<OrderPendingPage />} />
+      <Route path="/orders/:orderId" element={<RequireAuth><OrderPendingPage /></RequireAuth>} />
       <Route
         path="/admin/dashboard"
         element={
@@ -68,10 +84,10 @@ export function AppRouter() {
           </RequireOrganizer>
         }
       />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/home" element={<Navigate to="/concerts" replace />} />
-      <Route path="*" element={<Navigate to="/concerts" replace />} />
+      <Route path="/login" element={<RedirectIfAuthenticated><LoginPage /></RedirectIfAuthenticated>} />
+      <Route path="/register" element={<RedirectIfAuthenticated><RegisterPage /></RedirectIfAuthenticated>} />
+      <Route path="/home" element={<RedirectIfAuthenticated><Navigate to="/login" replace /></RedirectIfAuthenticated>} />
+      <Route path="*" element={<Navigate to={isAuthenticated() ? getPostLoginRedirect(getStoredRoles()) : '/login'} replace />} />
     </Routes>
   );
 }

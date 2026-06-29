@@ -8,6 +8,7 @@ export type Concert = {
   bannerUrl: string | null;
   startsAt: string;
   endsAt: string | null;
+  performanceStartAt: string;
   minPriceVnd: number | null;
 };
 
@@ -25,6 +26,7 @@ export type ConcertDetail = {
   artist_bio?: string;
   startsAt: string;
   endsAt: string | null;
+  performanceStartAt: string;
 };
 
 export type TicketType = {

@@ -48,6 +48,12 @@ export class OrdersService {
       // [4.1] Validate Concert
       const concert = await tx.concert.findUnique({
         where: { id: dto.concertId },
+        select: {
+          id: true,
+          status: true,
+          startsAt: true,
+          endsAt: true,
+        },
       });
 
       if (!concert) {
@@ -56,6 +62,16 @@ export class OrdersService {
 
       if (concert.status !== ConcertStatus.PUBLISHED) {
         throw new ConflictException('Concert is not published');
+      }
+
+      const now = new Date();
+
+      if (concert.startsAt > now) {
+        throw new ConflictException('Ticket sales have not started for this concert');
+      }
+
+      if (concert.endsAt !== null && concert.endsAt < now) {
+        throw new ConflictException('Ticket sales have ended for this concert');
       }
 
       // [4.2-4.3] Fetch all ticket types once, build map
@@ -73,7 +89,6 @@ export class OrdersService {
       const ticketTypeMap = new Map(ticketTypes.map((tt) => [tt.id, tt]));
 
       // [4.4-4.6] Validate each ticket type
-      const now = new Date();
       for (const item of dto.items) {
         const ticketType = ticketTypeMap.get(item.ticketTypeId)!;
 
@@ -82,18 +97,7 @@ export class OrdersService {
           throw new ConflictException('Ticket type is not active');
         }
 
-        // [4.5] Sales window check
-        if (ticketType.saleStartAt > now) {
-          throw new ConflictException('Sales have not started for this ticket type');
-        }
-        if (
-          ticketType.saleEndAt !== null &&
-          ticketType.saleEndAt < now
-        ) {
-          throw new ConflictException('Sales have ended for this ticket type');
-        }
-
-        // [4.6] Quantity validation
+        // [4.5] Quantity validation
         if (item.quantity <= 0 || !Number.isInteger(item.quantity)) {
           throw new BadRequestException('Quantity must be a positive integer');
         }

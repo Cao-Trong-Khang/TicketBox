@@ -158,7 +158,8 @@ export function OrganizerConcertDashboardPage() {
 
                   <div className="organizer-concert-meta">
                     <p>{concert.venueName}</p>
-                    <p>{formatDateRange(concert.startsAt, concert.endsAt)}</p>
+                    <p>{`Concert: ${formatDateTime(concert.performanceStartAt)}`}</p>
+                    <p>{`Mở bán vé: ${formatDateRange(concert.startsAt, concert.endsAt)}`}</p>
                   </div>
                 </div>
 
@@ -205,6 +206,10 @@ function formatDateRange(startsAt: string, endsAt: string | null): string {
   }
 
   return `${startLabel} - ${formatter.format(new Date(endsAt))}`;
+}
+
+function formatDateTime(value: string): string {
+  return formatDateRange(value, null);
 }
 
 function canEditConcert(concert: OrganizerConcertListItem): boolean {

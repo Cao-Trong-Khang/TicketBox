@@ -128,6 +128,7 @@ test('rate limiting protects auth, orders, and organizer mutations with 429 resp
           venueAddress: 'Address',
           startsAt: '2099-08-01T12:00:00.000Z',
           endsAt: '2099-08-01T15:00:00.000Z',
+          performanceStartAt: '2099-08-01T19:00:00.000Z',
         })
         .expect(201);
     }
@@ -143,6 +144,7 @@ test('rate limiting protects auth, orders, and organizer mutations with 429 resp
         venueAddress: 'Address',
         startsAt: '2099-08-01T12:00:00.000Z',
         endsAt: '2099-08-01T15:00:00.000Z',
+        performanceStartAt: '2099-08-01T19:00:00.000Z',
       })
       .expect(429);
 
@@ -197,6 +199,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: dto.startsAt,
         endsAt: dto.endsAt,
+        performanceStartAt: dto.performanceStartAt,
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
         organizerId: userId,
@@ -214,6 +217,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: '2099-08-01T12:00:00.000Z',
         endsAt: '2099-08-01T15:00:00.000Z',
+        performanceStartAt: '2099-08-01T19:00:00.000Z',
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
       }),
@@ -230,6 +234,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: '2099-08-01T12:00:00.000Z',
         endsAt: '2099-08-01T15:00:00.000Z',
+        performanceStartAt: '2099-08-01T19:00:00.000Z',
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
       }),
@@ -246,6 +251,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: '2099-08-01T12:00:00.000Z',
         endsAt: '2099-08-01T15:00:00.000Z',
+        performanceStartAt: '2099-08-01T19:00:00.000Z',
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
       }),
@@ -263,6 +269,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: new Date('2099-08-01T12:00:00.000Z'),
         endsAt: new Date('2099-08-01T15:00:00.000Z'),
+        performanceStartAt: new Date('2099-08-01T19:00:00.000Z'),
         createdAt: new Date('2099-08-01T10:00:00.000Z'),
         updatedAt: new Date('2099-08-01T10:00:00.000Z'),
       }),
@@ -354,6 +361,7 @@ function createSeededState(): TestState {
 
   return {
     users: [],
+    refreshTokens: [],
     roles: [
       {
         id: 'role-audience',
@@ -371,7 +379,6 @@ function createSeededState(): TestState {
       },
     ],
     userRoles: [],
-    refreshTokens: [],
   };
 }
 
@@ -416,21 +423,6 @@ function createPrismaMock(state: TestState): Partial<PrismaService> {
     role: {
       findUnique: async ({ where }: { where: Prisma.RoleWhereUniqueInput }) => {
         return state.roles.find((role) => role.code === where.code || role.id === where.id) ?? null;
-      },
-    },
-    refreshToken: {
-      create: async ({ data }: { data: Prisma.RefreshTokenUncheckedCreateInput }) => {
-        const refreshToken: RefreshToken = {
-          id: `refresh-token-${state.refreshTokens.length + 1}`,
-          userId: data.userId,
-          tokenHash: data.tokenHash,
-          expiresAt: data.expiresAt instanceof Date ? data.expiresAt : new Date(data.expiresAt),
-          revokedAt: null,
-          createdAt: new Date(),
-        };
-
-        state.refreshTokens.push(refreshToken);
-        return refreshToken;
       },
     },
     userRole: {
@@ -483,6 +475,21 @@ function createPrismaMock(state: TestState): Partial<PrismaService> {
               role,
             };
           });
+      },
+    },
+    refreshToken: {
+      create: async ({ data }: { data: Prisma.RefreshTokenUncheckedCreateInput }) => {
+        const refreshToken: RefreshToken = {
+          id: `refresh-token-${state.refreshTokens.length + 1}`,
+          userId: data.userId,
+          tokenHash: data.tokenHash,
+          expiresAt: data.expiresAt instanceof Date ? data.expiresAt : new Date(data.expiresAt),
+          revokedAt: null,
+          createdAt: new Date(),
+        };
+
+        state.refreshTokens.push(refreshToken);
+        return refreshToken;
       },
     },
   };
