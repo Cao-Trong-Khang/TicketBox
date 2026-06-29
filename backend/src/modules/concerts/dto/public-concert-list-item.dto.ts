@@ -8,5 +8,6 @@ export type PublicConcertListItemDto = {
   bannerUrl: string | null;
   startsAt: string;
   endsAt: string | null;
+  performanceStartAt: string;
   minPriceVnd: number | null;
 };

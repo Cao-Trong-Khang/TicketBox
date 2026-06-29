@@ -213,7 +213,14 @@ export function ConcertDetailPage() {
             )}
             <p>
               <CalendarDays size={18} aria-hidden="true" />
-              <span>{formatConcertDate(concertDetail.startsAt)}</span>
+              <span>{formatConcertDate(concertDetail.performanceStartAt)}</span>
+            </p>
+            <p>
+              <CalendarDays size={18} aria-hidden="true" />
+              <span>
+                Mở bán vé: {formatConcertDate(concertDetail.startsAt)}
+                {concertDetail.endsAt ? ` - ${formatConcertDate(concertDetail.endsAt)}` : ''}
+              </span>
             </p>
             <p>
               <MapPin size={18} aria-hidden="true" />

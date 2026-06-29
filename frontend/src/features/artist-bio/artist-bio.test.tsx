@@ -20,7 +20,7 @@ describe('AI artist biography UI', () => {
     vi.stubGlobal('fetch', vi.fn((url: string) => url.endsWith('/ticket-types') ? json([]) : json({
       id: '11111111-1111-4111-8111-111111111111', title: 'Concert', artistName: 'Artist', description: null,
       venueName: 'Venue', venueAddress: null, bannerUrl: null, seatingSvg: null,
-      startsAt: '2026-08-20T12:30:00.000Z', endsAt: null, artist_bio: 'A completed artist biography.',
+      startsAt: '2026-08-20T12:30:00.000Z', endsAt: null, performanceStartAt: '2026-08-20T20:30:00.000Z', artist_bio: 'A completed artist biography.',
     })));
     renderAt('/concerts/11111111-1111-4111-8111-111111111111');
     expect(await screen.findByRole('heading', { name: 'Tiểu sử nghệ sĩ' })).toBeInTheDocument();

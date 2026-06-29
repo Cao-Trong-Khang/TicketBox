@@ -41,7 +41,7 @@ export function ConcertCard({ concert, onNavigate }: ConcertCardProps) {
         <div className="concert-card-meta">
           <p>
             <CalendarDays size={17} aria-hidden="true" />
-            <span>{formatConcertDate(concert.startsAt)}</span>
+            <span>{formatConcertDate(concert.performanceStartAt)}</span>
           </p>
           <p className="concert-card-venue">
             <MapPin size={17} aria-hidden="true" />

@@ -28,6 +28,7 @@ type OrganizerConcertListQueryResult = {
   venueName: string;
   startsAt: Date;
   endsAt: Date | null;
+  performanceStartAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -45,6 +46,7 @@ export type OrganizerConcertDetailQueryResult = {
   seatingSvg: string | null;
   startsAt: Date;
   endsAt: Date | null;
+  performanceStartAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -80,6 +82,7 @@ export class OrganizerConcertsService {
         venueName: true,
         startsAt: true,
         endsAt: true,
+        performanceStartAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -96,7 +99,11 @@ export class OrganizerConcertsService {
 
     const startsAt = this.parseDateString(dto.startsAt, "startsAt");
     const endsAt = this.parseDateString(dto.endsAt, "endsAt");
-    this.assertValidDateRange(startsAt, endsAt);
+    const performanceStartAt = this.parseDateString(
+      dto.performanceStartAt,
+      "performanceStartAt",
+    );
+    this.assertValidConcertTiming(startsAt, endsAt, performanceStartAt);
 
     const concert = await this.prisma.concert.create({
       data: {
@@ -111,6 +118,7 @@ export class OrganizerConcertsService {
         seatingSvg: dto.seatingSvg ?? null,
         startsAt,
         endsAt,
+        performanceStartAt,
       },
       select: {
         id: true,
@@ -125,6 +133,7 @@ export class OrganizerConcertsService {
         seatingSvg: true,
         startsAt: true,
         endsAt: true,
+        performanceStartAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -163,9 +172,16 @@ export class OrganizerConcertsService {
     const endsAt = dto.endsAt
       ? this.parseDateString(dto.endsAt, "endsAt")
       : concert.endsAt;
+    const performanceStartAt = dto.performanceStartAt
+      ? this.parseDateString(dto.performanceStartAt, "performanceStartAt")
+      : this.getPerformanceStartAt(concert);
 
-    if (dto.startsAt !== undefined || dto.endsAt !== undefined) {
-      this.assertValidDateRange(startsAt, endsAt);
+    if (
+      dto.startsAt !== undefined ||
+      dto.endsAt !== undefined ||
+      dto.performanceStartAt !== undefined
+    ) {
+      this.assertValidConcertTiming(startsAt, endsAt, performanceStartAt);
     }
 
     const concertUpdateData: Prisma.ConcertUpdateInput = {
@@ -178,6 +194,8 @@ export class OrganizerConcertsService {
       seatingSvg: dto.seatingSvg,
       startsAt: dto.startsAt ? startsAt : undefined,
       endsAt: dto.endsAt ? endsAt : undefined,
+      performanceStartAt:
+        dto.performanceStartAt !== undefined ? performanceStartAt : undefined,
     };
 
     const updatedConcert = await this.prisma.concert.update({
@@ -198,6 +216,7 @@ export class OrganizerConcertsService {
         seatingSvg: true,
         startsAt: true,
         endsAt: true,
+        performanceStartAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -237,6 +256,7 @@ export class OrganizerConcertsService {
         seatingSvg: true,
         startsAt: true,
         endsAt: true,
+        performanceStartAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -298,6 +318,7 @@ export class OrganizerConcertsService {
         seatingSvg: true,
         startsAt: true,
         endsAt: true,
+        performanceStartAt: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -320,6 +341,7 @@ export class OrganizerConcertsService {
       "venueAddress",
       "startsAt",
       "endsAt",
+      "performanceStartAt",
     ] as const;
 
     for (const field of fields) {
@@ -342,6 +364,20 @@ export class OrganizerConcertsService {
   private assertValidDateRange(startsAt: Date, endsAt: Date | null): void {
     if (!endsAt || startsAt >= endsAt) {
       throw new BadRequestException("startsAt must be earlier than endsAt");
+    }
+  }
+
+  private assertValidConcertTiming(
+    startsAt: Date,
+    endsAt: Date | null,
+    performanceStartAt: Date,
+  ): void {
+    this.assertValidDateRange(startsAt, endsAt);
+
+    if (!endsAt || endsAt >= performanceStartAt) {
+      throw new BadRequestException(
+        "endsAt must be earlier than performanceStartAt",
+      );
     }
   }
 
@@ -420,6 +456,12 @@ export class OrganizerConcertsService {
     return "ENDED";
   }
 
+  private getPerformanceStartAt(
+    concert: Pick<OrganizerConcertDetailQueryResult, "startsAt" | "performanceStartAt">,
+  ): Date {
+    return concert.performanceStartAt ?? concert.startsAt;
+  }
+
   private toOrganizerListItem(
     concert: OrganizerConcertListQueryResult,
   ): OrganizerConcertListItemDto {
@@ -432,6 +474,7 @@ export class OrganizerConcertsService {
       venueName: concert.venueName,
       startsAt: concert.startsAt.toISOString(),
       endsAt: concert.endsAt?.toISOString() ?? null,
+      performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
       createdAt: concert.createdAt.toISOString(),
       updatedAt: concert.updatedAt.toISOString(),
     };
@@ -453,6 +496,7 @@ export class OrganizerConcertsService {
       seatingSvg: concert.seatingSvg,
       startsAt: concert.startsAt.toISOString(),
       endsAt: concert.endsAt?.toISOString() ?? null,
+      performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
       createdAt: concert.createdAt.toISOString(),
       updatedAt: concert.updatedAt.toISOString(),
     };

@@ -27,11 +27,17 @@ export function AdminDashboardPage() {
             <article
               className={`admin-dashboard-tile${isInteractive ? ' admin-dashboard-tile--interactive' : ''}`}
               key={item.label}
-              onClick={() => item.href && navigate(item.href)}
+              onClick={() => {
+                if (item.href) {
+                  navigate(item.href);
+                }
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
-                  item.href && navigate(item.href);
+                  if (item.href) {
+                    navigate(item.href);
+                  }
                 }
               }}
               role={isInteractive ? 'button' : undefined}

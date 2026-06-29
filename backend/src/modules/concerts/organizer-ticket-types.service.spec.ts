@@ -472,6 +472,7 @@ function createOwnedConcertRecord(): OrganizerConcertDetailQueryResult {
     seatingSvg: null,
     startsAt: new Date("2099-08-01T12:00:00.000Z"),
     endsAt: new Date("2099-08-01T15:00:00.000Z"),
+    performanceStartAt: new Date("2099-08-01T19:00:00.000Z"),
     createdAt: new Date("2026-06-24T09:00:00.000Z"),
     updatedAt: new Date("2026-06-24T09:00:00.000Z"),
   };

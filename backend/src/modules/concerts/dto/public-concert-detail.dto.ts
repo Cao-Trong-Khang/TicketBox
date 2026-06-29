@@ -9,5 +9,6 @@ export type PublicConcertDetailDto = {
   seatingSvg: string | null;
   startsAt: string;
   endsAt: string | null;
+  performanceStartAt: string;
   artist_bio?: string;
 };

@@ -20,6 +20,15 @@ type TestState = {
   roles: Role[];
   userRoles: UserRole[];
   users: User[];
+  refreshTokens: Array<{
+    id: string;
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    revokedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
 };
 
 test('rate limiting protects auth, orders, and organizer mutations with 429 responses', async () => {
@@ -64,7 +73,7 @@ test('rate limiting protects auth, orders, and organizer mutations with 429 resp
       })
       .expect(201);
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
       await request(app.getHttpServer())
         .post('/auth/login')
         .set('x-forwarded-for', '10.0.0.3')
@@ -127,6 +136,7 @@ test('rate limiting protects auth, orders, and organizer mutations with 429 resp
           venueAddress: 'Address',
           startsAt: '2099-08-01T12:00:00.000Z',
           endsAt: '2099-08-01T15:00:00.000Z',
+          performanceStartAt: '2099-08-01T19:00:00.000Z',
         })
         .expect(201);
     }
@@ -142,6 +152,7 @@ test('rate limiting protects auth, orders, and organizer mutations with 429 resp
         venueAddress: 'Address',
         startsAt: '2099-08-01T12:00:00.000Z',
         endsAt: '2099-08-01T15:00:00.000Z',
+        performanceStartAt: '2099-08-01T19:00:00.000Z',
       })
       .expect(429);
 
@@ -196,6 +207,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: dto.startsAt,
         endsAt: dto.endsAt,
+        performanceStartAt: dto.performanceStartAt,
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
         organizerId: userId,
@@ -213,6 +225,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: '2099-08-01T12:00:00.000Z',
         endsAt: '2099-08-01T15:00:00.000Z',
+        performanceStartAt: '2099-08-01T19:00:00.000Z',
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
       }),
@@ -229,6 +242,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: '2099-08-01T12:00:00.000Z',
         endsAt: '2099-08-01T15:00:00.000Z',
+        performanceStartAt: '2099-08-01T19:00:00.000Z',
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
       }),
@@ -245,6 +259,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: '2099-08-01T12:00:00.000Z',
         endsAt: '2099-08-01T15:00:00.000Z',
+        performanceStartAt: '2099-08-01T19:00:00.000Z',
         createdAt: '2099-08-01T10:00:00.000Z',
         updatedAt: '2099-08-01T10:00:00.000Z',
       }),
@@ -262,6 +277,7 @@ async function createTestApp(
         seatingSvg: null,
         startsAt: new Date('2099-08-01T12:00:00.000Z'),
         endsAt: new Date('2099-08-01T15:00:00.000Z'),
+        performanceStartAt: new Date('2099-08-01T19:00:00.000Z'),
         createdAt: new Date('2099-08-01T10:00:00.000Z'),
         updatedAt: new Date('2099-08-01T10:00:00.000Z'),
       }),
@@ -353,6 +369,7 @@ function createSeededState(): TestState {
 
   return {
     users: [],
+    refreshTokens: [],
     roles: [
       {
         id: 'role-audience',
@@ -465,7 +482,52 @@ function createPrismaMock(state: TestState): Partial<PrismaService> {
               ...userRole,
               role,
             };
-          });
+        });
+      },
+    },
+    refreshToken: {
+      create: async ({
+        data,
+      }: {
+        data: {
+          userId: string;
+          tokenHash: string;
+          expiresAt: Date;
+        };
+      }) => {
+        const now = new Date();
+        const refreshToken = {
+          id: `refresh-token-${state.refreshTokens.length + 1}`,
+          userId: data.userId,
+          tokenHash: data.tokenHash,
+          expiresAt: data.expiresAt,
+          revokedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        state.refreshTokens.push(refreshToken);
+        return refreshToken;
+      },
+      findMany: async () => [],
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: { revokedAt?: Date };
+      }) => {
+        const refreshToken = state.refreshTokens.find(
+          (candidate) => candidate.id === where.id,
+        );
+        assert.ok(refreshToken);
+
+        if (data.revokedAt !== undefined) {
+          refreshToken.revokedAt = data.revokedAt;
+          refreshToken.updatedAt = new Date();
+        }
+
+        return refreshToken;
       },
     },
   };

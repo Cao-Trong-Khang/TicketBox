@@ -20,23 +20,6 @@ function mockJsonResponse(body: unknown, status = 200) {
   );
 }
 
-function createConcerts() {
-  return [
-    {
-      id: 'concert-1',
-      title: 'Anh Trai Say Hi Concert 2026',
-      artistName: 'Anh Trai Say Hi',
-      description: null,
-      venueName: 'Nhà thi đấu',
-      venueAddress: 'Hà Nội',
-      bannerUrl: null,
-      startsAt: '2026-07-01T20:00:00.000Z',
-      endsAt: '2026-07-01T23:00:00.000Z',
-      minPriceVnd: 800000,
-    },
-  ];
-}
-
 describe('frontend auth shell', () => {
   beforeEach(() => {
     localStorage.clear();

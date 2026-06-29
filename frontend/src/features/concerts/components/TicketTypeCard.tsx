@@ -1,4 +1,4 @@
-import { formatConcertDate, formatVnd } from '../api';
+import { formatVnd } from '../api';
 import { TicketType } from '../types';
 
 type TicketTypeCardProps = {
@@ -14,10 +14,6 @@ export function TicketTypeCard({ ticketType, quantity, onIncrease, onDecrease }:
   const canIncrease = !isSoldOut && quantity < maxQty;
   const canDecrease = quantity > 0;
 
-  const saleEndLabel = ticketType.saleEndAt
-    ? formatConcertDate(ticketType.saleEndAt)
-    : 'Không giới hạn';
-
   return (
     <article className={`ticket-type-card ${isSoldOut ? 'ticket-type-card--sold-out' : ''}`}>
       <div className="ticket-type-card-main">
@@ -25,9 +21,6 @@ export function TicketTypeCard({ ticketType, quantity, onIncrease, onDecrease }:
           <h3>
             {ticketType.name} ({ticketType.code})
           </h3>
-          <p className="ticket-type-card-period">
-            {formatConcertDate(ticketType.saleStartAt)} — {saleEndLabel}
-          </p>
         </div>
 
         <strong>{formatVnd(ticketType.priceVnd)}</strong>

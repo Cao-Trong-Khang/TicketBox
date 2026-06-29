@@ -15,6 +15,7 @@ export function createEmptyConcertFormValues(): OrganizerConcertFormValues {
     seatingSvg: '',
     startsAt: '',
     endsAt: '',
+    performanceStartAt: '',
   };
 }
 
@@ -31,6 +32,7 @@ export function toConcertFormValues(
     seatingSvg: concert.seatingSvg ?? '',
     startsAt: isoToDateTimeLocalValue(concert.startsAt),
     endsAt: isoToDateTimeLocalValue(concert.endsAt),
+    performanceStartAt: isoToDateTimeLocalValue(concert.performanceStartAt),
   };
 }
 
@@ -56,11 +58,15 @@ export function validateConcertForm(
   }
 
   if (!values.startsAt) {
-    errors.startsAt = 'Vui lòng chọn thời gian bắt đầu.';
+    errors.startsAt = 'Vui lòng chọn thời gian bắt đầu mở bán vé.';
   }
 
   if (!values.endsAt) {
-    errors.endsAt = 'Vui lòng chọn thời gian kết thúc.';
+    errors.endsAt = 'Vui lòng chọn thời gian kết thúc mở bán vé.';
+  }
+
+  if (!values.performanceStartAt) {
+    errors.performanceStartAt = 'Vui lòng chọn thời gian bắt đầu concert.';
   }
 
   if (values.startsAt && values.endsAt) {
@@ -68,7 +74,16 @@ export function validateConcertForm(
     const end = new Date(values.endsAt);
 
     if (start >= end) {
-      errors.endsAt = 'Thời gian kết thúc phải sau thời gian bắt đầu.';
+      errors.endsAt = 'Kết thúc mở bán vé phải sau bắt đầu mở bán vé.';
+    }
+  }
+
+  if (values.endsAt && values.performanceStartAt) {
+    const saleEnd = new Date(values.endsAt);
+    const performanceStart = new Date(values.performanceStartAt);
+
+    if (saleEnd >= performanceStart) {
+      errors.performanceStartAt = 'Thời gian bắt đầu concert phải sau thời gian kết thúc mở bán vé.';
     }
   }
 
@@ -88,6 +103,7 @@ export function toConcertPayload(
     seatingSvg: normalizeOptionalText(values.seatingSvg),
     startsAt: dateTimeLocalValueToIso(values.startsAt),
     endsAt: dateTimeLocalValueToIso(values.endsAt),
+    performanceStartAt: dateTimeLocalValueToIso(values.performanceStartAt),
   };
 }
 
