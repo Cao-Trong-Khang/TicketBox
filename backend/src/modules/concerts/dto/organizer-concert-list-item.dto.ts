@@ -7,6 +7,7 @@ export class OrganizerConcertListItemDto {
   venueName!: string;
   startsAt!: string;
   endsAt!: string | null;
+  performanceStartAt!: string;
   createdAt!: string;
   updatedAt!: string;
 }

@@ -27,6 +27,7 @@ test("organizer list returns only owned concerts ordered by createdAt descending
         title: "Upcoming Concert",
         startsAt: new Date("2099-07-02T10:00:00.000Z"),
         endsAt: new Date("2099-07-02T13:00:00.000Z"),
+        performanceStartAt: new Date("2099-07-02T14:00:00.000Z"),
         createdAt: new Date("2026-07-02T10:00:00.000Z"),
       }),
       createConcert({
@@ -36,6 +37,7 @@ test("organizer list returns only owned concerts ordered by createdAt descending
         status: ConcertStatus.CANCELLED,
         startsAt: new Date("2099-07-01T10:00:00.000Z"),
         endsAt: new Date("2099-07-01T13:00:00.000Z"),
+        performanceStartAt: new Date("2099-07-01T14:00:00.000Z"),
         createdAt: new Date("2026-07-01T10:00:00.000Z"),
       }),
       createConcert({
@@ -59,6 +61,7 @@ test("organizer list returns only owned concerts ordered by createdAt descending
   );
   assert.equal(response[0].status, ConcertStatus.PUBLISHED);
   assert.equal(response[0].lifecycleStatus, "UPCOMING");
+  assert.equal(response[0].performanceStartAt, "2099-07-02T14:00:00.000Z");
   assert.equal(response[1].status, ConcertStatus.CANCELLED);
   assert.equal(response[1].lifecycleStatus, "UPCOMING");
 });
@@ -104,13 +107,19 @@ test("organizer create stores a PUBLISHED concert, keeps organizer ownership, an
     seatingSvg: "<svg />",
     startsAt: "2099-08-01T12:00:00.000Z",
     endsAt: "2099-08-01T15:00:00.000Z",
+    performanceStartAt: "2099-08-01T19:00:00.000Z",
   });
 
   assert.equal(createdPayloads.length, 1);
   assert.equal(createdPayloads[0].organizerId, organizerId);
   assert.equal(createdPayloads[0].status, ConcertStatus.PUBLISHED);
+  assert.equal(
+    (createdPayloads[0].performanceStartAt as Date).toISOString(),
+    "2099-08-01T19:00:00.000Z",
+  );
   assert.equal(response.status, ConcertStatus.PUBLISHED);
   assert.equal(response.lifecycleStatus, "UPCOMING");
+  assert.equal(response.performanceStartAt, "2099-08-01T19:00:00.000Z");
   assert.deepEqual(deletedKeys, ["concerts:list:published"]);
 });
 
@@ -131,6 +140,30 @@ test("organizer create rejects invalid date range", async () => {
         venueAddress: "Address",
         startsAt: "2026-08-01T15:00:00.000Z",
         endsAt: "2026-08-01T12:00:00.000Z",
+        performanceStartAt: "2026-08-01T20:00:00.000Z",
+      }),
+    BadRequestException,
+  );
+});
+
+test("organizer create rejects when sale end is later than or equal to performance start", async () => {
+  const organizerId = "00000000-0000-4000-8000-000000000001";
+  const service = createService(
+    createState({
+      userRoles: [createUserRole(organizerId, "role-organizer")],
+    }),
+  );
+
+  await assert.rejects(
+    () =>
+      service.createConcert(organizerId, {
+        title: "Invalid Performance Timing",
+        artistName: "Artist",
+        venueName: "Venue",
+        venueAddress: "Address",
+        startsAt: "2099-08-01T12:00:00.000Z",
+        endsAt: "2099-08-01T15:00:00.000Z",
+        performanceStartAt: "2099-08-01T15:00:00.000Z",
       }),
     BadRequestException,
   );
@@ -188,10 +221,12 @@ test("organizer can update upcoming owned concert and update invalidates public 
   const updated = await service.updateOwnedConcert(organizerId, concertId, {
     title: "Updated Concert",
     endsAt: "2099-08-01T16:00:00.000Z",
+    performanceStartAt: "2099-08-01T20:00:00.000Z",
   });
 
   assert.equal(updated.title, "Updated Concert");
   assert.equal(updated.endsAt, "2099-08-01T16:00:00.000Z");
+  assert.equal(updated.performanceStartAt, "2099-08-01T20:00:00.000Z");
   assert.deepEqual(deletedKeys, [
     "concerts:list:published",
     `concerts:detail:${concertId}`,
@@ -297,6 +332,14 @@ test("organizer update rejects invalid patch values and invalid date ranges", as
       service.updateOwnedConcert(organizerId, concertId, {
         startsAt: "2099-08-01T18:00:00.000Z",
         endsAt: "2099-08-01T17:00:00.000Z",
+      }),
+    BadRequestException,
+  );
+
+  await assert.rejects(
+    () =>
+      service.updateOwnedConcert(organizerId, concertId, {
+        performanceStartAt: "2099-08-01T14:00:00.000Z",
       }),
     BadRequestException,
   );
@@ -485,6 +528,9 @@ function createService(
           seatingSvg: (data.seatingSvg as string | null | undefined) ?? null,
           startsAt: data.startsAt as Date,
           endsAt: data.endsAt as Date,
+          performanceStartAt:
+            (data.performanceStartAt as Date | undefined) ??
+            (data.startsAt as Date),
           createdAt: now,
           updatedAt: now,
         });
@@ -543,6 +589,9 @@ function createService(
         }
         if (data.endsAt !== undefined) {
           concert.endsAt = data.endsAt as Date | null;
+        }
+        if (data.performanceStartAt !== undefined) {
+          concert.performanceStartAt = data.performanceStartAt as Date | null;
         }
         if (data.status !== undefined) {
           concert.status = data.status as ConcertStatus;
@@ -618,6 +667,10 @@ function createConcert(overrides?: Partial<Concert>): Concert {
       overrides && "endsAt" in overrides
         ? (overrides.endsAt ?? null)
         : new Date("2099-08-01T15:00:00.000Z"),
+    performanceStartAt:
+      overrides && "performanceStartAt" in overrides
+        ? (overrides.performanceStartAt ?? null)
+        : new Date("2099-08-01T19:00:00.000Z"),
     createdAt: overrides?.createdAt ?? new Date("2026-06-20T09:00:00.000Z"),
     updatedAt: overrides?.updatedAt ?? new Date("2026-06-20T09:00:00.000Z"),
   };
@@ -632,6 +685,7 @@ function toConcertListRecord(concert: Concert) {
     venueName: concert.venueName,
     startsAt: concert.startsAt,
     endsAt: concert.endsAt,
+    performanceStartAt: concert.performanceStartAt,
     createdAt: concert.createdAt,
     updatedAt: concert.updatedAt,
   };
@@ -651,6 +705,7 @@ function toConcertDetailRecord(concert: Concert) {
     seatingSvg: concert.seatingSvg,
     startsAt: concert.startsAt,
     endsAt: concert.endsAt,
+    performanceStartAt: concert.performanceStartAt,
     createdAt: concert.createdAt,
     updatedAt: concert.updatedAt,
   };

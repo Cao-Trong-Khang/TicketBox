@@ -9,6 +9,7 @@ export type OrganizerConcertListItem = {
   venueName: string;
   startsAt: string;
   endsAt: string | null;
+  performanceStartAt: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -26,6 +27,7 @@ export type OrganizerConcertDetail = {
   seatingSvg: string | null;
   startsAt: string;
   endsAt: string | null;
+  performanceStartAt: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -40,6 +42,7 @@ export type OrganizerConcertPayload = {
   seatingSvg?: string;
   startsAt: string;
   endsAt: string;
+  performanceStartAt: string;
 };
 
 export type OrganizerConcertFormValues = {
@@ -52,6 +55,7 @@ export type OrganizerConcertFormValues = {
   seatingSvg: string;
   startsAt: string;
   endsAt: string;
+  performanceStartAt: string;
 };
 
 export type OrganizerTicketTypeStatus = 'ACTIVE' | 'INACTIVE' | string;

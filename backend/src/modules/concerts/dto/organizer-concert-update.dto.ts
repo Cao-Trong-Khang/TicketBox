@@ -47,4 +47,8 @@ export class OrganizerConcertUpdateDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsDateString()
   endsAt?: string;
+
+  @ValidateIf((_, value) => value !== undefined)
+  @IsDateString()
+  performanceStartAt?: string;
 }

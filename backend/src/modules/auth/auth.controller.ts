@@ -22,7 +22,7 @@ export class AuthController {
   @RateLimit({
     keyPrefix: 'auth-register',
     limit: 3,
-    ttlSeconds: 15 * 60,
+    ttlSeconds: 60,
     identity: 'ip',
   })
   register(@Body() dto: RegisterDto) {
@@ -33,8 +33,8 @@ export class AuthController {
   @UseGuards(RateLimitGuard)
   @RateLimit({
     keyPrefix: 'auth-login',
-    limit: 5,
-    ttlSeconds: 15 * 60,
+    limit: 10,
+    ttlSeconds: 60,
     identity: 'ip',
   })
   login(@Body() dto: LoginDto) {

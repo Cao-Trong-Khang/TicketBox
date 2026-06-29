@@ -288,6 +288,7 @@ model Concert {
   status   ConcertStatus @default(DRAFT)
   startsAt DateTime      @map("starts_at")
   endsAt   DateTime?     @map("ends_at")
+  performanceStartAt DateTime? @map("performance_start_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

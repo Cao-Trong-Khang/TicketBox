@@ -7,12 +7,12 @@ import { ConcertsService } from './concerts.service';
 type PrismaConcertFindManyArgs = {
   where: {
     status: ConcertStatus;
-    startsAt: {
+    performanceStartAt: {
       gte: Date;
     };
   };
   orderBy: {
-    startsAt: 'asc';
+    performanceStartAt: 'asc';
   };
   select: {
     ticketTypes: {
@@ -50,6 +50,7 @@ type PrismaConcertFindFirstTicketTypesArgs = {
 test('public concerts list maps upcoming published concerts to public DTOs and caches the mapped response', async () => {
   const startsAt = new Date('2026-08-20T12:30:00.000Z');
   const endsAt = new Date('2026-08-20T15:30:00.000Z');
+  const performanceStartAt = new Date('2026-08-20T20:00:00.000Z');
   const findManyCalls: PrismaConcertFindManyArgs[] = [];
   let cachedValue: string | null = null;
 
@@ -69,6 +70,7 @@ test('public concerts list maps upcoming published concerts to public DTOs and c
             bannerUrl: 'https://example.test/banner.jpg',
             startsAt,
             endsAt,
+            performanceStartAt,
             ticketTypes: [{ priceVnd: 900000 }, { priceVnd: 500000 }],
           },
           {
@@ -81,6 +83,7 @@ test('public concerts list maps upcoming published concerts to public DTOs and c
             bannerUrl: null,
             startsAt: new Date('2026-09-01T12:00:00.000Z'),
             endsAt: null,
+            performanceStartAt: new Date('2026-09-01T20:00:00.000Z'),
             ticketTypes: [],
           },
         ];
@@ -101,8 +104,8 @@ test('public concerts list maps upcoming published concerts to public DTOs and c
 
   assert.equal(findManyCalls.length, 1);
   assert.equal(findManyCalls[0].where.status, ConcertStatus.PUBLISHED);
-  assert.ok(findManyCalls[0].where.startsAt.gte instanceof Date);
-  assert.deepEqual(findManyCalls[0].orderBy, { startsAt: 'asc' });
+  assert.ok(findManyCalls[0].where.performanceStartAt.gte instanceof Date);
+  assert.deepEqual(findManyCalls[0].orderBy, { performanceStartAt: 'asc' });
   assert.equal(findManyCalls[0].select.ticketTypes.where.status, TicketTypeStatus.ACTIVE);
   assert.deepEqual(response, [
     {
@@ -115,6 +118,7 @@ test('public concerts list maps upcoming published concerts to public DTOs and c
       bannerUrl: 'https://example.test/banner.jpg',
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
+      performanceStartAt: performanceStartAt.toISOString(),
       minPriceVnd: 500000,
     },
     {
@@ -127,6 +131,7 @@ test('public concerts list maps upcoming published concerts to public DTOs and c
       bannerUrl: null,
       startsAt: '2026-09-01T12:00:00.000Z',
       endsAt: null,
+      performanceStartAt: '2026-09-01T20:00:00.000Z',
       minPriceVnd: null,
     },
   ]);
@@ -143,6 +148,7 @@ test('public concert detail maps published concert metadata and caches the DTO r
   const concertId = '11111111-1111-4111-8111-111111111111';
   const startsAt = new Date('2026-08-20T12:30:00.000Z');
   const endsAt = new Date('2026-08-20T15:30:00.000Z');
+  const performanceStartAt = new Date('2026-08-20T20:00:00.000Z');
   const findFirstCalls: PrismaConcertFindFirstArgs[] = [];
   let cachedValue: string | null = null;
 
@@ -162,6 +168,7 @@ test('public concert detail maps published concert metadata and caches the DTO r
           seatingSvg: '<svg />',
           startsAt,
           endsAt,
+          performanceStartAt,
           aiArtistBios: [{ generatedBio: 'Latest completed biography' }]
         };
       },
@@ -201,6 +208,7 @@ test('public concert detail maps published concert metadata and caches the DTO r
     seatingSvg: '<svg />',
     startsAt: startsAt.toISOString(),
     endsAt: endsAt.toISOString(),
+    performanceStartAt: performanceStartAt.toISOString(),
     artist_bio: 'Latest completed biography',
   });
 
@@ -232,6 +240,7 @@ test('public concert detail deletes corrupted cache and falls back to PostgreSQL
           seatingSvg: null,
           startsAt: new Date('2026-10-01T12:00:00.000Z'),
           endsAt: null,
+          performanceStartAt: null,
         };
       },
     },

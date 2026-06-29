@@ -40,4 +40,7 @@ export class OrganizerConcertCreateDto {
 
   @IsDateString()
   endsAt!: string;
+
+  @IsDateString()
+  performanceStartAt!: string;
 }

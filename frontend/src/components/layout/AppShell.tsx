@@ -1,7 +1,7 @@
 ﻿import { ReactNode, useEffect, useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { LogOut, Ticket } from 'lucide-react';
-import { userHasRole } from '../../features/auth/session';
+import { isAuthenticated } from '../../features/auth/session';
 
 type AppShellProps = {
   children: ReactNode;
@@ -9,8 +9,7 @@ type AppShellProps = {
 
 function readAuthState() {
   return {
-    hasToken: Boolean(localStorage.getItem('accessToken')),
-    isOrganizer: userHasRole('ORGANIZER'),
+    hasToken: isAuthenticated(),
   };
 }
 
@@ -48,20 +47,6 @@ export function AppShell({ children }: AppShellProps) {
         </Link>
 
         <nav className="nav-links" aria-label="Primary">
-          <NavLink to="/concerts">Concerts</NavLink>
-
-          {authState.isOrganizer && (
-            <NavLink to="/organizer/concerts">Kênh organizer</NavLink>
-          )}
-
-          {!authState.hasToken && (
-            <NavLink to="/login">Đăng nhập</NavLink>
-          )}
-
-          {!authState.hasToken && (
-            <NavLink to="/register">Đăng ký</NavLink>
-          )}
-
           {authState.hasToken && (
             <button
               className="nav-button"

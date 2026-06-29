@@ -108,9 +108,9 @@ export function OrganizerConcertForm({
           />
         </FieldBlock>
 
-        <FieldBlock label="Bắt đầu" error={errors.startsAt}>
+        <FieldBlock label="Bắt đầu mở bán vé" error={errors.startsAt}>
           <FormField
-            label="Bắt đầu"
+            label="Bắt đầu mở bán vé"
             name="startsAt"
             type="datetime-local"
             value={values.startsAt}
@@ -120,13 +120,28 @@ export function OrganizerConcertForm({
           />
         </FieldBlock>
 
-        <FieldBlock label="Kết thúc" error={errors.endsAt}>
+        <FieldBlock label="Kết thúc mở bán vé" error={errors.endsAt}>
           <FormField
-            label="Kết thúc"
+            label="Kết thúc mở bán vé"
             name="endsAt"
             type="datetime-local"
             value={values.endsAt}
             onChange={handleChange('endsAt')}
+            disabled={isReadonly || isSubmitting}
+            required
+          />
+        </FieldBlock>
+
+        <FieldBlock
+          label="Thời gian bắt đầu concert"
+          error={errors.performanceStartAt}
+        >
+          <FormField
+            label="Thời gian bắt đầu concert"
+            name="performanceStartAt"
+            type="datetime-local"
+            value={values.performanceStartAt}
+            onChange={handleChange('performanceStartAt')}
             disabled={isReadonly || isSubmitting}
             required
           />
