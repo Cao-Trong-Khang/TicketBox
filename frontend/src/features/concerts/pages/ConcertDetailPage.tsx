@@ -8,6 +8,7 @@ import { resolveAssetUrl } from '../../../lib/assets';
 import { createOrder } from '../../orders/api';
 import { userHasRole } from '../../auth/session';
 import { formatConcertDate, getConcertDetail, getConcertTicketTypes } from '../api';
+import { InteractiveSeatMap } from '../components/InteractiveSeatMap';
 import { TicketTypeCard } from '../components/TicketTypeCard';
 import { TicketSelectionSummary } from '../components/TicketSelectionSummary';
 import { ConcertDetail, TicketType } from '../types';
@@ -61,6 +62,29 @@ export function ConcertDetailPage() {
     return () => {
       isActive = false;
     };
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+
+    const timerId = window.setInterval(async () => {
+      try {
+        const nextTicketTypes = await getConcertTicketTypes(id);
+        setTicketTypes((currentTicketTypes) => {
+          if (currentTicketTypes.length === 0 && nextTicketTypes.length === 0) {
+            return currentTicketTypes;
+          }
+
+          return nextTicketTypes;
+        });
+      } catch {
+        // Keep polling non-blocking.
+      }
+    }, 5000);
+
+    return () => window.clearInterval(timerId);
   }, [id]);
 
   const retry = async () => {
@@ -263,17 +287,7 @@ export function ConcertDetailPage() {
         )}
         <section aria-label="Sơ đồ chỗ ngồi">
           <h2>Sơ đồ chỗ ngồi</h2>
-          {concertDetail.seatingSvg ? (
-            <div className="concert-seatmap">
-              {/*
-                XSS safety note: seatingSvg is currently backend-controlled TicketBox data.
-                If this ever becomes organizer/user-uploaded content, sanitize it before rendering.
-              */}
-              <div dangerouslySetInnerHTML={{ __html: concertDetail.seatingSvg }} />
-            </div>
-          ) : (
-            <div className="concert-seatmap-placeholder">Chưa có sơ đồ chỗ ngồi</div>
-          )}
+          <InteractiveSeatMap svgMarkup={concertDetail.seatingSvg} ticketTypes={ticketTypes} />
         </section>
 
         <section className="concert-tickets-section" aria-labelledby="ticket-types-title">
