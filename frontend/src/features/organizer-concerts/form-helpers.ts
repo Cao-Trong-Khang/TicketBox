@@ -1,3 +1,4 @@
+import DOMPurify from 'dompurify';
 import {
   OrganizerConcertDetail,
   OrganizerConcertFormValues,
@@ -5,8 +6,11 @@ import {
 } from './types';
 
 export const BANNER_MAX_FILE_SIZE = 5_242_880;
+export const SEATING_SVG_MAX_FILE_SIZE = 200 * 1024;
 const ALLOWED_BANNER_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const ALLOWED_BANNER_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+const ALLOWED_SEATING_SVG_MIME_TYPES = new Set(['image/svg+xml']);
+const ALLOWED_SEATING_SVG_EXTENSIONS = new Set(['svg']);
 
 export function createEmptyConcertFormValues(): OrganizerConcertFormValues {
   return {
@@ -156,6 +160,62 @@ export function createBannerPreviewUrl(file: File): Promise<string> {
     };
 
     reader.readAsDataURL(file);
+  });
+}
+
+export function validateSeatingSvgFile(file: File): { valid: boolean; error?: string } {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+
+  if (!ALLOWED_SEATING_SVG_EXTENSIONS.has(extension)) {
+    return {
+      valid: false,
+      error: 'Chỉ chấp nhận file SVG.',
+    };
+  }
+
+  if (!ALLOWED_SEATING_SVG_MIME_TYPES.has(file.type.toLowerCase())) {
+    return {
+      valid: false,
+      error: 'Chỉ chấp nhận file SVG.',
+    };
+  }
+
+  if (file.size > SEATING_SVG_MAX_FILE_SIZE) {
+    return {
+      valid: false,
+      error: 'File SVG phải nhỏ hơn hoặc bằng 200 KB.',
+    };
+  }
+
+  return { valid: true };
+}
+
+export function createSeatingSvgPreviewMarkup(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        const sanitized = DOMPurify.sanitize(reader.result, {
+          USE_PROFILES: { svg: true, svgFilters: true },
+          ALLOWED_TAGS: ['svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'text', 'line', 'polyline', 'polygon'],
+          ALLOWED_ATTR: ['id', 'class', 'data-zone', 'data-ticket-code', 'viewBox', 'fill', 'stroke', 'stroke-width', 'opacity', 'transform', 'x', 'y', 'width', 'height', 'd', 'points', 'cx', 'cy', 'r', 'rx', 'ry'],
+          FORBID_TAGS: ['script', 'foreignObject', 'iframe', 'object', 'embed', 'form', 'input'],
+          FORBID_ATTR: ['onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'style'],
+        });
+
+        resolve(sanitized);
+        return;
+      }
+
+      reject(new Error('Không thể đọc file SVG xem trước.'));
+    };
+
+    reader.onerror = () => {
+      reject(new Error('Không thể đọc file SVG xem trước.'));
+    };
+
+    reader.readAsText(file);
   });
 }
 

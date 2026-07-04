@@ -123,6 +123,52 @@ test("organizer create stores a PUBLISHED concert, keeps organizer ownership, an
   assert.deepEqual(deletedKeys, ["concerts:list:published"]);
 });
 
+test("organizer create stores a sanitized SVG payload", async () => {
+  const organizerId = "00000000-0000-4000-8000-000000000001";
+  const service = createService(
+    createState({
+      userRoles: [createUserRole(organizerId, "role-organizer")],
+    }),
+  );
+
+  const response = await service.createConcert(organizerId, {
+    title: "SVG Concert",
+    artistName: "Artist",
+    venueName: "Venue",
+    venueAddress: "Address",
+    seatingSvg: '<svg><rect width="10" height="10" fill="red"></rect></svg>',
+    startsAt: "2099-08-01T12:00:00.000Z",
+    endsAt: "2099-08-01T15:00:00.000Z",
+    performanceStartAt: "2099-08-01T19:00:00.000Z",
+  });
+
+  assert.equal(response.seatingSvg, '<svg><rect width="10" height="10" fill="red"></rect></svg>');
+});
+
+test("organizer create rejects unsafe SVG payloads", async () => {
+  const organizerId = "00000000-0000-4000-8000-000000000001";
+  const service = createService(
+    createState({
+      userRoles: [createUserRole(organizerId, "role-organizer")],
+    }),
+  );
+
+  await assert.rejects(
+    () =>
+      service.createConcert(organizerId, {
+        title: "Unsafe SVG",
+        artistName: "Artist",
+        venueName: "Venue",
+        venueAddress: "Address",
+        seatingSvg: '<svg><script>alert(1)</script></svg>',
+        startsAt: "2099-08-01T12:00:00.000Z",
+        endsAt: "2099-08-01T15:00:00.000Z",
+        performanceStartAt: "2099-08-01T19:00:00.000Z",
+      }),
+    BadRequestException,
+  );
+});
+
 test("organizer create rejects invalid date range", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
   const service = createService(

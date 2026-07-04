@@ -19,6 +19,7 @@ import { OrganizerConcertCreateDto } from "./dto/organizer-concert-create.dto";
 import { OrganizerConcertDetailDto } from "./dto/organizer-concert-detail.dto";
 import { OrganizerConcertListItemDto } from "./dto/organizer-concert-list-item.dto";
 import { OrganizerConcertUpdateDto } from "./dto/organizer-concert-update.dto";
+import { sanitizeSeatingSvgMarkup } from "./svg-sanitizer";
 
 type OrganizerConcertListQueryResult = {
   id: string;
@@ -104,6 +105,7 @@ export class OrganizerConcertsService {
       "performanceStartAt",
     );
     this.assertValidConcertTiming(startsAt, endsAt, performanceStartAt);
+    const sanitizedSeatingSvg = this.sanitizeSeatingSvg(dto.seatingSvg, "create");
 
     const concert = await this.prisma.concert.create({
       data: {
@@ -115,7 +117,7 @@ export class OrganizerConcertsService {
         venueName: dto.venueName,
         venueAddress: dto.venueAddress,
         bannerUrl: dto.bannerUrl ?? null,
-        seatingSvg: dto.seatingSvg ?? null,
+        seatingSvg: sanitizedSeatingSvg,
         startsAt,
         endsAt,
         performanceStartAt,
@@ -184,6 +186,11 @@ export class OrganizerConcertsService {
       this.assertValidConcertTiming(startsAt, endsAt, performanceStartAt);
     }
 
+    const seatingSvgValue =
+      dto.seatingSvg === undefined || dto.seatingSvg === null
+        ? dto.seatingSvg
+        : this.sanitizeSeatingSvg(dto.seatingSvg, "update");
+
     const concertUpdateData: Prisma.ConcertUpdateInput = {
       title: dto.title,
       artistName: dto.artistName,
@@ -191,7 +198,7 @@ export class OrganizerConcertsService {
       venueName: dto.venueName,
       venueAddress: dto.venueAddress,
       bannerUrl: dto.bannerUrl,
-      seatingSvg: dto.seatingSvg,
+      seatingSvg: seatingSvgValue,
       startsAt: dto.startsAt ? startsAt : undefined,
       endsAt: dto.endsAt ? endsAt : undefined,
       performanceStartAt:
@@ -225,6 +232,19 @@ export class OrganizerConcertsService {
     await this.invalidatePublicConcertCache(concertId);
 
     return this.toOrganizerDetail(updatedConcert);
+  }
+
+  private sanitizeSeatingSvg(
+    value: string | null | undefined,
+    context: "create" | "update",
+  ): string | null {
+    try {
+      return sanitizeSeatingSvgMarkup(value);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid SVG";
+      this.logger.warn(`Rejected seating SVG during ${context} for organizer concert: ${message}`);
+      throw error;
+    }
   }
 
   async cancelOwnedConcert(

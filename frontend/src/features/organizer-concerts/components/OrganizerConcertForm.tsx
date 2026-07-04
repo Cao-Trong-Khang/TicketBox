@@ -1,13 +1,16 @@
 import { ChangeEvent, FormEvent, ReactNode, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { Button } from '../../../components/ui/Button';
 import { FormField } from '../../../components/ui/FormField';
 import { resolveAssetUrl } from '../../../lib/assets';
 import {
   createBannerPreviewUrl,
   createEmptyConcertFormValues,
+  createSeatingSvgPreviewMarkup,
   toConcertPayload,
   validateBannerFile,
   validateConcertForm,
+  validateSeatingSvgFile,
 } from '../form-helpers';
 import { OrganizerConcertFormValues, OrganizerConcertPayload } from '../types';
 
@@ -42,6 +45,14 @@ export function OrganizerConcertForm({
   const [selectedBannerFile, setSelectedBannerFile] = useState<File | null>(null);
   const [bannerPreviewUrl, setBannerPreviewUrl] = useState<string | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
+  const [seatingSvgPreviewMarkup, setSeatingSvgPreviewMarkup] = useState<string | null>(() => {
+    if (!initialValues?.seatingSvg) {
+      return null;
+    }
+
+    return sanitizeSvgMarkup(initialValues.seatingSvg);
+  });
+  const [seatingSvgError, setSeatingSvgError] = useState<string | null>(null);
   const currentBannerUrl = resolveAssetUrl(values.bannerUrl);
   const displayedBannerUrl = bannerPreviewUrl ?? currentBannerUrl;
   const resolvedBannerInputLabel =
@@ -76,6 +87,42 @@ export function OrganizerConcertForm({
     await onSubmit(toConcertPayload(values), {
       selectedBannerFile,
     });
+  };
+
+  const handleSeatingSvgChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setSeatingSvgPreviewMarkup(null);
+      setSeatingSvgError(null);
+      setValues((current) => ({ ...current, seatingSvg: '' }));
+      return;
+    }
+
+    const validation = validateSeatingSvgFile(file);
+
+    if (!validation.valid) {
+      setSeatingSvgPreviewMarkup(null);
+      setSeatingSvgError(validation.error ?? 'SVG chưa hợp lệ.');
+      setValues((current) => ({ ...current, seatingSvg: '' }));
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const previewMarkup = await createSeatingSvgPreviewMarkup(file);
+      const sanitizedMarkup = sanitizeSvgMarkup(previewMarkup);
+      setSeatingSvgPreviewMarkup(sanitizedMarkup);
+      setSeatingSvgError(null);
+      setValues((current) => ({ ...current, seatingSvg: sanitizedMarkup }));
+    } catch (error) {
+      setSeatingSvgPreviewMarkup(null);
+      setSeatingSvgError(
+        error instanceof Error ? error.message : 'Không thể đọc file SVG.',
+      );
+      setValues((current) => ({ ...current, seatingSvg: '' }));
+      event.target.value = '';
+    }
   };
 
   const handleBannerChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -236,15 +283,28 @@ export function OrganizerConcertForm({
           )}
         </FieldBlock>
 
-        <FieldBlock label="Seating SVG" error={errors.seatingSvg}>
-          <TextAreaField
-            label="Seating SVG"
-            name="seatingSvg"
-            value={values.seatingSvg}
-            onChange={handleChange('seatingSvg')}
-            disabled={isReadonly || isSubmitting}
-            rows={6}
-          />
+        <FieldBlock label="Seating SVG" error={errors.seatingSvg ?? seatingSvgError}>
+          <label className="form-field" htmlFor="concertSeatingSvg">
+            <span>Tải file SVG</span>
+            <input
+              id="concertSeatingSvg"
+              name="concertSeatingSvg"
+              type="file"
+              accept="image/svg+xml"
+              onChange={(event) => void handleSeatingSvgChange(event)}
+              disabled={isReadonly || isSubmitting}
+            />
+          </label>
+          <p className="organizer-field-help">
+            Xuất SVG từ Figma, Illustrator hoặc Inkscape. Mỗi vùng nên có data-ticket-code, data-zone hoặc id tương ứng với mã vé.
+          </p>
+          {seatingSvgPreviewMarkup ? (
+            <div className="concert-seatmap-preview" aria-label="Xem trước sơ đồ chỗ ngồi">
+              <div dangerouslySetInnerHTML={{ __html: seatingSvgPreviewMarkup }} />
+            </div>
+          ) : (
+            <p className="organizer-field-help">Chưa có sơ đồ chỗ ngồi.</p>
+          )}
         </FieldBlock>
       </div>
 
@@ -261,7 +321,7 @@ export function OrganizerConcertForm({
 
 type FieldBlockProps = {
   children: ReactNode;
-  error?: string;
+  error?: string | null;
   label: string;
 };
 
@@ -308,4 +368,14 @@ function TextAreaField({
       />
     </label>
   );
+}
+
+function sanitizeSvgMarkup(markup: string): string {
+  return DOMPurify.sanitize(markup, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    ALLOWED_TAGS: ['svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'text', 'line', 'polyline', 'polygon'],
+    ALLOWED_ATTR: ['id', 'class', 'data-zone', 'data-ticket-code', 'viewBox', 'fill', 'stroke', 'stroke-width', 'opacity', 'transform', 'x', 'y', 'width', 'height', 'd', 'points', 'cx', 'cy', 'r', 'rx', 'ry'],
+    FORBID_TAGS: ['script', 'foreignObject', 'iframe', 'object', 'embed', 'form', 'input'],
+    FORBID_ATTR: ['onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'style'],
+  });
 }
