@@ -4,6 +4,10 @@ import {
   OrganizerConcertPayload,
 } from './types';
 
+export const BANNER_MAX_FILE_SIZE = 5_242_880;
+const ALLOWED_BANNER_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const ALLOWED_BANNER_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+
 export function createEmptyConcertFormValues(): OrganizerConcertFormValues {
   return {
     title: '',
@@ -105,6 +109,54 @@ export function toConcertPayload(
     endsAt: dateTimeLocalValueToIso(values.endsAt),
     performanceStartAt: dateTimeLocalValueToIso(values.performanceStartAt),
   };
+}
+
+export function validateBannerFile(file: File): { valid: boolean; error?: string } {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+
+  if (!ALLOWED_BANNER_EXTENSIONS.has(extension)) {
+    return {
+      valid: false,
+      error: 'Chỉ chấp nhận file JPEG, PNG hoặc WebP.',
+    };
+  }
+
+  if (!ALLOWED_BANNER_MIME_TYPES.has(file.type.toLowerCase())) {
+    return {
+      valid: false,
+      error: 'Chỉ chấp nhận file JPEG, PNG hoặc WebP.',
+    };
+  }
+
+  if (file.size > BANNER_MAX_FILE_SIZE) {
+    return {
+      valid: false,
+      error: 'File phải nhỏ hơn hoặc bằng 5 MB.',
+    };
+  }
+
+  return { valid: true };
+}
+
+export function createBannerPreviewUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error('Không thể đọc file xem trước.'));
+    };
+
+    reader.onerror = () => {
+      reject(new Error('Không thể đọc file xem trước.'));
+    };
+
+    reader.readAsDataURL(file);
+  });
 }
 
 export function isoToDateTimeLocalValue(isoString: string | null): string {

@@ -71,7 +71,9 @@ services:
       - >-
         mc alias set ticketbox http://minio:9000 ticketbox ticketbox-minio-secret &&
         mc mb --ignore-existing ticketbox/artist-documents &&
-        mc anonymous set none ticketbox/artist-documents
+        mc anonymous set none ticketbox/artist-documents &&
+        mc mb --ignore-existing ticketbox/concert-banners &&
+        mc anonymous set none ticketbox/concert-banners
 
   backend:
     build:
@@ -105,6 +107,9 @@ services:
       MINIO_SECRET_KEY: ticketbox-minio-secret
       MINIO_BUCKET: artist-documents
       MINIO_TIMEOUT_MS: 10000
+      BANNERS_MAX_FILE_SIZE: 5242880
+      BANNERS_BUCKET: concert-banners
+      BANNERS_CACHE_MAX_AGE: 86400
       JWT_ACCESS_SECRET: local-development-jwt-secret
       JWT_ACCESS_TOKEN_TTL: 1h
       CHECK_IN_QR_HMAC_SECRET: local-development-check-in-qr-secret-1234567890

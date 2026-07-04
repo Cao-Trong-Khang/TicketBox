@@ -3,7 +3,7 @@ import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { OrganizerConcertForm } from '../components/OrganizerConcertForm';
 import { OrganizerTicketTypeDraftSection, OrganizerTicketTypeDraft } from '../components/OrganizerTicketTypeDraftSection';
-import { activateOrganizerTicketType, createOrganizerConcert, createOrganizerTicketType } from '../api';
+import { activateOrganizerTicketType, createOrganizerConcert, createOrganizerTicketType, uploadConcertBanner } from '../api';
 import { hasTicketDraftValidationErrors } from '../ticket-type-draft-helpers';
 import { OrganizerConcertPayload, OrganizerTicketTypePayload } from '../types';
 import { ApiError } from '../../../lib/api-client';
@@ -16,7 +16,10 @@ export function OrganizerConcertCreatePage() {
   const [ticketDrafts, setTicketDrafts] = useState<OrganizerTicketTypeDraft[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (payload: OrganizerConcertPayload) => {
+  const handleSubmit = async (
+    payload: OrganizerConcertPayload,
+    options: { selectedBannerFile: File | null },
+  ) => {
     setError(null);
     setRecoveryConcertId(null);
 
@@ -32,7 +35,17 @@ export function OrganizerConcertCreatePage() {
     setIsSubmitting(true);
 
     try {
-      const createdConcert = await createOrganizerConcert(payload);
+      let nextPayload = payload;
+
+      if (options.selectedBannerFile) {
+        const uploadResponse = await uploadConcertBanner(options.selectedBannerFile);
+        nextPayload = {
+          ...payload,
+          bannerUrl: uploadResponse.bannerUrl,
+        };
+      }
+
+      const createdConcert = await createOrganizerConcert(nextPayload);
 
       if (!createdConcert.id) {
         navigate('/organizer/concerts');
@@ -125,6 +138,7 @@ export function OrganizerConcertCreatePage() {
             <OrganizerConcertForm
               submitLabel="Tạo concert"
               isSubmitting={isSubmitting}
+              bannerInputLabel="Chọn banner concert"
               onSubmit={handleSubmit}
             >
               <OrganizerTicketTypeDraftSection

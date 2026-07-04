@@ -1,5 +1,6 @@
 import { apiFetch } from '../../lib/api-client';
 import {
+  BannerUploadResponse,
   OrganizerConcertDetail,
   OrganizerConcertListItem,
   OrganizerConcertPayload,
@@ -17,6 +18,43 @@ export function createOrganizerConcert(
   return apiFetch<OrganizerConcertDetail>('/organizer/concerts', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export function uploadConcertBanner(file: File): Promise<BannerUploadResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  return apiFetch<BannerUploadResponse>('/organizer/concerts/banners', {
+    method: 'POST',
+    body: formData,
+  }).catch((error: unknown) => {
+    if (typeof error === 'object' && error !== null && 'status' in error) {
+      const apiError = error as { status: number; message: string };
+
+      if (apiError.status === 400) {
+        throw {
+          ...apiError,
+          message: apiError.message || 'Ảnh banner chưa hợp lệ.',
+        };
+      }
+
+      if (apiError.status === 413) {
+        throw {
+          ...apiError,
+          message: 'File banner phải nhỏ hơn hoặc bằng 5 MB.',
+        };
+      }
+
+      if (apiError.status === 503) {
+        throw {
+          ...apiError,
+          message: 'Không thể tải banner lên lúc này. Vui lòng thử lại.',
+        };
+      }
+    }
+
+    throw error;
   });
 }
 

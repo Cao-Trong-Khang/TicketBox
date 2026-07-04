@@ -1,23 +1,31 @@
 import { ChangeEvent, FormEvent, ReactNode, useState } from 'react';
 import { Button } from '../../../components/ui/Button';
 import { FormField } from '../../../components/ui/FormField';
+import { resolveAssetUrl } from '../../../lib/assets';
 import {
+  createBannerPreviewUrl,
   createEmptyConcertFormValues,
   toConcertPayload,
+  validateBannerFile,
   validateConcertForm,
 } from '../form-helpers';
 import { OrganizerConcertFormValues, OrganizerConcertPayload } from '../types';
 
 type OrganizerConcertFormProps = {
+  bannerInputLabel?: string;
   children?: ReactNode;
   initialValues?: OrganizerConcertFormValues;
   isSubmitting?: boolean;
   isReadonly?: boolean;
   submitLabel: string;
-  onSubmit: (payload: OrganizerConcertPayload) => Promise<void>;
+  onSubmit: (
+    payload: OrganizerConcertPayload,
+    options: { selectedBannerFile: File | null },
+  ) => Promise<void>;
 };
 
 export function OrganizerConcertForm({
+  bannerInputLabel,
   children,
   initialValues,
   isSubmitting = false,
@@ -31,6 +39,13 @@ export function OrganizerConcertForm({
   const [errors, setErrors] = useState<
     Partial<Record<keyof OrganizerConcertFormValues, string>>
   >({});
+  const [selectedBannerFile, setSelectedBannerFile] = useState<File | null>(null);
+  const [bannerPreviewUrl, setBannerPreviewUrl] = useState<string | null>(null);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+  const currentBannerUrl = resolveAssetUrl(values.bannerUrl);
+  const displayedBannerUrl = bannerPreviewUrl ?? currentBannerUrl;
+  const resolvedBannerInputLabel =
+    bannerInputLabel ?? (currentBannerUrl ? 'Replace banner' : 'Chọn banner concert');
 
   const handleChange =
     (field: keyof OrganizerConcertFormValues) =>
@@ -58,7 +73,44 @@ export function OrganizerConcertForm({
       return;
     }
 
-    await onSubmit(toConcertPayload(values));
+    await onSubmit(toConcertPayload(values), {
+      selectedBannerFile,
+    });
+  };
+
+  const handleBannerChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setSelectedBannerFile(null);
+      setBannerPreviewUrl(null);
+      setBannerError(null);
+      return;
+    }
+
+    const validation = validateBannerFile(file);
+
+    if (!validation.valid) {
+      setSelectedBannerFile(null);
+      setBannerPreviewUrl(null);
+      setBannerError(validation.error ?? 'Banner chưa hợp lệ.');
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const previewUrl = await createBannerPreviewUrl(file);
+      setSelectedBannerFile(file);
+      setBannerPreviewUrl(previewUrl);
+      setBannerError(null);
+    } catch (error) {
+      setSelectedBannerFile(null);
+      setBannerPreviewUrl(null);
+      setBannerError(
+        error instanceof Error ? error.message : 'Không thể đọc file xem trước.',
+      );
+      event.target.value = '';
+    }
   };
 
   return (
@@ -160,15 +212,28 @@ export function OrganizerConcertForm({
           />
         </FieldBlock>
 
-        <FieldBlock label="Banner URL" error={errors.bannerUrl}>
-          <FormField
-            label="Banner URL"
-            name="bannerUrl"
-            type="url"
-            value={values.bannerUrl}
-            onChange={handleChange('bannerUrl')}
-            disabled={isReadonly || isSubmitting}
-          />
+        <FieldBlock label={resolvedBannerInputLabel} error={bannerError ?? errors.bannerUrl}>
+          <label className="form-field" htmlFor="concertBanner">
+            <span>{resolvedBannerInputLabel}</span>
+            <input
+              id="concertBanner"
+              name="concertBanner"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(event) => void handleBannerChange(event)}
+              disabled={isReadonly || isSubmitting}
+            />
+          </label>
+          <p className="organizer-field-help">
+            JPEG, PNG hoặc WebP. Tối đa 5 MB.
+          </p>
+          {displayedBannerUrl && (
+            <img
+              className="organizer-banner-preview"
+              src={displayedBannerUrl}
+              alt="Banner preview"
+            />
+          )}
         </FieldBlock>
 
         <FieldBlock label="Seating SVG" error={errors.seatingSvg}>
