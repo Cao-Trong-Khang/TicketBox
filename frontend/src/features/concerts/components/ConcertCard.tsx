@@ -1,6 +1,7 @@
 import { CalendarDays, MapPin, Music2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../../components/ui/Button';
+import { resolveAssetUrl } from '../../../lib/assets';
 import { formatConcertDate, formatPrice } from '../api';
 import { Concert } from '../types';
 
@@ -12,14 +13,15 @@ type ConcertCardProps = {
 export function ConcertCard({ concert, onNavigate }: ConcertCardProps) {
   const [hasImageError, setHasImageError] = useState(false);
   const handleNavigate = () => onNavigate(concert.id);
-  const shouldShowBanner = Boolean(concert.bannerUrl) && !hasImageError;
+  const bannerUrl = resolveAssetUrl(concert.bannerUrl);
+  const shouldShowBanner = Boolean(bannerUrl) && !hasImageError;
 
   return (
     <article className="concert-card">
       {shouldShowBanner ? (
         <img
           className="concert-card-banner"
-          src={concert.bannerUrl ?? undefined}
+          src={bannerUrl ?? undefined}
           alt={concert.title}
           onError={() => setHasImageError(true)}
         />

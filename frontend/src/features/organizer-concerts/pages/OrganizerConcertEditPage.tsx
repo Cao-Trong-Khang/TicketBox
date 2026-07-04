@@ -7,6 +7,7 @@ import {
   createOrganizerTicketType,
   getOrganizerConcertDetail,
   getOrganizerTicketTypes,
+  uploadConcertBanner,
   updateOrganizerConcert,
   updateOrganizerTicketType,
 } from '../api';
@@ -113,7 +114,10 @@ export function OrganizerConcertEditPage() {
     }
   };
 
-  const handleSubmit = async (payload: OrganizerConcertPayload) => {
+  const handleSubmit = async (
+    payload: OrganizerConcertPayload,
+    options: { selectedBannerFile: File | null },
+  ) => {
     if (!id) {
       return;
     }
@@ -123,7 +127,17 @@ export function OrganizerConcertEditPage() {
     setIsSubmitting(true);
 
     try {
-      const updatedConcert = await updateOrganizerConcert(id, payload);
+      let nextPayload = payload;
+
+      if (options.selectedBannerFile) {
+        const uploadResponse = await uploadConcertBanner(options.selectedBannerFile);
+        nextPayload = {
+          ...payload,
+          bannerUrl: uploadResponse.bannerUrl,
+        };
+      }
+
+      const updatedConcert = await updateOrganizerConcert(id, nextPayload);
       setConcert(updatedConcert);
       setFeedback('Đã lưu thay đổi cho concert.');
     } catch (err: unknown) {
@@ -248,6 +262,7 @@ export function OrganizerConcertEditPage() {
               submitLabel="Lưu thay đổi"
               isSubmitting={isSubmitting}
               isReadonly={isReadonly}
+              bannerInputLabel="Replace banner"
               onSubmit={handleSubmit}
             />
 

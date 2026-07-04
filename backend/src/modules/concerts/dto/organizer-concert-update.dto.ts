@@ -3,7 +3,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUrl,
   ValidateIf,
 } from "class-validator";
 
@@ -33,7 +32,7 @@ export class OrganizerConcertUpdateDto {
   venueAddress?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
   bannerUrl?: string | null;
 
   @IsOptional()

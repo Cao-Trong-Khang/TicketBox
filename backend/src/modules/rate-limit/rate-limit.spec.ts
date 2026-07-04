@@ -65,7 +65,7 @@ test('rate limiting protects auth, orders, and organizer mutations with 429 resp
       })
       .expect(201);
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
       await request(app.getHttpServer())
         .post('/auth/login')
         .set('x-forwarded-for', '10.0.0.3')

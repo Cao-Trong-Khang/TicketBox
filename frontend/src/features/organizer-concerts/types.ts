@@ -58,6 +58,10 @@ export type OrganizerConcertFormValues = {
   performanceStartAt: string;
 };
 
+export type BannerUploadResponse = {
+  bannerUrl: string;
+};
+
 export type OrganizerTicketTypeStatus = 'ACTIVE' | 'INACTIVE' | string;
 
 export type OrganizerTicketType = {

@@ -5,6 +5,7 @@ export type PostgresConfig = { host: string; port: number; user: string; passwor
 export type RedisConfig = { host: string; port: number };
 export type KafkaConfig = { brokers: string[] };
 export type JwtConfig = { accessSecret: string; accessTokenTtl: string };
+export type BannersConfig = { maxFileSize: number; bucket: string; cacheMaxAge: number };
 
 export type ArtistBioConfig = {
   topic: string;
@@ -105,6 +106,14 @@ export function getJwtConfig(configService: ConfigService): JwtConfig {
   const accessSecret = configService.get<string>('JWT_ACCESS_SECRET', 'local-development-jwt-secret');
   if (!accessSecret.trim()) throw new Error('Invalid empty environment value for JWT_ACCESS_SECRET');
   return { accessSecret, accessTokenTtl: configService.get<string>('JWT_ACCESS_TOKEN_TTL', '1h') };
+}
+
+export function getBannersConfig(configService: ConfigService): BannersConfig {
+  return {
+    maxFileSize: readPositiveNumber(configService, 'BANNERS_MAX_FILE_SIZE', 5_242_880),
+    bucket: readRequired(configService, 'BANNERS_BUCKET', 'concert-banners'),
+    cacheMaxAge: readPositiveNumber(configService, 'BANNERS_CACHE_MAX_AGE', 86_400),
+  };
 }
 
 function readNumber(configService: ConfigService, key: string, fallback: number): number {

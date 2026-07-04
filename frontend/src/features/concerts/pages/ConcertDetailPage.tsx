@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
+import { resolveAssetUrl } from '../../../lib/assets';
 import { createOrder } from '../../orders/api';
 import { userHasRole } from '../../auth/session';
 import { formatConcertDate, getConcertDetail, getConcertTicketTypes } from '../api';
@@ -184,7 +185,8 @@ export function ConcertDetailPage() {
     return <p className="concerts-empty">Sự kiện không tồn tại</p>;
   }
 
-  const shouldShowBanner = Boolean(concertDetail.bannerUrl) && !hasBannerError;
+  const bannerUrl = resolveAssetUrl(concertDetail.bannerUrl);
+  const shouldShowBanner = Boolean(bannerUrl) && !hasBannerError;
   const isOrganizer = userHasRole('ORGANIZER');
 
   return (
@@ -194,7 +196,7 @@ export function ConcertDetailPage() {
           {shouldShowBanner ? (
             <img
               className="concert-card-banner"
-              src={concertDetail.bannerUrl ?? undefined}
+              src={bannerUrl ?? undefined}
               alt={concertDetail.title}
               onError={() => setHasBannerError(true)}
             />
