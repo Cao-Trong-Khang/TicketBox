@@ -275,11 +275,13 @@ export function OrganizerConcertForm({
             JPEG, PNG hoặc WebP. Tối đa 5 MB.
           </p>
           {displayedBannerUrl && (
-            <img
-              className="organizer-banner-preview"
-              src={displayedBannerUrl}
-              alt="Banner preview"
-            />
+            <div className="organizer-banner-preview-wrapper">
+              <img
+                className="organizer-banner-preview"
+                src={displayedBannerUrl}
+                alt="Banner preview"
+              />
+            </div>
           )}
         </FieldBlock>
 
@@ -300,7 +302,7 @@ export function OrganizerConcertForm({
           </p>
           {seatingSvgPreviewMarkup ? (
             <div className="concert-seatmap-preview" aria-label="Xem trước sơ đồ chỗ ngồi">
-              <div dangerouslySetInnerHTML={{ __html: seatingSvgPreviewMarkup }} />
+              <div className="concert-seatmap-preview-inner" dangerouslySetInnerHTML={{ __html: seatingSvgPreviewMarkup }} />
             </div>
           ) : (
             <p className="organizer-field-help">Chưa có sơ đồ chỗ ngồi.</p>

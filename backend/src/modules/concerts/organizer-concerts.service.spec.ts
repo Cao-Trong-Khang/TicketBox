@@ -169,6 +169,49 @@ test("organizer create rejects unsafe SVG payloads", async () => {
   );
 });
 
+test("organizer create and update preserve layout-safe SVG attributes", async () => {
+  const organizerId = "00000000-0000-4000-8000-000000000001";
+  const concertId = "10101010-1010-4101-8101-101010101010";
+  const service = createService(
+    createState({
+      concerts: [
+        createConcert({
+          id: concertId,
+          organizerId,
+          startsAt: new Date("2099-08-01T12:00:00.000Z"),
+          endsAt: new Date("2099-08-01T15:00:00.000Z"),
+        }),
+      ],
+      userRoles: [createUserRole(organizerId, "role-organizer")],
+    }),
+  );
+
+  const created = await service.createConcert(organizerId, {
+    title: "SVG Concert",
+    artistName: "Artist",
+    venueName: "Venue",
+    venueAddress: "Address",
+    seatingSvg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"><text font-size="14" text-anchor="middle" dominant-baseline="middle">Seat</text></svg>',
+    startsAt: "2099-08-01T12:00:00.000Z",
+    endsAt: "2099-08-01T15:00:00.000Z",
+    performanceStartAt: "2099-08-01T19:00:00.000Z",
+  });
+
+  assert.match(created.seatingSvg!, /viewBox="0 0 100 100"/);
+  assert.match(created.seatingSvg!, /preserveAspectRatio="xMidYMid meet"/);
+  assert.match(created.seatingSvg!, /font-size="14"/);
+  assert.match(created.seatingSvg!, /text-anchor="middle"/);
+  assert.match(created.seatingSvg!, /dominant-baseline="middle"/);
+
+  const updated = await service.updateOwnedConcert(organizerId, concertId, {
+    seatingSvg: '<svg viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet"><text dominant-baseline="middle">Seat</text></svg>',
+  });
+
+  assert.match(updated.seatingSvg!, /viewBox="0 0 200 200"/);
+  assert.match(updated.seatingSvg!, /preserveAspectRatio="xMidYMid meet"/);
+  assert.match(updated.seatingSvg!, /dominant-baseline="middle"/);
+});
+
 test("organizer create rejects invalid date range", async () => {
   const organizerId = "00000000-0000-4000-8000-000000000001";
   const service = createService(

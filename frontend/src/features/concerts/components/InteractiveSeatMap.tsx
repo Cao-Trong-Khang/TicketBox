@@ -95,10 +95,12 @@ export function InteractiveSeatMap({ svgMarkup, ticketTypes }: InteractiveSeatMa
 
   return (
     <div className="concert-seatmap-interactive">
-      <div
-        className="concert-seatmap-svg"
-        dangerouslySetInnerHTML={{ __html: sanitizedMarkup }}
-      />
+      <div className="concert-seatmap-svg-wrapper">
+        <div
+          className="concert-seatmap-svg concert-seatmap-svg-content"
+          dangerouslySetInnerHTML={{ __html: sanitizedMarkup }}
+        />
+      </div>
       <div className="concert-seatmap-legend" aria-label="Thông tin hạng vé">
         {zones.length === 0 ? (
           <p>Không phát hiện vùng vé nào trong sơ đồ.</p>

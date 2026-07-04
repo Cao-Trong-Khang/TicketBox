@@ -42,7 +42,7 @@ export class OrganizerConcertsController {
   @RateLimit({
     keyPrefix: "organizer-mutation",
     limit: 20,
-    ttlSeconds: 5 * 60,
+    ttlSeconds: 60,
     identity: "user_or_ip",
   })
   createConcert(
@@ -68,7 +68,7 @@ export class OrganizerConcertsController {
   @RateLimit({
     keyPrefix: "organizer-mutation",
     limit: 20,
-    ttlSeconds: 5 * 60,
+    ttlSeconds: 60,
     identity: "user_or_ip",
   })
   updateOwnedConcert(
@@ -88,7 +88,7 @@ export class OrganizerConcertsController {
   @RateLimit({
     keyPrefix: "organizer-mutation",
     limit: 20,
-    ttlSeconds: 5 * 60,
+    ttlSeconds: 60,
     identity: "user_or_ip",
   })
   cancelOwnedConcert(
