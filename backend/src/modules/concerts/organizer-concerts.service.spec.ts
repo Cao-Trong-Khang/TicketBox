@@ -61,6 +61,8 @@ test("organizer list returns only owned concerts ordered by createdAt descending
   );
   assert.equal(response[0].status, ConcertStatus.PUBLISHED);
   assert.equal(response[0].lifecycleStatus, "UPCOMING");
+  assert.equal(response[0].bannerUrl, "https://example.test/banner.jpg");
+  assert.equal(response[0].venueAddress, "District 1");
   assert.equal(response[0].performanceStartAt, "2099-07-02T14:00:00.000Z");
   assert.equal(response[1].status, ConcertStatus.CANCELLED);
   assert.equal(response[1].lifecycleStatus, "UPCOMING");
@@ -772,6 +774,8 @@ function toConcertListRecord(concert: Concert) {
     title: concert.title,
     artistName: concert.artistName,
     venueName: concert.venueName,
+    venueAddress: concert.venueAddress,
+    bannerUrl: concert.bannerUrl,
     startsAt: concert.startsAt,
     endsAt: concert.endsAt,
     performanceStartAt: concert.performanceStartAt,
