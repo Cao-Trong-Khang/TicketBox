@@ -42,6 +42,37 @@ describe('OrganizerConcertForm', () => {
     expect(screen.getByLabelText('Thời gian bắt đầu concert')).toBeInTheDocument();
   });
 
+  it('renders responsive preview wrappers for uploaded banner and SVG media', async () => {
+    render(
+      <OrganizerConcertForm submitLabel="Tạo concert" onSubmit={vi.fn().mockResolvedValue(undefined)} />,
+    );
+
+    const bannerFile = new File(['banner'], 'banner.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByLabelText('Chọn banner concert'), {
+      target: { files: [bannerFile] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByAltText('Banner preview')).toBeInTheDocument();
+    });
+
+    expect(screen.getByAltText('Banner preview').closest('.organizer-banner-preview-wrapper')).toBeInTheDocument();
+
+    const svgFile = new File(['<svg><rect width="10" height="10" /></svg>'], 'map.svg', {
+      type: 'image/svg+xml',
+    });
+
+    fireEvent.change(screen.getByLabelText('Tải file SVG'), {
+      target: { files: [svgFile] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Xem trước sơ đồ chỗ ngồi')).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText('Xem trước sơ đồ chỗ ngồi').querySelector('.concert-seatmap-preview-inner')).toBeInTheDocument();
+  });
+
   it('validates that concert performance starts after the sale window closes', async () => {
     render(
       <OrganizerConcertForm submitLabel="Tạo concert" onSubmit={vi.fn().mockResolvedValue(undefined)} />,

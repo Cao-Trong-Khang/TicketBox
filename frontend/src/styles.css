@@ -855,11 +855,56 @@ h1 {
   padding: 18px;
 }
 
-.concert-seatmap svg {
+.concert-seatmap-interactive {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.concert-seatmap-svg-wrapper,
+.concert-seatmap-preview,
+.organizer-banner-preview-wrapper {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.concert-seatmap-svg,
+.concert-seatmap-preview-inner,
+.organizer-banner-preview {
   display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.concert-seatmap-svg svg,
+.concert-seatmap-preview-inner svg {
+  display: block;
+  width: 100%;
   max-width: 100%;
   height: auto;
   margin: 0 auto;
+}
+
+.concert-seatmap-preview {
+  padding: 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.organizer-banner-preview-wrapper {
+  padding: 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.organizer-banner-preview {
+  aspect-ratio: 16 / 9;
 }
 
 .concert-seatmap-placeholder {
