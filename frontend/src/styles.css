@@ -485,6 +485,10 @@ h1 {
   gap: 16px;
 }
 
+.organizer-dashboard-grid {
+  align-items: stretch;
+}
+
 .organizer-editor-page {
   min-height: calc(100vh - 184px);
 }
@@ -619,6 +623,27 @@ h1 {
 
 .organizer-concert-meta p {
   margin: 0;
+}
+
+.organizer-dashboard-card {
+  height: 100%;
+}
+
+.organizer-dashboard-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.organizer-dashboard-card-footer {
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.organizer-dashboard-card-footer .organizer-concert-actions {
+  width: 100%;
+  justify-content: flex-end;
 }
 
 .organizer-status {
@@ -1239,6 +1264,19 @@ h1 {
 
   .organizer-concert-card-topline {
     flex-direction: column;
+  }
+
+  .organizer-dashboard-card-header {
+    flex-direction: column;
+  }
+
+  .organizer-dashboard-card-footer,
+  .organizer-dashboard-card-footer .organizer-concert-actions {
+    justify-content: stretch;
+  }
+
+  .organizer-dashboard-card-footer .organizer-concert-actions .button {
+    width: 100%;
   }
 
   .organizer-editor-topbar {

@@ -27,6 +27,8 @@ type OrganizerConcertListQueryResult = {
   title: string;
   artistName: string | null;
   venueName: string;
+  venueAddress: string | null;
+  bannerUrl: string | null;
   startsAt: Date;
   endsAt: Date | null;
   performanceStartAt: Date | null;
@@ -81,6 +83,8 @@ export class OrganizerConcertsService {
         title: true,
         artistName: true,
         venueName: true,
+        venueAddress: true,
+        bannerUrl: true,
         startsAt: true,
         endsAt: true,
         performanceStartAt: true,
@@ -492,6 +496,8 @@ export class OrganizerConcertsService {
       title: concert.title,
       artistName: concert.artistName,
       venueName: concert.venueName,
+      venueAddress: concert.venueAddress,
+      bannerUrl: concert.bannerUrl,
       startsAt: concert.startsAt.toISOString(),
       endsAt: concert.endsAt?.toISOString() ?? null,
       performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
