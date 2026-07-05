@@ -1,9 +1,16 @@
 package com.ticketbox.checkin
 
-import androidx.compose.material3.MaterialTheme
+import android.Manifest
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -26,27 +33,85 @@ import com.ticketbox.checkin.data.network.ApiSyncResponse
 import com.ticketbox.checkin.data.network.CheckInApiService
 import com.ticketbox.checkin.data.session.StaffSession
 import com.ticketbox.checkin.domain.LocalScanResult
+import com.ticketbox.checkin.ui.components.EmptyState
+import com.ticketbox.checkin.ui.components.LoadingState
+import com.ticketbox.checkin.ui.components.StatusBadge
+import com.ticketbox.checkin.ui.components.TicketBoxPrimaryButton
+import com.ticketbox.checkin.ui.navigation.EventShell
+import com.ticketbox.checkin.ui.navigation.StaffTab
+import com.ticketbox.checkin.ui.navigation.VipResultKind
+import com.ticketbox.checkin.ui.navigation.VipResultState
+import com.ticketbox.checkin.ui.screens.auth.LoginScreen
+import com.ticketbox.checkin.ui.screens.events.AssignedEventsScreen
+import com.ticketbox.checkin.ui.screens.history.HistoryScreen
+import com.ticketbox.checkin.ui.screens.profile.ProfileScreen
+import com.ticketbox.checkin.ui.screens.scan.ManualInputScreen
+import com.ticketbox.checkin.ui.screens.scan.ScanScreen
+import com.ticketbox.checkin.ui.screens.sync.OfflineModeNoticeScreen
+import com.ticketbox.checkin.ui.screens.sync.SyncConflictScreen
+import com.ticketbox.checkin.ui.screens.sync.SyncQueueScreen
+import com.ticketbox.checkin.ui.screens.ticketresult.TicketResultScreen
+import com.ticketbox.checkin.ui.screens.vip.VipGuestDetailScreen
+import com.ticketbox.checkin.ui.screens.vip.VipResultScreen
+import com.ticketbox.checkin.ui.screens.vip.VipScreen
+import com.ticketbox.checkin.ui.theme.TicketBoxTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import androidx.test.platform.app.InstrumentationRegistry
 
 class MobileScreensComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
 
     @Test
-    fun loginAndAssignedEventsScreensShowStaffOnlyEntryFlow() {
-        var loginRequest: Pair<String, String>? = null
+    fun sharedDesignSystemComponentsExposeStateLabelsAndActionDescriptions() {
+        var retryClicked = false
 
         composeRule.setContent {
-            MaterialTheme {
-                LoginScreen(
-                    onLogin = { emailOrPhone, password -> loginRequest = emailOrPhone to password },
-                    statusMessage = "Invalid login",
-                )
+            TicketBoxTheme {
+                Column {
+                    StatusBadge("Pending Sync")
+                    EmptyState("No VIP guests loaded")
+                    LoadingState("Loading assignments")
+                    TicketBoxPrimaryButton(
+                        label = "Retry",
+                        onClick = { retryClicked = true },
+                        contentDescription = "Retry sync action",
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Pending Sync").assertIsDisplayed()
+        composeRule.onNodeWithText("No VIP guests loaded").assertIsDisplayed()
+        composeRule.onNodeWithText("Loading assignments").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Retry sync action").performClick()
+        assertTrue(retryClicked)
+    }
+
+    @Test
+    fun loginAndAssignedEventsScreensShowStaffOnlyEntryFlow() {
+        var loginRequest: Pair<String, String>? = null
+        var screen by mutableStateOf("login")
+
+        composeRule.setContent {
+            TicketBoxTheme {
+                when (screen) {
+                    "login" -> LoginScreen(
+                        onLogin = { emailOrPhone, password -> loginRequest = emailOrPhone to password },
+                        statusMessage = "Invalid login",
+                    )
+                    "events" -> AssignedEventsScreen(
+                        assignments = listOf(assignment()),
+                        statusMessage = "Check-in Staff account required",
+                        onRefresh = {},
+                        onSelect = {},
+                    )
+                }
             }
         }
 
@@ -57,16 +122,7 @@ class MobileScreensComposeTest {
         composeRule.onNodeWithText("Log In").performClick()
         assertEquals("staff@example.test" to "CorrectHorse1!", loginRequest)
 
-        composeRule.setContent {
-            MaterialTheme {
-                AssignedEventsScreen(
-                    assignments = listOf(assignment()),
-                    statusMessage = "Check-in Staff account required",
-                    onRefresh = {},
-                    onSelect = {},
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "events" }
 
         composeRule.onNodeWithText("Assigned Events").assertIsDisplayed()
         composeRule.onNodeWithText("Check-in Staff account required").assertIsDisplayed()
@@ -89,7 +145,7 @@ class MobileScreensComposeTest {
         )
 
         composeRule.setContent {
-            MaterialTheme {
+            TicketBoxTheme {
                 EventShell(
                     repository = repository,
                     assignment = assignment(),
@@ -114,9 +170,14 @@ class MobileScreensComposeTest {
 
         composeRule.onNodeWithText("Dashboard").assertExists()
         composeRule.onNodeWithText("Scan").assertExists()
-        composeRule.onNodeWithText("VIP").assertExists()
+        composeRule.onAllNodesWithText("VIP").assertCountEquals(2)
         composeRule.onNodeWithText("History").assertExists()
         composeRule.onNodeWithText("Profile").assertExists()
+        composeRule.onNodeWithContentDescription("Dashboard tab").assertExists()
+        composeRule.onNodeWithContentDescription("Scan tab").assertExists()
+        composeRule.onNodeWithContentDescription("VIP tab").assertExists()
+        composeRule.onNodeWithContentDescription("History tab").assertExists()
+        composeRule.onNodeWithContentDescription("Profile tab").assertExists()
         composeRule.onNodeWithText("TicketBox Live").assertIsDisplayed()
         composeRule.onNodeWithText("Saigon Arena / Gate A").assertIsDisplayed()
         composeRule.onNodeWithText("Tickets").assertIsDisplayed()
@@ -132,20 +193,31 @@ class MobileScreensComposeTest {
 
     @Test
     fun scanAndManualInputScreensRouteValidationAndEmptyInput() {
+        grantCameraPermission()
+
         var manualOpened = false
         var scanOutcome: LocalScanOutcome? = null
         var manualCode: String? = null
         val repository = repository(tickets = listOf(ticket()))
+        var screen by mutableStateOf("scan")
 
         composeRule.setContent {
-            MaterialTheme {
-                ScanScreen(
-                    repository = repository,
-                    assignment = assignment(),
-                    isOnline = false,
-                    onOpenManualInput = { manualOpened = true },
-                    onShowResult = { scanOutcome = it },
-                )
+            TicketBoxTheme {
+                when (screen) {
+                    "scan" -> ScanScreen(
+                        repository = repository,
+                        assignment = assignment(),
+                        isOnline = false,
+                        onOpenManualInput = { manualOpened = true },
+                        onShowResult = { scanOutcome = it },
+                    )
+                    "manual" -> ManualInputScreen(
+                        assignment = assignment(),
+                        isOnline = true,
+                        onBack = {},
+                        onValidate = { manualCode = it },
+                    )
+                }
             }
         }
 
@@ -160,16 +232,7 @@ class MobileScreensComposeTest {
         composeRule.waitUntil(timeoutMillis = 5_000) { scanOutcome != null }
         assertEquals(LocalScanResult.Accepted, scanOutcome?.result)
 
-        composeRule.setContent {
-            MaterialTheme {
-                ManualInputScreen(
-                    assignment = assignment(),
-                    isOnline = true,
-                    onBack = {},
-                    onValidate = { manualCode = it },
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "manual" }
 
         composeRule.onNodeWithText("Manual Ticket Input").assertIsDisplayed()
         composeRule.onNodeWithText("Validate").performClick()
@@ -181,11 +244,13 @@ class MobileScreensComposeTest {
 
     @Test
     fun resultScreensSeparateValidInvalidAndDuplicateActions() {
+        var outcomeState by mutableStateOf(outcome(LocalScanResult.Accepted, "accepted", "Local scan accepted"))
+
         composeRule.setContent {
-            MaterialTheme {
+            TicketBoxTheme {
                 TicketResultScreen(
                     assignment = assignment(),
-                    outcome = outcome(LocalScanResult.Accepted, "accepted", "Local scan accepted"),
+                    outcome = outcomeState,
                     isOnline = true,
                     onConfirm = {},
                     onScanNext = {},
@@ -199,17 +264,8 @@ class MobileScreensComposeTest {
         composeRule.onNodeWithText("TICKET-001").assertIsDisplayed()
         composeRule.onNodeWithText("Linh Nguyen").assertIsDisplayed()
 
-        composeRule.setContent {
-            MaterialTheme {
-                TicketResultScreen(
-                    assignment = assignment(),
-                    outcome = outcome(LocalScanResult.Invalid, "invalid", "Ticket belongs to a different event"),
-                    isOnline = true,
-                    onConfirm = {},
-                    onScanNext = {},
-                    onManualInput = {},
-                )
-            }
+        composeRule.runOnIdle {
+            outcomeState = outcome(LocalScanResult.Invalid, "invalid", "Ticket belongs to a different event")
         }
 
         composeRule.onNodeWithText("Invalid Ticket").assertIsDisplayed()
@@ -217,17 +273,8 @@ class MobileScreensComposeTest {
         composeRule.onNodeWithText("Scan Again").assertIsDisplayed()
         composeRule.onNodeWithText("Manual Input").assertIsDisplayed()
 
-        composeRule.setContent {
-            MaterialTheme {
-                TicketResultScreen(
-                    assignment = assignment(),
-                    outcome = outcome(LocalScanResult.Duplicate, "duplicate", "Already checked in"),
-                    isOnline = true,
-                    onConfirm = {},
-                    onScanNext = {},
-                    onManualInput = {},
-                )
-            }
+        composeRule.runOnIdle {
+            outcomeState = outcome(LocalScanResult.Duplicate, "duplicate", "Already checked in")
         }
 
         composeRule.onNodeWithText("Duplicate").assertIsDisplayed()
@@ -240,6 +287,7 @@ class MobileScreensComposeTest {
     @Test
     fun vipHistoryAndProfileScreensStayScopedToSelectedAssignment() {
         var logoutClicked = false
+        var changeEventClicked = false
         val repository = repository(
             vipGuests = listOf(
                 vipGuest("vip-1", "VIP Guest One", sponsorCompany = "TicketBox Partners", guestType = "Artist Guest"),
@@ -251,16 +299,31 @@ class MobileScreensComposeTest {
                 scanLog("scan-3", "TICKET-003", "accepted", "pending"),
             ),
         )
+        var screen by mutableStateOf("vip")
 
         composeRule.setContent {
-            MaterialTheme {
-                VipScreen(
-                    repository = repository,
-                    assignment = assignment(),
-                    onSelectGuest = {},
-                    onNotFound = {},
-                    updateStatus = {},
-                )
+            TicketBoxTheme {
+                when (screen) {
+                    "vip" -> VipScreen(
+                        repository = repository,
+                        assignment = assignment(),
+                        onSelectGuest = {},
+                        onNotFound = {},
+                        updateStatus = {},
+                    )
+                    "history" -> HistoryScreen(
+                        repository = repository,
+                        assignment = assignment(),
+                        onOpenConflict = {},
+                    )
+                    "profile" -> ProfileScreen(
+                        repository = repository,
+                        assignment = assignment(),
+                        isOnline = false,
+                        onBackToAssignments = { changeEventClicked = true },
+                        onLogout = { logoutClicked = true },
+                    )
+                }
             }
         }
 
@@ -268,42 +331,26 @@ class MobileScreensComposeTest {
         composeRule.onNodeWithText("Total VIP").assertIsDisplayed()
         composeRule.onNodeWithText("Remaining VIP").assertIsDisplayed()
         composeRule.onNodeWithText("VIP Guest One").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("TicketBox Partners").assertIsDisplayed()
+        composeRule.onAllNodesWithText("TicketBox Partners").assertCountEquals(2)
         composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("missing guest")
         composeRule.onNodeWithText("Guest Not Found").performScrollTo().assertIsDisplayed()
 
-        composeRule.setContent {
-            MaterialTheme {
-                HistoryScreen(
-                    repository = repository,
-                    assignment = assignment(),
-                    onOpenConflict = {},
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "history" }
 
         composeRule.onNodeWithText("Scan History").assertIsDisplayed()
         composeRule.onNodeWithText("TICKET-001").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Duplicate").performScrollTo().performClick()
+        composeRule.onAllNodesWithText("Duplicate").assertCountEquals(2)
         composeRule.onNodeWithText("TICKET-002").performScrollTo().assertIsDisplayed()
 
-        composeRule.setContent {
-            MaterialTheme {
-                ProfileScreen(
-                    repository = repository,
-                    assignment = assignment(),
-                    isOnline = false,
-                    onBackToAssignments = {},
-                    onLogout = { logoutClicked = true },
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "profile" }
 
         composeRule.onNodeWithText("Profile").assertIsDisplayed()
         composeRule.onNodeWithText("staff@example.test").assertIsDisplayed()
         composeRule.onNodeWithText("Check-in Staff").assertIsDisplayed()
         composeRule.onNodeWithText("Pending 1").assertIsDisplayed()
         composeRule.onNodeWithText("Preload retained").assertIsDisplayed()
+        composeRule.onNodeWithText("Change Event").performClick()
+        assertTrue(changeEventClicked)
         composeRule.onNodeWithText("Logout").performClick()
         assertTrue(logoutClicked)
     }
@@ -330,15 +377,42 @@ class MobileScreensComposeTest {
                 conflictRecord,
             ),
         )
+        var screen by mutableStateOf("notice")
 
         composeRule.setContent {
-            MaterialTheme {
-                OfflineModeNoticeScreen(
-                    repository = repository,
-                    assignment = assignment(),
-                    onContinueOffline = { continuedOffline = true },
-                    onViewSyncQueue = { openedQueue = true },
-                )
+            TicketBoxTheme {
+                when (screen) {
+                    "notice" -> OfflineModeNoticeScreen(
+                        repository = repository,
+                        assignment = assignment(),
+                        onContinueOffline = { continuedOffline = true },
+                        onViewSyncQueue = { openedQueue = true },
+                    )
+                    "result" -> TicketResultScreen(
+                        assignment = assignment(),
+                        outcome = outcome(LocalScanResult.Accepted, "accepted", "Local scan accepted"),
+                        isOnline = false,
+                        onConfirm = {},
+                        onScanNext = {},
+                        onManualInput = {},
+                    )
+                    "queue" -> SyncQueueScreen(
+                        repository = repository,
+                        assignment = assignment(),
+                        isOnline = false,
+                        enqueueSync = { syncQueuedFor = it },
+                        onBack = {},
+                        onOpenConflict = { openedConflict = it },
+                        updateStatus = {},
+                    )
+                    "conflict" -> SyncConflictScreen(
+                        assignment = assignment(),
+                        scan = conflictRecord,
+                        onMarkConflict = {},
+                        onContactSupervisor = {},
+                        onBack = {},
+                    )
+                }
             }
         }
 
@@ -351,18 +425,7 @@ class MobileScreensComposeTest {
         assertTrue(continuedOffline)
         assertTrue(openedQueue)
 
-        composeRule.setContent {
-            MaterialTheme {
-                TicketResultScreen(
-                    assignment = assignment(),
-                    outcome = outcome(LocalScanResult.Accepted, "accepted", "Local scan accepted"),
-                    isOnline = false,
-                    onConfirm = {},
-                    onScanNext = {},
-                    onManualInput = {},
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "result" }
 
         composeRule.onNodeWithText("Recorded Offline").assertIsDisplayed()
         composeRule.onNodeWithText("Pending Sync").assertIsDisplayed()
@@ -370,19 +433,7 @@ class MobileScreensComposeTest {
         composeRule.onNodeWithText("Scan Next").assertIsDisplayed()
         composeRule.onNodeWithText("Confirm Check-in").assertDoesNotExist()
 
-        composeRule.setContent {
-            MaterialTheme {
-                SyncQueueScreen(
-                    repository = repository,
-                    assignment = assignment(),
-                    isOnline = false,
-                    enqueueSync = { syncQueuedFor = it },
-                    onBack = {},
-                    onOpenConflict = { openedConflict = it },
-                    updateStatus = {},
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "queue" }
 
         composeRule.onNodeWithText("Offline / Pending Sync / Pending 2").assertIsDisplayed()
         composeRule.onNodeWithText("Retry Sync").performClick()
@@ -390,17 +441,7 @@ class MobileScreensComposeTest {
         composeRule.onNodeWithText("TICKET-004").performScrollTo().performClick()
         assertEquals("scan-conflict", openedConflict?.localScanId)
 
-        composeRule.setContent {
-            MaterialTheme {
-                SyncConflictScreen(
-                    assignment = assignment(),
-                    scan = conflictRecord,
-                    onMarkConflict = {},
-                    onContactSupervisor = {},
-                    onBack = {},
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "conflict" }
 
         composeRule.onNodeWithText("Sync Conflict").assertIsDisplayed()
         composeRule.onNodeWithText("Ticket was already checked in on another device").assertIsDisplayed()
@@ -418,15 +459,50 @@ class MobileScreensComposeTest {
             sponsorCompany = "TicketBox Partners",
             guestType = "Artist Guest",
         )
+        var screen by mutableStateOf("detail")
 
         composeRule.setContent {
-            MaterialTheme {
-                VipGuestDetailScreen(
-                    assignment = assignment(),
-                    guest = guest,
-                    onBack = {},
-                    onConfirm = { confirmed = true },
-                )
+            TicketBoxTheme {
+                when (screen) {
+                    "detail" -> VipGuestDetailScreen(
+                        assignment = assignment(),
+                        guest = guest,
+                        onBack = {},
+                        onConfirm = { confirmed = true },
+                    )
+                    "success" -> VipResultScreen(
+                        assignment = assignment(),
+                        state = VipResultState(
+                            kind = VipResultKind.Success,
+                            guest = guest,
+                            outcome = outcome(LocalScanResult.Accepted, "accepted", "Local scan accepted"),
+                        ),
+                        onCheckNext = {},
+                        onSearchAgain = {},
+                        onContactSupervisor = {},
+                    )
+                    "duplicate" -> VipResultScreen(
+                        assignment = assignment(),
+                        state = VipResultState(
+                            kind = VipResultKind.Duplicate,
+                            guest = guest,
+                            outcome = outcome(LocalScanResult.Duplicate, "duplicate", "This guest was already checked in"),
+                        ),
+                        onCheckNext = {},
+                        onSearchAgain = {},
+                        onContactSupervisor = {},
+                    )
+                    "notfound" -> VipResultScreen(
+                        assignment = assignment(),
+                        state = VipResultState(
+                            kind = VipResultKind.NotFound,
+                            query = "unknown@example.test",
+                        ),
+                        onCheckNext = {},
+                        onSearchAgain = {},
+                        onContactSupervisor = {},
+                    )
+                }
             }
         }
 
@@ -437,60 +513,19 @@ class MobileScreensComposeTest {
         composeRule.onNodeWithText("Confirm VIP Check-in").performClick()
         assertTrue(confirmed)
 
-        composeRule.setContent {
-            MaterialTheme {
-                VipResultScreen(
-                    assignment = assignment(),
-                    state = VipResultState(
-                        kind = VipResultKind.Success,
-                        guest = guest,
-                        outcome = outcome(LocalScanResult.Accepted, "accepted", "Local scan accepted"),
-                    ),
-                    onCheckNext = {},
-                    onSearchAgain = {},
-                    onContactSupervisor = {},
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "success" }
 
         composeRule.onNodeWithText("VIP Checked In").assertIsDisplayed()
         composeRule.onNodeWithText("Check in next VIP guest").assertIsDisplayed()
 
-        composeRule.setContent {
-            MaterialTheme {
-                VipResultScreen(
-                    assignment = assignment(),
-                    state = VipResultState(
-                        kind = VipResultKind.Duplicate,
-                        guest = guest,
-                        outcome = outcome(LocalScanResult.Duplicate, "duplicate", "This guest was already checked in"),
-                    ),
-                    onCheckNext = {},
-                    onSearchAgain = {},
-                    onContactSupervisor = {},
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "duplicate" }
 
         composeRule.onNodeWithText("VIP Already Checked In").assertIsDisplayed()
         composeRule.onNodeWithText("This guest was already checked in").assertIsDisplayed()
         composeRule.onNodeWithText("Search Again").assertIsDisplayed()
         composeRule.onNodeWithText("Contact Supervisor").assertIsDisplayed()
 
-        composeRule.setContent {
-            MaterialTheme {
-                VipResultScreen(
-                    assignment = assignment(),
-                    state = VipResultState(
-                        kind = VipResultKind.NotFound,
-                        query = "unknown@example.test",
-                    ),
-                    onCheckNext = {},
-                    onSearchAgain = {},
-                    onContactSupervisor = {},
-                )
-            }
-        }
+        composeRule.runOnIdle { screen = "notfound" }
 
         composeRule.onNodeWithText("VIP Guest Not Found").assertIsDisplayed()
         composeRule.onNodeWithText("unknown@example.test").assertIsDisplayed()
@@ -623,6 +658,13 @@ class MobileScreensComposeTest {
         serverCheckInAtIso = serverCheckInAtIso,
         message = message,
     )
+
+    private fun grantCameraPermission() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.uiAutomation
+            .executeShellCommand("pm grant ${instrumentation.targetContext.packageName} ${Manifest.permission.CAMERA}")
+            .close()
+    }
 }
 
 private class UiFakeDao(
