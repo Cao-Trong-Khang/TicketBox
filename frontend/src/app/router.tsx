@@ -10,6 +10,7 @@ import { OrganizerConcertEditPage } from '../features/organizer-concerts/pages/O
 import { OrganizerTicketTypeManagementPage } from '../features/organizer-concerts/pages/OrganizerTicketTypeManagementPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { OrderPendingPage } from '../features/orders/pages/OrderPendingPage';
+import { OrderHistoryPage } from '../features/orders/pages/OrderHistoryPage';
 import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { getPostLoginRedirect, getStoredRoles, isAuthenticated, userHasRole } from '../features/auth/session';
 
@@ -35,6 +36,7 @@ export function AppRouter() {
       <Route path="/" element={<RedirectIfAuthenticated><Navigate to="/login" replace /></RedirectIfAuthenticated>} />
       <Route path="/concerts" element={<RequireAuth><ConcertsListPage /></RequireAuth>} />
       <Route path="/concerts/:id" element={<RequireAuth><ConcertDetailPage /></RequireAuth>} />
+      <Route path="/orders" element={<RequireAuth><OrderHistoryPage /></RequireAuth>} />
       <Route
         path="/organizer/concerts"
         element={
