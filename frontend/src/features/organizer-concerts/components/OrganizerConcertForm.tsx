@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, ReactNode, useState } from 'react';
+import { ChangeEvent, FormEvent, ReactNode, useCallback, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { Button } from '../../../components/ui/Button';
 import { FormField } from '../../../components/ui/FormField';
@@ -13,26 +13,34 @@ import {
   validateSeatingSvgFile,
 } from '../form-helpers';
 import { OrganizerConcertFormValues, OrganizerConcertPayload } from '../types';
+import { validateArtistPdf } from '../../artist-bio/pdf-validation';
 
 type OrganizerConcertFormProps = {
   bannerInputLabel?: string;
   children?: ReactNode;
+  descriptionAssistant?: (
+    applyDescription: (value: string) => void,
+    focusDescription: () => void,
+  ) => ReactNode;
   initialValues?: OrganizerConcertFormValues;
   isSubmitting?: boolean;
   isReadonly?: boolean;
+  showArtistBioUpload?: boolean;
   submitLabel: string;
   onSubmit: (
     payload: OrganizerConcertPayload,
-    options: { selectedBannerFile: File | null },
+    options: { selectedBannerFile: File | null; selectedArtistBioFile: File | null },
   ) => Promise<void>;
 };
 
 export function OrganizerConcertForm({
   bannerInputLabel,
   children,
+  descriptionAssistant,
   initialValues,
   isSubmitting = false,
   isReadonly = false,
+  showArtistBioUpload = false,
   submitLabel,
   onSubmit,
 }: OrganizerConcertFormProps) {
@@ -45,6 +53,8 @@ export function OrganizerConcertForm({
   const [selectedBannerFile, setSelectedBannerFile] = useState<File | null>(null);
   const [bannerPreviewUrl, setBannerPreviewUrl] = useState<string | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
+  const [selectedArtistBioFile, setSelectedArtistBioFile] = useState<File | null>(null);
+  const [artistBioError, setArtistBioError] = useState<string | null>(null);
   const [seatingSvgPreviewMarkup, setSeatingSvgPreviewMarkup] = useState<string | null>(() => {
     if (!initialValues?.seatingSvg) {
       return null;
@@ -86,7 +96,25 @@ export function OrganizerConcertForm({
 
     await onSubmit(toConcertPayload(values), {
       selectedBannerFile,
+      selectedArtistBioFile,
     });
+  };
+
+  const handleArtistBioChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setArtistBioError(null);
+    if (!file) {
+      setSelectedArtistBioFile(null);
+      return;
+    }
+    const validation = validateArtistPdf(file);
+    if (!validation.valid) {
+      setSelectedArtistBioFile(null);
+      setArtistBioError(validation.error);
+      event.target.value = '';
+      return;
+    }
+    setSelectedArtistBioFile(file);
   };
 
   const handleSeatingSvgChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -159,6 +187,26 @@ export function OrganizerConcertForm({
       event.target.value = '';
     }
   };
+
+  const artistBioUpload = showArtistBioUpload ? (
+    <div className="organizer-form-stack">
+      <FieldBlock label="AI Artist Bio" error={artistBioError}>
+        <label className="form-field" htmlFor="artistBioPressKit">
+          <span>Press kit PDF cho AI Artist Bio (không bắt buộc)</span>
+          <input id="artistBioPressKit" name="artistBioPressKit" type="file" accept=".pdf,application/pdf" onChange={handleArtistBioChange} disabled={isReadonly || isSubmitting} />
+        </label>
+        <p className="organizer-field-help">PDF tối đa 10 MB. Tệp chỉ được tải lên sau khi concert được tạo.</p>
+        {selectedArtistBioFile && <p className="organizer-field-help">Đã chọn: {selectedArtistBioFile.name}</p>}
+      </FieldBlock>
+    </div>
+  ) : null;
+  const applyDescription = useCallback((value: string) => {
+    setValues((current) => ({ ...current, description: value }));
+    setErrors((current) => ({ ...current, description: undefined }));
+  }, []);
+  const focusDescription = useCallback(() => {
+    document.getElementById('description')?.focus();
+  }, []);
 
   return (
     <form className="organizer-form" onSubmit={handleSubmit} noValidate>
@@ -248,6 +296,9 @@ export function OrganizerConcertForm({
       </div>
 
       <div className="organizer-form-stack">
+        {artistBioUpload}
+        {descriptionAssistant?.(applyDescription, focusDescription)}
+
         <FieldBlock label="Mô tả" error={errors.description}>
           <TextAreaField
             label="Mô tả"
@@ -255,7 +306,7 @@ export function OrganizerConcertForm({
             value={values.description}
             onChange={handleChange('description')}
             disabled={isReadonly || isSubmitting}
-            rows={5}
+            rows={8}
           />
         </FieldBlock>
 

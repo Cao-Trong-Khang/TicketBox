@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BadRequestException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ArtistDocumentStatus } from '@prisma/client';
 import { AiProviderError, ArtistBioAiProvider } from './artist-bio-ai.provider';
@@ -60,12 +60,17 @@ type ArtistServiceHarness = {
   created: unknown[];
 };
 
-function artistServiceHarness(ownerId = 'owner', publishFails = false): ArtistServiceHarness {
+function artistServiceHarness(ownerId = 'owner', publishFails = false, editable = true): ArtistServiceHarness {
   const published: unknown[] = [];
   const created: unknown[] = [];
   const prisma = {
     userRole: { findMany: async () => [{ role: { code: 'ORGANIZER' } }] },
-    concert: { findUnique: async () => ({ organizerId: ownerId }) },
+    concert: { findUnique: async () => ({
+      organizerId: ownerId,
+      status: editable ? 'PUBLISHED' : 'CANCELLED',
+      startsAt: new Date('2099-01-01T00:00:00.000Z'),
+      performanceStartAt: new Date('2099-01-01T01:00:00.000Z'),
+    }) },
     artistDocument: {
       create: async ({ data }: { data: unknown }) => { created.push(data); return data; },
       findMany: async () => [],
@@ -156,4 +161,31 @@ test('worker retry helpers apply exponential storage retry and 60 second rate-li
   delays.length = 0;
   assert.equal(await internals.generateWithRetry('press kit'), 'bio');
   assert.deepEqual(delays, [60000]);
+});
+
+test('read-only concert rejects upload before storage or publication', async () => {
+  const harness = artistServiceHarness('owner', false, false);
+  await assert.rejects(
+    harness.service.upload({ id: 'owner', email: 'owner@test' }, '11111111-1111-4111-8111-111111111111', {
+      originalname: 'press-kit.pdf', mimetype: 'application/pdf', size: 12, buffer: Buffer.from('%PDF-1.4 demo'),
+    }),
+    ConflictException,
+  );
+  assert.equal(harness.created.length, 0);
+  assert.equal(harness.published.length, 0);
+});
+
+test('read-only concert still allows document listing', async () => {
+  const harness = artistServiceHarness('owner', false, false);
+  assert.deepEqual(await harness.service.list({ id: 'owner', email: 'owner@test' }, '11111111-1111-4111-8111-111111111111'), []);
+});
+
+test('read-only concert rejects manual edit and regeneration before document mutation', async () => {
+  const harness = artistServiceHarness('owner', false, false);
+  const user = { id: 'owner', email: 'owner@test' };
+  const concertId = '11111111-1111-4111-8111-111111111111';
+  await assert.rejects(harness.service.updateBio(user, concertId, '22222222-2222-4222-8222-222222222222', 'Updated bio'), ConflictException);
+  await assert.rejects(harness.service.regenerate(user, concertId, '22222222-2222-4222-8222-222222222222'), ConflictException);
+  assert.equal(harness.created.length, 0);
+  assert.equal(harness.published.length, 0);
 });

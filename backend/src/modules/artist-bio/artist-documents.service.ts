@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { AiArtistBioStatus, ArtistDocumentStatus } from '@prisma/client';
+import { AiArtistBioStatus, ArtistDocumentStatus, ConcertStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthenticatedUser } from '../auth/types';
@@ -25,7 +25,7 @@ export class ArtistDocumentsService {
   ) {}
 
   async upload(user: AuthenticatedUser, concertId: string, file?: UploadedPdf): Promise<{ document_id: string; status: 'uploaded' }> {
-    await this.assertOwner(user.id, concertId);
+    await this.assertOwner(user.id, concertId, true);
     if (!file) throw new BadRequestException('PDF file is required');
     if (file.size > PDF_MAX_BYTES) throw new BadRequestException('PDF must not exceed 10 MB');
 
@@ -72,7 +72,7 @@ export class ArtistDocumentsService {
   }
 
   async updateBio(user: AuthenticatedUser, concertId: string, documentId: string, generatedBio: string): Promise<{ generated_bio: string }> {
-    await this.assertOwner(user.id, concertId);
+    await this.assertOwner(user.id, concertId, true);
     const document = await this.findDocument(concertId, documentId);
     if (!document.bio) throw new ConflictException('No generated biography exists for this document');
     const value = generatedBio.trim();
@@ -88,7 +88,7 @@ export class ArtistDocumentsService {
   }
 
   async regenerate(user: AuthenticatedUser, concertId: string, documentId: string): Promise<{ document_id: string; status: 'uploaded' }> {
-    await this.assertOwner(user.id, concertId);
+    await this.assertOwner(user.id, concertId, true);
     const source = await this.findDocument(concertId, documentId);
     const newId = randomUUID();
     await this.prisma.artistDocument.create({ data: { id: newId, concertId, fileName: source.fileName, storageKey: source.storageKey } });
@@ -106,15 +106,22 @@ export class ArtistDocumentsService {
     return document;
   }
 
-  private async assertOwner(userId: string, concertId: string): Promise<void> {
+  private async assertOwner(userId: string, concertId: string, requireEditable = false): Promise<void> {
     const [roles, permitted, concert] = await Promise.all([
       this.prisma.userRole.findMany({ where: { userId }, include: { role: true } }),
       this.permissionService.userHasPermissions(userId, [PERMISSION_CODES.concertUpdate]),
-      this.prisma.concert.findUnique({ where: { id: concertId }, select: { organizerId: true } }),
+      this.prisma.concert.findUnique({
+        where: { id: concertId },
+        select: { organizerId: true, status: true, startsAt: true, performanceStartAt: true },
+      }),
     ]);
     if (!concert) throw new NotFoundException('Concert not found');
     const organizer = roles.some(({ role }) => role.code === ROLE_CODES.organizer);
     if (!organizer || !permitted || concert.organizerId !== userId) throw new ForbiddenException('Organizer ownership and concert management permission are required');
+    const performanceStartAt = concert.performanceStartAt ?? concert.startsAt;
+    if (requireEditable && (concert.status === ConcertStatus.CANCELLED || performanceStartAt.getTime() <= Date.now())) {
+      throw new ConflictException('Artist biography cannot be changed for a cancelled, ongoing, or ended concert');
+    }
   }
 }
 
