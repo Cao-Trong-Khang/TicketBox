@@ -34,6 +34,50 @@ export type OrganizerConcertDetail = {
   updatedAt: string;
 };
 
+export type OrganizerConcertRevenueConcert = {
+  id: string;
+  status: string;
+  lifecycleStatus: OrganizerConcertLifecycleStatus;
+  title: string;
+  artistName: string | null;
+  venueName: string;
+  venueAddress: string | null;
+  bannerUrl: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  performanceStartAt: string;
+};
+
+export type OrganizerConcertRevenueSummary = {
+  totalRevenueVnd: number;
+  totalSoldQuantity: number;
+  totalReservedQuantity: number;
+  totalAvailableQuantity: number;
+  totalTicketQuantity: number;
+  soldRate: number;
+  paidOrderCount: number;
+};
+
+export type OrganizerConcertRevenueTicketType = {
+  id: string;
+  code: string;
+  name: string;
+  priceVnd: number;
+  totalQuantity: number;
+  reservedQuantity: number;
+  soldQuantity: number;
+  availableQuantity: number;
+  revenueVnd: number;
+  soldRate: number;
+  status: string;
+};
+
+export type OrganizerConcertRevenue = {
+  concert: OrganizerConcertRevenueConcert;
+  summary: OrganizerConcertRevenueSummary;
+  ticketTypes: OrganizerConcertRevenueTicketType[];
+};
+
 export type OrganizerConcertPayload = {
   title: string;
   artistName: string;

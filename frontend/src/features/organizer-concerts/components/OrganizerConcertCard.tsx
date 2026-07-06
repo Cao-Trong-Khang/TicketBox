@@ -12,6 +12,7 @@ type OrganizerConcertCardProps = {
   isCancelling: boolean;
   onCancel: () => void;
   onEdit: () => void;
+  onRevenue: () => void;
   statusLabel: string;
   statusVariant: string;
 };
@@ -23,6 +24,7 @@ export function OrganizerConcertCard({
   isCancelling,
   onCancel,
   onEdit,
+  onRevenue,
   statusLabel,
   statusVariant,
 }: OrganizerConcertCardProps) {
@@ -75,6 +77,9 @@ export function OrganizerConcertCard({
 
         <div className="concert-card-footer organizer-dashboard-card-footer">
           <div className="organizer-concert-actions" aria-label={`Concert actions for ${concert.title}`}>
+            <Button type="button" className="button-secondary" onClick={onRevenue}>
+              Doanh thu
+            </Button>
             <Button type="button" disabled={!canEdit} onClick={onEdit}>
               Sửa
             </Button>

@@ -6,12 +6,25 @@ import {
   ForbiddenException,
   NotFoundException,
 } from "@nestjs/common";
-import { Concert, ConcertStatus, Role, UserRole } from "@prisma/client";
+import {
+  Concert,
+  ConcertStatus,
+  Order,
+  OrderItem,
+  OrderStatus,
+  Role,
+  TicketType,
+  TicketTypeStatus,
+  UserRole,
+} from "@prisma/client";
 import { ROLE_CODES } from "../rbac/rbac.constants";
 import { OrganizerConcertsService } from "./organizer-concerts.service";
 
 type TestState = {
   concerts: Concert[];
+  ticketTypes: TicketType[];
+  orders: Order[];
+  orderItems: OrderItem[];
   roles: Role[];
   userRoles: UserRole[];
 };
@@ -283,6 +296,152 @@ test("organizer detail returns 404 for missing or foreign concert", async () => 
       ),
     NotFoundException,
   );
+});
+
+test("organizer revenue returns summary and ticket-type breakdown using only paid orders", async () => {
+  const organizerId = "00000000-0000-4000-8000-000000000001";
+  const concertId = "12121212-1212-4121-8121-121212121212";
+  const paidOrderId = "paid-order-1";
+  const pendingOrderId = "pending-order-1";
+  const state = createState({
+    concerts: [
+      createConcert({
+        id: concertId,
+        organizerId,
+        title: "Revenue Concert",
+      }),
+    ],
+    ticketTypes: [
+      createTicketType({
+        id: "ticket-type-vip",
+        concertId,
+        code: "VIP",
+        name: "VIP",
+        priceVnd: 2000000,
+        totalQuantity: 100,
+        reservedQuantity: 5,
+        soldQuantity: 20,
+      }),
+      createTicketType({
+        id: "ticket-type-ga",
+        concertId,
+        code: "GA",
+        name: "General Admission",
+        priceVnd: 500000,
+        totalQuantity: 200,
+        reservedQuantity: 10,
+        soldQuantity: 30,
+      }),
+    ],
+    orders: [
+      createOrder({
+        id: paidOrderId,
+        concertId,
+        userId: organizerId,
+        status: OrderStatus.PAID,
+        totalAmountVnd: 4500000,
+        paidAt: new Date("2099-07-01T12:00:00.000Z"),
+      }),
+      createOrder({
+        id: pendingOrderId,
+        concertId,
+        userId: organizerId,
+        status: OrderStatus.PENDING,
+        totalAmountVnd: 99999999,
+        paidAt: null,
+      }),
+    ],
+    orderItems: [
+      createOrderItem({
+        id: "paid-item-vip",
+        orderId: paidOrderId,
+        ticketTypeId: "ticket-type-vip",
+        quantity: 2,
+        unitPriceVnd: 2000000,
+        subtotalVnd: 4000000,
+      }),
+      createOrderItem({
+        id: "paid-item-ga",
+        orderId: paidOrderId,
+        ticketTypeId: "ticket-type-ga",
+        quantity: 1,
+        unitPriceVnd: 500000,
+        subtotalVnd: 500000,
+      }),
+      createOrderItem({
+        id: "pending-item-ga",
+        orderId: pendingOrderId,
+        ticketTypeId: "ticket-type-ga",
+        quantity: 10,
+        unitPriceVnd: 500000,
+        subtotalVnd: 5000000,
+      }),
+    ],
+    userRoles: [createUserRole(organizerId, "role-organizer")],
+  });
+  const service = createService(state);
+
+  const response = await service.getOwnedConcertRevenue(organizerId, concertId);
+
+  assert.equal(response.concert.id, concertId);
+  assert.equal(response.summary.totalRevenueVnd, 4500000);
+  assert.equal(response.summary.paidOrderCount, 1);
+  assert.equal(response.summary.totalSoldQuantity, 50);
+  assert.equal(response.summary.totalReservedQuantity, 15);
+  assert.equal(response.summary.totalAvailableQuantity, 235);
+  assert.equal(response.summary.totalTicketQuantity, 300);
+  assert.equal(response.summary.soldRate, 50 / 300);
+  assert.deepEqual(
+    response.ticketTypes.map((ticketType) => ({
+      code: ticketType.code,
+      availableQuantity: ticketType.availableQuantity,
+      revenueVnd: ticketType.revenueVnd,
+    })),
+    [
+      {
+        code: "GA",
+        availableQuantity: 160,
+        revenueVnd: 500000,
+      },
+      {
+        code: "VIP",
+        availableQuantity: 75,
+        revenueVnd: 4000000,
+      },
+    ],
+  );
+});
+
+test("organizer revenue returns zero paid revenue for concerts without paid orders", async () => {
+  const organizerId = "00000000-0000-4000-8000-000000000001";
+  const concertId = "34343434-3434-4343-8343-343434343434";
+  const service = createService(
+    createState({
+      concerts: [createConcert({ id: concertId, organizerId })],
+      ticketTypes: [
+        createTicketType({
+          id: "ticket-type-only",
+          concertId,
+          code: "CAT1",
+          name: "CAT1",
+          totalQuantity: 80,
+          reservedQuantity: 12,
+          soldQuantity: 0,
+        }),
+      ],
+      userRoles: [createUserRole(organizerId, "role-organizer")],
+    }),
+  );
+
+  const response = await service.getOwnedConcertRevenue(organizerId, concertId);
+
+  assert.equal(response.summary.totalRevenueVnd, 0);
+  assert.equal(response.summary.paidOrderCount, 0);
+  assert.equal(response.summary.totalSoldQuantity, 0);
+  assert.equal(response.summary.totalReservedQuantity, 12);
+  assert.equal(response.summary.totalAvailableQuantity, 68);
+  assert.equal(response.summary.soldRate, 0);
+  assert.equal(response.ticketTypes[0].revenueVnd, 0);
 });
 
 test("organizer can update upcoming owned concert and update invalidates public caches", async () => {
@@ -693,6 +852,72 @@ function createService(
         return toConcertDetailRecord(concert);
       },
     },
+    ticketType: {
+      findMany: async ({ where }: { where: { concertId: string } }) =>
+        state.ticketTypes
+          .filter((ticketType) => ticketType.concertId === where.concertId)
+          .sort((left, right) => {
+            if (left.priceVnd !== right.priceVnd) {
+              return left.priceVnd - right.priceVnd;
+            }
+
+            return left.code.localeCompare(right.code);
+          })
+          .map(toTicketTypeRecord),
+    },
+    order: {
+      findMany: async ({
+        where,
+      }: {
+        where: {
+          concertId: string;
+          status: OrderStatus;
+          paidAt?: { not: null };
+        };
+      }) =>
+        state.orders
+          .filter(
+            (order) =>
+              order.concertId === where.concertId &&
+              order.status === where.status &&
+              (!where.paidAt || order.paidAt !== null),
+          )
+          .map((order) => ({
+            id: order.id,
+            totalAmountVnd: order.totalAmountVnd,
+          })),
+    },
+    orderItem: {
+      findMany: async ({
+        where,
+      }: {
+        where: {
+          order: {
+            concertId: string;
+            status: OrderStatus;
+            paidAt?: { not: null };
+          };
+        };
+      }) =>
+        state.orderItems
+          .filter((orderItem) => {
+            const order = state.orders.find(
+              (candidate) => candidate.id === orderItem.orderId,
+            );
+
+            return (
+              order !== undefined &&
+              order.concertId === where.order.concertId &&
+              order.status === where.order.status &&
+              (!where.order.paidAt || order.paidAt !== null)
+            );
+          })
+          .map((orderItem) => ({
+            ticketTypeId: orderItem.ticketTypeId,
+            quantity: orderItem.quantity,
+            subtotalVnd: orderItem.subtotalVnd,
+          })),
+    },
   };
   const redis = {
     del: options?.redis?.del ?? (async () => undefined),
@@ -704,6 +929,9 @@ function createService(
 function createState(overrides?: Partial<TestState>): TestState {
   return {
     concerts: overrides?.concerts ?? [],
+    ticketTypes: overrides?.ticketTypes ?? [],
+    orders: overrides?.orders ?? [],
+    orderItems: overrides?.orderItems ?? [],
     roles: overrides?.roles ?? [
       {
         id: "role-organizer",
@@ -714,6 +942,57 @@ function createState(overrides?: Partial<TestState>): TestState {
       },
     ],
     userRoles: overrides?.userRoles ?? [],
+  };
+}
+
+function createTicketType(overrides?: Partial<TicketType>): TicketType {
+  return {
+    id: overrides?.id ?? "ticket-type-1",
+    concertId: overrides?.concertId ?? "11111111-1111-4111-8111-111111111111",
+    code: overrides?.code ?? "GA",
+    name: overrides?.name ?? "General Admission",
+    priceVnd: overrides?.priceVnd ?? 500000,
+    totalQuantity: overrides?.totalQuantity ?? 100,
+    reservedQuantity: overrides?.reservedQuantity ?? 0,
+    soldQuantity: overrides?.soldQuantity ?? 0,
+    perUserLimit: overrides?.perUserLimit ?? 4,
+    saleStartAt: overrides?.saleStartAt ?? new Date("2099-07-01T00:00:00.000Z"),
+    saleEndAt: overrides?.saleEndAt ?? new Date("2099-08-01T00:00:00.000Z"),
+    status: overrides?.status ?? TicketTypeStatus.ACTIVE,
+    createdAt: overrides?.createdAt ?? new Date("2026-06-20T09:00:00.000Z"),
+    updatedAt: overrides?.updatedAt ?? new Date("2026-06-20T09:00:00.000Z"),
+  };
+}
+
+function createOrder(overrides?: Partial<Order>): Order {
+  return {
+    id: overrides?.id ?? "order-1",
+    orderCode: overrides?.orderCode ?? "TBX-ORDER-1",
+    userId:
+      overrides?.userId ?? "00000000-0000-4000-8000-000000000001",
+    concertId:
+      overrides?.concertId ?? "11111111-1111-4111-8111-111111111111",
+    status: overrides?.status ?? OrderStatus.PENDING,
+    totalAmountVnd: overrides?.totalAmountVnd ?? 0,
+    expiresAt: overrides?.expiresAt ?? new Date("2099-07-01T12:15:00.000Z"),
+    paidAt:
+      overrides && "paidAt" in overrides
+        ? (overrides.paidAt ?? null)
+        : null,
+    idempotencyKey: overrides?.idempotencyKey ?? "idem-1",
+    createdAt: overrides?.createdAt ?? new Date("2026-06-20T09:00:00.000Z"),
+    updatedAt: overrides?.updatedAt ?? new Date("2026-06-20T09:00:00.000Z"),
+  };
+}
+
+function createOrderItem(overrides?: Partial<OrderItem>): OrderItem {
+  return {
+    id: overrides?.id ?? "order-item-1",
+    orderId: overrides?.orderId ?? "order-1",
+    ticketTypeId: overrides?.ticketTypeId ?? "ticket-type-1",
+    quantity: overrides?.quantity ?? 1,
+    unitPriceVnd: overrides?.unitPriceVnd ?? 500000,
+    subtotalVnd: overrides?.subtotalVnd ?? 500000,
   };
 }
 
@@ -801,5 +1080,18 @@ function toConcertDetailRecord(concert: Concert) {
     performanceStartAt: concert.performanceStartAt,
     createdAt: concert.createdAt,
     updatedAt: concert.updatedAt,
+  };
+}
+
+function toTicketTypeRecord(ticketType: TicketType) {
+  return {
+    id: ticketType.id,
+    code: ticketType.code,
+    name: ticketType.name,
+    priceVnd: ticketType.priceVnd,
+    totalQuantity: ticketType.totalQuantity,
+    reservedQuantity: ticketType.reservedQuantity,
+    soldQuantity: ticketType.soldQuantity,
+    status: ticketType.status,
   };
 }

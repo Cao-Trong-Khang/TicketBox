@@ -489,6 +489,72 @@ h1 {
   align-items: stretch;
 }
 
+.organizer-revenue-layout {
+  display: grid;
+  gap: 24px;
+}
+
+.organizer-revenue-hero {
+  align-items: stretch;
+}
+
+.organizer-revenue-concert-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  line-height: 1.15;
+}
+
+.organizer-revenue-artist {
+  margin: 0;
+}
+
+.organizer-panel-header {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.organizer-revenue-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.organizer-revenue-summary-card {
+  display: grid;
+  gap: 10px;
+  min-height: 120px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(28, 37, 54, 0.06);
+}
+
+.organizer-revenue-summary-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.organizer-revenue-summary-card strong {
+  color: var(--ink);
+  font-size: 1.35rem;
+  line-height: 1.2;
+}
+
+.organizer-revenue-ticket-grid p {
+  display: grid;
+  gap: 4px;
+}
+
+.organizer-revenue-ticket-grid span {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .organizer-editor-page {
   min-height: calc(100vh - 184px);
 }
