@@ -165,7 +165,9 @@ describe('Organizer concert banner upload flows', () => {
       expect(patchCall).toBeDefined();
       expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({ description: 'Persisted AI description' });
     });
-    expect(await screen.findByText(/đồng bộ với trang chi tiết concert/i)).toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'AI Artist Bio đã được lưu vào Mô tả và đồng bộ với trang chi tiết concert.',
+    );
   });
 
   it('uploads a selected press kit only after concert creation and navigates to edit', async () => {
