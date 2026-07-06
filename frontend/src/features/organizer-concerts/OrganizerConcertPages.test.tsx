@@ -81,6 +81,7 @@ describe('Organizer concert banner upload flows', () => {
         updatedAt: '2099-08-01T10:00:00.000Z',
       }))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse({ bannerUrl: '/uploads/banners/replaced.jpg' }))
       .mockResolvedValueOnce(jsonResponse({
         id: 'concert-1',
@@ -124,13 +125,134 @@ describe('Organizer concert banner upload flows', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
 
-    expect(fetchMock.mock.calls[2][0]).toBe('http://localhost:3000/organizer/concerts/banners');
-    expect(fetchMock.mock.calls[3][0]).toBe('http://localhost:3000/organizer/concerts/11111111-1111-4111-8111-111111111111');
-    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toMatchObject({
+    expect(fetchMock.mock.calls[3][0]).toBe('http://localhost:3000/organizer/concerts/banners');
+    expect(fetchMock.mock.calls[4][0]).toBe('http://localhost:3000/organizer/concerts/11111111-1111-4111-8111-111111111111');
+    expect(JSON.parse(String(fetchMock.mock.calls[4][1]?.body))).toMatchObject({
       bannerUrl: '/uploads/banners/replaced.jpg',
     });
+  });
+
+  it('persists a completed AI biography into concert description automatically', async () => {
+    const concertId = '11111111-1111-4111-8111-111111111111';
+    const concert = {
+      id: concertId, status: 'PUBLISHED', lifecycleStatus: 'UPCOMING', title: 'AI concert', artistName: 'Artist',
+      description: null, venueName: 'Venue', venueAddress: 'Address', bannerUrl: null, seatingSvg: null,
+      startsAt: '2099-08-01T12:00:00.000Z', endsAt: '2099-08-01T15:00:00.000Z', performanceStartAt: '2099-08-01T19:00:00.000Z',
+      createdAt: '2099-08-01T10:00:00.000Z', updatedAt: '2099-08-01T10:00:00.000Z',
+    };
+    const document = { document_id: 'doc-1', file_name: 'press-kit.pdf', status: 'done', uploaded_at: '2099-08-01T10:01:00.000Z', generated_bio: 'Persisted AI description' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(concert))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([document]))
+      .mockResolvedValueOnce(jsonResponse(document))
+      .mockResolvedValueOnce(jsonResponse({ ...concert, description: 'Persisted AI description', updatedAt: '2099-08-01T10:02:00.000Z' }))
+      .mockResolvedValueOnce(jsonResponse([document]))
+      .mockResolvedValueOnce(jsonResponse(document));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: `/organizer/concerts/${concertId}/edit`, state: { artistBioDocumentId: 'doc-1' } }]}>
+        <Routes><Route path={'/organizer/concerts/:id/edit'} element={<OrganizerConcertEditPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByDisplayValue('Persisted AI description')).toBeInTheDocument();
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(([, options]) => options?.method === 'PATCH');
+      expect(patchCall).toBeDefined();
+      expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({ description: 'Persisted AI description' });
+    });
+    expect(await screen.findByText(/đồng bộ với trang chi tiết concert/i)).toBeInTheDocument();
+  });
+
+  it('uploads a selected press kit only after concert creation and navigates to edit', async () => {
+    const concertId = '11111111-1111-4111-8111-111111111111';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: concertId }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'ticket-1' }))
+      .mockResolvedValueOnce(jsonResponse({ document_id: 'doc-1', status: 'uploaded' }, 202))
+      .mockResolvedValueOnce(jsonResponse({ id: 'ticket-1', status: 'ACTIVE' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={['/organizer/concerts/new']}>
+        <Routes>
+          <Route path="/organizer/concerts/new" element={<OrganizerConcertCreatePage />} />
+          <Route path="/organizer/concerts/:id/edit" element={<p>Edit destination</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fillRequiredConcertFields();
+    addTicketDraft();
+    const pdf = new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByLabelText(/Press kit PDF cho AI Artist Bio/), { target: { files: [pdf] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+
+    expect(await screen.findByText('Edit destination')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/organizer/concerts');
+    const uploadCall = fetchMock.mock.calls.find(([url]) => url === `http://localhost:3000/admin/concerts/${concertId}/documents`);
+    expect(uploadCall?.[1]?.body).toBeInstanceOf(FormData);
+  });
+
+  it('still navigates after a press-kit queue failure and completes ticket setup', async () => {
+    const concertId = '11111111-1111-4111-8111-111111111111';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: concertId }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'ticket-1' }))
+      .mockResolvedValueOnce(jsonResponse({ message: 'Queue unavailable' }, 503))
+      .mockResolvedValueOnce(jsonResponse({ id: 'ticket-1', status: 'ACTIVE' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={['/organizer/concerts/new']}>
+        <Routes>
+          <Route path="/organizer/concerts/new" element={<OrganizerConcertCreatePage />} />
+          <Route path="/organizer/concerts/:id/edit" element={<p>Recovered edit destination</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fillRequiredConcertFields();
+    addTicketDraft();
+    fireEvent.change(screen.getByLabelText(/Press kit PDF cho AI Artist Bio/), { target: { files: [new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+
+    expect(await screen.findByText('Recovered edit destination')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/ticket-types/ticket-1/activate'))).toBe(true);
+  });
+
+  it.each([
+    ['ticket setup only', 202],
+    ['ticket setup and press-kit queue', 503],
+  ])('keeps the concert recoverable when %s fails', async (_label, bioStatus) => {
+    const concertId = '11111111-1111-4111-8111-111111111111';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: concertId }))
+      .mockResolvedValueOnce(jsonResponse({ message: 'Ticket setup failed' }, 503))
+      .mockResolvedValueOnce(bioStatus === 202
+        ? jsonResponse({ document_id: 'doc-1', status: 'uploaded' }, 202)
+        : jsonResponse({ message: 'Queue unavailable' }, 503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={['/organizer/concerts/new']}>
+        <Routes>
+          <Route path="/organizer/concerts/new" element={<OrganizerConcertCreatePage />} />
+          <Route path="/organizer/concerts/:id/edit" element={<p>Partial recovery destination</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fillRequiredConcertFields();
+    addTicketDraft();
+    fireEvent.change(screen.getByLabelText(/Press kit PDF cho AI Artist Bio/), { target: { files: [new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+
+    expect(await screen.findByText('Partial recovery destination')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/documents'))).toBe(true);
   });
 });
 

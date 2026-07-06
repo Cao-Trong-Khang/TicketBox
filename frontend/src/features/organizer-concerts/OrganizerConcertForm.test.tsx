@@ -156,6 +156,46 @@ describe('OrganizerConcertForm', () => {
     ).toBeInTheDocument();
   });
 
+  it('validates and defers a selected AI Artist Bio PDF', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<OrganizerConcertForm showArtistBioUpload submitLabel="Tạo concert" onSubmit={onSubmit} />);
+
+    const input = screen.getByLabelText(/Press kit PDF cho AI Artist Bio/);
+    fireEvent.change(input, { target: { files: [new File(['text'], 'press-kit.txt', { type: 'text/plain' })] } });
+    expect(await screen.findByText('Chỉ chấp nhận tệp PDF.')).toBeInTheDocument();
+
+    const pdf = new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [pdf] } });
+    expect(await screen.findByText('Đã chọn: press-kit.pdf')).toBeInTheDocument();
+
+    fillValidConcertForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][1].selectedArtistBioFile).toBe(pdf);
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('artistBioFile');
+  });
+
+  it('lets the AI assistant fill Description before the organizer saves', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <OrganizerConcertForm
+        submitLabel="Lưu thay đổi"
+        onSubmit={onSubmit}
+        descriptionAssistant={(applyDescription) => (
+          <button type="button" onClick={() => applyDescription('AI generated description')}>Apply AI description</button>
+        )}
+      />,
+    );
+    fillValidConcertForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply AI description' }));
+    const description = screen.getByLabelText('Mô tả');
+    expect(description).toHaveValue('AI generated description');
+    expect(screen.getByRole('button', { name: 'Apply AI description' }).compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ description: 'AI generated description' });
+  });
+
   it('preserves existing seatingSvg when no new SVG file is selected during edit', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
@@ -241,3 +281,13 @@ describe('OrganizerConcertForm', () => {
     });
   });
 });
+
+function fillValidConcertForm() {
+  fireEvent.change(screen.getByLabelText('Tên concert'), { target: { value: 'Concert' } });
+  fireEvent.change(screen.getByLabelText('Nghệ sĩ'), { target: { value: 'Artist' } });
+  fireEvent.change(screen.getByLabelText('Địa điểm'), { target: { value: 'Venue' } });
+  fireEvent.change(screen.getByLabelText('Địa chỉ'), { target: { value: 'Address' } });
+  fireEvent.change(screen.getByLabelText('Bắt đầu mở bán vé'), { target: { value: '2099-08-20T09:00' } });
+  fireEvent.change(screen.getByLabelText('Kết thúc mở bán vé'), { target: { value: '2099-08-20T19:00' } });
+  fireEvent.change(screen.getByLabelText('Thời gian bắt đầu concert'), { target: { value: '2099-08-20T20:00' } });
+}

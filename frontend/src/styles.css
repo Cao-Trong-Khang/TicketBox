@@ -1422,7 +1422,8 @@ h1 {
   display: grid;
   gap: 24px;
 }
-.artist-bio-admin header p { color: var(--muted); }
+.artist-bio-panel { display: grid; gap: 20px; margin-top: 24px; }
+.artist-bio-admin header p, .artist-bio-panel header p { color: var(--muted); }
 .artist-bio-upload { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .artist-bio-upload .button { width: fit-content; }
 .artist-bio-layout { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(0, 2fr); gap: 20px; }

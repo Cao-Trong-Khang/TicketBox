@@ -1,6 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert } from '../../../components/ui/Alert';
-import { Button } from '../../../components/ui/Button';
 import { OrganizerConcertForm } from '../components/OrganizerConcertForm';
 import { OrganizerTicketTypeDraftSection, OrganizerTicketTypeDraft } from '../components/OrganizerTicketTypeDraftSection';
 import { activateOrganizerTicketType, createOrganizerConcert, createOrganizerTicketType, uploadConcertBanner } from '../api';
@@ -8,20 +7,19 @@ import { hasTicketDraftValidationErrors } from '../ticket-type-draft-helpers';
 import { OrganizerConcertPayload, OrganizerTicketTypePayload } from '../types';
 import { ApiError } from '../../../lib/api-client';
 import { useState } from 'react';
+import { uploadArtistDocument } from '../../artist-bio/api';
 
 export function OrganizerConcertCreatePage() {
   const navigate = useNavigate();
   const [error, setError] = useState<ApiError | null>(null);
-  const [recoveryConcertId, setRecoveryConcertId] = useState<string | null>(null);
   const [ticketDrafts, setTicketDrafts] = useState<OrganizerTicketTypeDraft[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (
     payload: OrganizerConcertPayload,
-    options: { selectedBannerFile: File | null },
+    options: { selectedBannerFile: File | null; selectedArtistBioFile: File | null },
   ) => {
     setError(null);
-    setRecoveryConcertId(null);
 
     const ticketValidationError = hasTicketDraftValidationErrors(ticketDrafts);
     if (ticketValidationError) {
@@ -52,7 +50,7 @@ export function OrganizerConcertCreatePage() {
         return;
       }
 
-      try {
+      const ticketSetup = async () => {
         for (const draft of ticketDrafts) {
           const createdTicketType = await createOrganizerTicketType(createdConcert.id, {
             code: draft.code,
@@ -64,18 +62,20 @@ export function OrganizerConcertCreatePage() {
 
           await activateOrganizerTicketType(createdConcert.id, createdTicketType.id);
         }
-
-        navigate(`/organizer/concerts/${createdConcert.id}/edit`, {
-          state: {
-            feedback: 'Concert đã được tạo và hiển thị công khai. Bạn có thể tiếp tục quản lý vé tại đây.',
-          },
-        });
-      } catch (ticketError: unknown) {
-        setRecoveryConcertId(createdConcert.id);
-        setError(
-          toRecoveryApiError(ticketError),
-        );
-      }
+      };
+      const ticketResult = ticketDrafts.length > 0
+        ? ticketSetup()
+        : Promise.resolve();
+      const bioResult = options.selectedArtistBioFile
+        ? uploadArtistDocument(createdConcert.id, options.selectedArtistBioFile)
+        : Promise.resolve(null);
+      const [tickets, biography] = await Promise.allSettled([ticketResult, bioResult]);
+      const messages = ['Concert đã được tạo và hiển thị công khai.'];
+      if (tickets.status === 'rejected') messages.push('Một số loại vé chưa hoàn tất; vui lòng kiểm tra lại bên dưới.');
+      if (biography.status === 'rejected') messages.push('Press kit chưa được tải lên; bạn có thể thử lại trong phần AI Artist Bio.');
+      if (biography.status === 'fulfilled' && options.selectedArtistBioFile) messages.push('AI Artist Bio đã được xếp hàng xử lý.');
+      const artistBioDocumentId = biography.status === 'fulfilled' ? biography.value?.document_id ?? null : null;
+      navigate(`/organizer/concerts/${createdConcert.id}/edit`, { state: { feedback: messages.join(' '), artistBioDocumentId } });
     } catch (err: unknown) {
       setError(toApiError(err));
     } finally {
@@ -118,27 +118,16 @@ export function OrganizerConcertCreatePage() {
         {!isAccessError(error) && (
           <div className="organizer-editor-panel">
             {error && error.status !== 401 && error.status !== 403 && (
-              <Alert tone={recoveryConcertId ? 'success' : 'error'}>
-                {toCreateErrorMessage(error, recoveryConcertId)}
+              <Alert tone="error">
+                {toCreateErrorMessage(error)}
               </Alert>
-            )}
-
-            {recoveryConcertId && (
-              <div className="organizer-create-recovery">
-                <Button
-                  type="button"
-                  className="button-secondary"
-                  onClick={() => navigate(`/organizer/concerts/${recoveryConcertId}/ticket-types`)}
-                >
-                  Đi đến Quản lý vé
-                </Button>
-              </div>
             )}
 
             <OrganizerConcertForm
               submitLabel="Tạo concert"
               isSubmitting={isSubmitting}
               bannerInputLabel="Chọn banner concert"
+              showArtistBioUpload
               onSubmit={handleSubmit}
             >
               <OrganizerTicketTypeDraftSection
@@ -182,11 +171,7 @@ function isAccessError(error: ApiError | null): boolean {
   return error?.status === 401 || error?.status === 403;
 }
 
-function toCreateErrorMessage(error: ApiError, recoveryConcertId: string | null): string {
-  if (recoveryConcertId) {
-    return 'Concert đã được tạo nhưng một số loại vé chưa hoàn tất. Vui lòng kiểm tra lại trong trang Quản lý vé.';
-  }
-
+function toCreateErrorMessage(error: ApiError): string {
   if (error.status === 400) {
     return error.message || 'Dữ liệu concert chưa hợp lệ.';
   }
@@ -196,15 +181,6 @@ function toCreateErrorMessage(error: ApiError, recoveryConcertId: string | null)
   }
 
   return error.message || 'Không thể tạo concert lúc này.';
-}
-
-function toRecoveryApiError(error: unknown): ApiError {
-  const apiError = toApiError(error);
-
-  return {
-    ...apiError,
-    message: apiError.message || 'Một số loại vé chưa được tạo hoặc kích hoạt thành công.',
-  };
 }
 
 function toApiError(error: unknown): ApiError {
