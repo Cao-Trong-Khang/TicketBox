@@ -92,7 +92,52 @@ describe('OrganizerConcertRevenuePage', () => {
     expect(screen.getByText('General Admission')).toBeInTheDocument();
     expect(screen.getByText('15.000.000 ₫')).toBeInTheDocument();
     expect(screen.getByText('1.000.000 ₫')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sửa concert' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sửa concert' })).not.toBeInTheDocument();
+  });
+
+  it('does not render the no-paid-orders banner when there are zero paid orders', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        jsonResponse({
+          concert: {
+            id: 'concert-1',
+            status: 'PUBLISHED',
+            lifecycleStatus: 'UPCOMING',
+            title: 'Revenue Concert',
+            artistName: 'Artist',
+            venueName: 'Venue',
+            venueAddress: 'Address',
+            bannerUrl: '/uploads/banners/revenue.jpg',
+            startsAt: '2099-08-01T12:00:00.000Z',
+            endsAt: '2099-08-01T15:00:00.000Z',
+            performanceStartAt: '2099-08-01T19:00:00.000Z',
+          },
+          summary: {
+            totalRevenueVnd: 0,
+            totalSoldQuantity: 0,
+            totalReservedQuantity: 3,
+            totalAvailableQuantity: 85,
+            totalTicketQuantity: 100,
+            soldRate: 0,
+            paidOrderCount: 0,
+          },
+          ticketTypes: [],
+        }),
+      ),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/organizer/concerts/concert-1/revenue']}>
+        <Routes>
+          <Route path="/organizer/concerts/:id/revenue" element={<OrganizerConcertRevenuePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Revenue Concert' })).toBeInTheDocument();
+    expect(screen.queryByText(/Chưa có đơn thanh toán thành công/i)).not.toBeInTheDocument();
+    expect(screen.getByText('0 ₫')).toBeInTheDocument();
   });
 });
 

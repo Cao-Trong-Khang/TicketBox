@@ -1,8 +1,6 @@
 import { CalendarDays, MapPin, Music2, Ticket, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Alert } from '../../../components/ui/Alert';
-import { Button } from '../../../components/ui/Button';
+import { Link, useParams } from 'react-router-dom';
 import { ApiError } from '../../../lib/api-client';
 import { resolveAssetUrl } from '../../../lib/assets';
 import { formatConcertDate, formatVnd } from '../../concerts/api';
@@ -12,25 +10,28 @@ import { OrganizerConcertRevenue } from '../types';
 
 export function OrganizerConcertRevenuePage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const [revenue, setRevenue] = useState<OrganizerConcertRevenue | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(Boolean(id));
   const [error, setError] = useState<ApiError | null>(null);
   const [hasBannerError, setHasBannerError] = useState(false);
 
-  useEffect(() => {
+  const routeError = useMemo(() => {
     if (!id) {
-      setError({
+      return {
         status: 404,
         message: 'Không tìm thấy concert organizer này.',
-      });
-      setIsLoading(false);
+      } as ApiError;
+    }
+
+    return null;
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) {
       return;
     }
 
     let isActive = true;
-    setIsLoading(true);
-    setError(null);
 
     getOrganizerConcertRevenue(id)
       .then((data) => {
@@ -93,7 +94,7 @@ export function OrganizerConcertRevenuePage() {
     [revenue],
   );
 
-  if (isLoading) {
+  if (isLoading && !routeError) {
     return (
       <section className="organizer-dashboard-page" aria-labelledby="organizer-revenue-title">
         <div className="organizer-dashboard-container">
@@ -110,7 +111,9 @@ export function OrganizerConcertRevenuePage() {
     );
   }
 
-  if (error || !revenue) {
+  const activeError = routeError ?? error;
+
+  if (activeError || !revenue) {
     return (
       <section className="organizer-dashboard-page" aria-labelledby="organizer-revenue-title">
         <div className="organizer-dashboard-container">
@@ -125,8 +128,8 @@ export function OrganizerConcertRevenuePage() {
           </header>
 
           <div className="organizer-dashboard-note">
-            <p>{toErrorMessage(error)}</p>
-            {error?.status === 401 && (
+            <p>{toErrorMessage(activeError)}</p>
+            {activeError?.status === 401 && (
               <Link to="/login" className="organizer-dashboard-link">
                 Đi đến đăng nhập
               </Link>
@@ -151,9 +154,6 @@ export function OrganizerConcertRevenuePage() {
             <Link to="/organizer/concerts" className="organizer-dashboard-link">
               Quay lại dashboard
             </Link>
-            <Button type="button" onClick={() => navigate(`/organizer/concerts/${revenue.concert.id}/edit`)}>
-              Sửa concert
-            </Button>
           </div>
         </header>
 
@@ -206,12 +206,6 @@ export function OrganizerConcertRevenuePage() {
             </p>
           </div>
         </section>
-
-        {revenue.summary.paidOrderCount === 0 && (
-          <Alert tone="success">
-            Chưa có đơn thanh toán thành công. Dashboard vẫn hiển thị số vé đã giữ, đã bán và còn lại theo dữ liệu hiện có.
-          </Alert>
-        )}
 
         <section aria-labelledby="organizer-revenue-summary-title">
           <div className="organizer-panel-header">
