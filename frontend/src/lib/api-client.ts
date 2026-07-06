@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './config';
+import { clearSession, getTokenExpiration, notifyAuthChanged } from '../features/auth/session';
 
 export type ApiError = {
   status: number;
@@ -6,8 +7,38 @@ export type ApiError = {
   data?: unknown;
 };
 
+type RefreshResponse = { accessToken: string; refreshToken: string };
+let refreshPromise: Promise<string> | null = null;
+
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('accessToken');
+  let token = localStorage.getItem('accessToken');
+  const expiresAt = token ? getTokenExpiration(token) : null;
+  if (shouldRefresh(endpoint) && token && expiresAt !== null && expiresAt <= Date.now()) {
+    token = await refreshAccessToken();
+  }
+
+  let response = await sendRequest(endpoint, options, token);
+  if (response.status === 401 && shouldRefresh(endpoint)) {
+    token = await refreshAccessToken();
+    response = await sendRequest(endpoint, options, token);
+    if (response.status === 401) return failRefresh();
+  }
+
+  const text = await response.text();
+  const data = text ? parseJson(text) : {};
+
+  if (!response.ok) {
+    throw { status: response.status, message: getErrorMessage(data, response.statusText), data } satisfies ApiError;
+  }
+
+  return data as T;
+}
+
+function shouldRefresh(endpoint: string): boolean {
+  return !['/auth/login', '/auth/register', '/auth/refresh'].includes(endpoint);
+}
+
+async function sendRequest(endpoint: string, options: RequestInit, token: string | null): Promise<Response> {
   const headers = new Headers(options.headers);
 
   if (token) {
@@ -18,23 +49,46 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  return fetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
     headers,
   });
+}
 
-  const text = await response.text();
-  const data = text ? parseJson(text) : {};
+async function refreshAccessToken(): Promise<string> {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = performRefresh().finally(() => { refreshPromise = null; });
+  return refreshPromise;
+}
 
-  if (!response.ok) {
-    throw {
-      status: response.status,
-      message: getErrorMessage(data, response.statusText),
-      data,
-    } satisfies ApiError;
+async function performRefresh(): Promise<string> {
+  const refreshToken = localStorage.getItem('refreshToken');
+  if (!refreshToken) return failRefresh();
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!response.ok) return failRefresh();
+
+    const data = (await response.json()) as Partial<RefreshResponse>;
+    if (!data.accessToken || !data.refreshToken) return failRefresh();
+
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    notifyAuthChanged();
+    return data.accessToken;
+  } catch {
+    return failRefresh();
   }
+}
 
-  return data as T;
+function failRefresh(): never {
+  clearSession();
+  if (window.location.pathname !== '/login') window.location.assign('/login');
+  throw { status: 401, message: 'Session expired. Please sign in again.' } satisfies ApiError;
 }
 
 function parseJson(text: string): unknown {
