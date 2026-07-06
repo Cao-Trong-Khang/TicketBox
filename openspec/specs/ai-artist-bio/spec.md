@@ -1,4 +1,4 @@
-﻿## Purpose
+## Purpose
 
 This capability lets an Organizer upload a PDF press kit for a concert they own, observe asynchronous extraction and AI generation, regenerate or manually edit the result, and make only the latest completed biography visible to Audience users. It depends on the Web Application, NestJS Backend API, PostgreSQL, Kafka, Background Worker, MinIO, Redis concert-detail cache, and an external AI Model or local mock adapter. Check-in Staff have no access to its admin operations.
 
@@ -146,4 +146,55 @@ All new API errors MUST use `{ error: string, message: string, status_code: numb
 #### Scenario: Protected endpoint fails
 - **WHEN** a new admin request fails validation, authorization, conflict, or dependency handling
 - **THEN** the response uses the standard error envelope and contains no provider secrets or raw internal errors
+
+### Requirement: Deferred press-kit selection during concert creation
+The Organizer Web Application SHALL provide an optional Artist Bio PDF selector during concert creation. It MUST accept only a PDF no larger than 10 MB client-side, retain the file without uploading it before concert creation, and upload it through `POST /admin/concerts/:concertId/documents` only after the Backend API returns the created concert ID.
+
+#### Scenario: Selected press kit is uploaded after concert creation
+- **WHEN** an Organizer submits a valid concert with a valid selected PDF
+- **THEN** the Web Application creates the concert first and sends the PDF upload using the returned concert ID
+
+#### Scenario: Invalid selected press kit is rejected locally
+- **WHEN** an Organizer selects a non-PDF file or a PDF larger than 10 MB
+- **THEN** the Web Application displays a validation error and does not include an Artist Bio upload in the create flow
+
+### Requirement: Embedded Artist Bio editor
+The Organizer Edit Concert page SHALL embed the existing Artist Bio experience, including PDF upload, document history, document selection, status display, polling every four seconds while processing, generated biography display, sanitized failure details, manual editing, and regeneration. Polling MUST stop when the selected attempt becomes `done` or `failed`.
+
+#### Scenario: Embedded editor tracks generation
+- **WHEN** an Organizer opens an owned editable concert and selects a processing document
+- **THEN** the page refreshes its detail every four seconds until it displays a terminal state
+
+#### Scenario: Organizer reviews and edits completed content
+- **WHEN** an owned document is `done`
+- **THEN** the embedded editor displays the generated biography and permits a non-empty manual edit through the existing endpoint
+
+#### Scenario: Organizer regenerates an attempt
+- **WHEN** an Organizer requests regeneration for an eligible owned document
+- **THEN** the embedded editor queues a new attempt through the existing endpoint and selects the returned document for status monitoring
+
+### Requirement: Shared standalone and embedded behavior
+The standalone Artist Bio route and the embedded Edit Concert experience MUST use shared API, validation, polling, state-management, and presentation behavior. The standalone route SHALL remain functional for backward compatibility.
+
+#### Scenario: Existing standalone route remains usable
+- **WHEN** an Organizer navigates to the existing Artist Bio route for an owned concert
+- **THEN** the shared experience provides the same document history and management behavior as the Edit Concert page
+
+### Requirement: Lifecycle-aware Artist Bio access
+The system SHALL allow an authorized Organizer to list and inspect Artist Bio documents for an owned concert in any lifecycle state, but MUST reject upload, manual edit, and regeneration when the concert is cancelled, ongoing, or ended. The Web Application MUST disable the corresponding controls, and the Backend API MUST enforce the lifecycle rule independently.
+
+#### Scenario: Read-only concert displays existing Artist Bio data
+- **WHEN** an Organizer opens a cancelled, ongoing, or ended owned concert
+- **THEN** existing documents and biography results remain visible while mutation controls are disabled
+
+#### Scenario: Direct mutation request cannot bypass read-only state
+- **WHEN** an authorized owner directly calls an Artist Bio mutation endpoint for a cancelled, ongoing, or ended concert
+- **THEN** the Backend API returns a controlled conflict response and performs no document, object, biography, or Kafka mutation
+
+### Requirement: Correct UTF-8 Artist Bio content
+The Artist Bio user interface, controlled AI prompts, and associated assertions touched by this change MUST contain correctly encoded UTF-8 Vietnamese text and MUST NOT depend on mojibake strings.
+
+#### Scenario: Vietnamese prompt and UI are rendered correctly
+- **WHEN** the Artist Bio UI renders or the AI adapter builds its controlled Vietnamese prompt
+- **THEN** Vietnamese diacritics are preserved correctly and automated tests assert the intended text
 
