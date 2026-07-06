@@ -1,7 +1,7 @@
 ﻿import { ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogOut, Ticket } from 'lucide-react';
-import { isAuthenticated } from '../../features/auth/session';
+import { clearSession, isAuthenticated } from '../../features/auth/session';
 
 type AppShellProps = {
   children: ReactNode;
@@ -30,11 +30,7 @@ export function AppShell({ children }: AppShellProps) {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('userRoles');
-
-    window.dispatchEvent(new Event('ticketbox-auth-changed'));
+    clearSession();
     navigate('/login');
   };
 
