@@ -106,19 +106,22 @@ describe('frontend auth shell', () => {
   });
 
   it('redirects organizer user to organizer page after login', async () => {
-    const fetchMock = vi.fn().mockImplementationOnce(() =>
-      mockJsonResponse({
-        accessToken: 'organizer-token',
-        refreshToken: 'refresh-token',
-        user: {
-          id: 'user-2',
-          email: 'organizer@example.com',
-          displayName: null,
-          status: 'ACTIVE',
-          roles: ['ORGANIZER'],
-        },
-      }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        mockJsonResponse({
+          accessToken: 'organizer-token',
+          refreshToken: 'refresh-token',
+          user: {
+            id: 'user-2',
+            email: 'organizer@example.com',
+            displayName: null,
+            status: 'ACTIVE',
+            roles: ['ORGANIZER'],
+          },
+        }),
+      )
+      .mockImplementationOnce(() => mockJsonResponse([]));
 
     vi.stubGlobal('fetch', fetchMock);
 
@@ -141,7 +144,7 @@ describe('frontend auth shell', () => {
     expect(localStorage.getItem('userRoles')).toBe(JSON.stringify(['ORGANIZER']));
 
     expect(
-      await screen.findByRole('heading', { name: 'Admin Dashboard' }),
+      await screen.findByRole('heading', { name: 'Concert của bạn' }),
     ).toBeInTheDocument();
   });
 
@@ -193,14 +196,12 @@ describe('frontend auth shell', () => {
     expect(screen.queryByRole('heading', { name: 'Concert của bạn' })).not.toBeInTheDocument();
   });
 
-  it('navigates to the organizer dashboard from the concert management card', async () => {
+  it('redirects the legacy admin dashboard path to the organizer dashboard', async () => {
     localStorage.setItem('accessToken', 'organizer-token');
     localStorage.setItem('userRoles', JSON.stringify(['ORGANIZER']));
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse([])));
 
     renderApp('/admin/dashboard');
-
-    fireEvent.click(await screen.findByRole('button', { name: /Concert Management/i }));
 
     expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
   });

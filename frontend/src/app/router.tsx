@@ -11,7 +11,6 @@ import { OrganizerConcertRevenuePage } from '../features/organizer-concerts/page
 import { OrganizerTicketTypeManagementPage } from '../features/organizer-concerts/pages/OrganizerTicketTypeManagementPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { OrderPendingPage } from '../features/orders/pages/OrderPendingPage';
-import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { getPostLoginRedirect, getStoredRoles, isAuthenticated, userHasRole } from '../features/auth/session';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -77,14 +76,6 @@ export function AppRouter() {
         }
       />
       <Route path="/orders/:orderId" element={<RequireAuth><OrderPendingPage /></RequireAuth>} />
-      <Route
-        path="/admin/dashboard"
-        element={
-          <RequireOrganizer>
-            <AdminDashboardPage />
-          </RequireOrganizer>
-        }
-      />
       <Route
         path="/admin/concerts/:concertId/artist-bio"
         element={
