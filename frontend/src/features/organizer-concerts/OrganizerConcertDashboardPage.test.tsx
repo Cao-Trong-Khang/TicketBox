@@ -44,6 +44,7 @@ describe('OrganizerConcertDashboardPage', () => {
         <Routes>
           <Route path="/organizer/concerts" element={<OrganizerConcertDashboardPage />} />
           <Route path="/organizer/concerts/:id/edit" element={<div>Edit page</div>} />
+          <Route path="/organizer/concerts/:id/revenue" element={<div>Revenue page</div>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -51,10 +52,49 @@ describe('OrganizerConcertDashboardPage', () => {
     const banner = (await screen.findByAltText('Organizer Concert')) as HTMLImageElement;
     expect(banner.src).toBe('http://localhost:3000/uploads/banners/dashboard.jpg');
     expect(screen.getByText('Venue, Address')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Doanh thu' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sửa' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hủy' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Xem chi tiết' })).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Doanh thu' }));
+    expect(await screen.findByText('Revenue page')).toBeInTheDocument();
+  });
+
+  it('navigates to the existing edit page from the organizer card', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: 'concert-1',
+            status: 'PUBLISHED',
+            lifecycleStatus: 'UPCOMING',
+            title: 'Organizer Concert',
+            artistName: 'Artist',
+            venueName: 'Venue',
+            venueAddress: 'Address',
+            bannerUrl: '/uploads/banners/dashboard.jpg',
+            startsAt: '2099-08-01T12:00:00.000Z',
+            endsAt: '2099-08-01T15:00:00.000Z',
+            performanceStartAt: '2099-08-01T19:00:00.000Z',
+            createdAt: '2099-07-01T12:00:00.000Z',
+            updatedAt: '2099-07-01T12:00:00.000Z',
+          },
+        ]),
+      ),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/organizer/concerts']}>
+        <Routes>
+          <Route path="/organizer/concerts" element={<OrganizerConcertDashboardPage />} />
+          <Route path="/organizer/concerts/:id/edit" element={<div>Edit page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole('button', { name: 'Sửa' });
     fireEvent.click(screen.getByRole('button', { name: 'Sửa' }));
     expect(await screen.findByText('Edit page')).toBeInTheDocument();
   });

@@ -16,6 +16,7 @@ import { AuthenticatedUser } from "../auth/types";
 import { OrganizerConcertCreateDto } from "./dto/organizer-concert-create.dto";
 import { OrganizerConcertDetailDto } from "./dto/organizer-concert-detail.dto";
 import { OrganizerConcertListItemDto } from "./dto/organizer-concert-list-item.dto";
+import { OrganizerConcertRevenueDto } from "./dto/organizer-concert-revenue.dto";
 import { OrganizerConcertUpdateDto } from "./dto/organizer-concert-update.dto";
 import { OrganizerConcertsService } from "./organizer-concerts.service";
 
@@ -58,6 +59,17 @@ export class OrganizerConcertsController {
     @Param("id", new ParseUUIDPipe({ version: "4" })) concertId: string,
   ): Promise<OrganizerConcertDetailDto> {
     return this.organizerConcertsService.getOwnedConcert(
+      request.user.id,
+      concertId,
+    );
+  }
+
+  @Get(":id/revenue")
+  getOwnedConcertRevenue(
+    @Req() request: AuthenticatedRequest,
+    @Param("id", new ParseUUIDPipe({ version: "4" })) concertId: string,
+  ): Promise<OrganizerConcertRevenueDto> {
+    return this.organizerConcertsService.getOwnedConcertRevenue(
       request.user.id,
       concertId,
     );

@@ -5,7 +5,7 @@ export function isAuthenticated(): boolean {
 }
 
 export function getPostLoginRedirect(roles: string[]): string {
-  return roles.includes(ORGANIZER_ROLE) ? '/admin/dashboard' : '/concerts';
+  return roles.includes(ORGANIZER_ROLE) ? '/organizer/concerts' : '/concerts';
 }
 
 export function getStoredRoles(): string[] {

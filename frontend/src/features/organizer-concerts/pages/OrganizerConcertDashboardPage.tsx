@@ -6,6 +6,12 @@ import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
 import { cancelOrganizerConcert, getOrganizerConcerts } from '../api';
 import { OrganizerConcertCard } from '../components/OrganizerConcertCard';
+import {
+  canCancelConcert,
+  canEditConcert,
+  getOrganizerStatusLabel,
+  getOrganizerStatusVariant,
+} from '../status-helpers';
 import { OrganizerConcertListItem } from '../types';
 
 export function OrganizerConcertDashboardPage() {
@@ -149,6 +155,7 @@ export function OrganizerConcertDashboardPage() {
                 isCancelling={pendingCancelId === concert.id}
                 onCancel={() => void handleCancel(concert.id)}
                 onEdit={() => navigate(`/organizer/concerts/${concert.id}/edit`)}
+                onRevenue={() => navigate(`/organizer/concerts/${concert.id}/revenue`)}
                 statusLabel={getOrganizerStatusLabel(concert)}
                 statusVariant={getOrganizerStatusVariant(concert)}
               />
@@ -158,46 +165,6 @@ export function OrganizerConcertDashboardPage() {
       </div>
     </section>
   );
-}
-
-function canEditConcert(concert: OrganizerConcertListItem): boolean {
-  return concert.status !== 'CANCELLED' && concert.lifecycleStatus === 'UPCOMING';
-}
-
-function canCancelConcert(concert: OrganizerConcertListItem): boolean {
-  return concert.status !== 'CANCELLED' && concert.lifecycleStatus === 'UPCOMING';
-}
-
-function getOrganizerStatusLabel(concert: OrganizerConcertListItem): string {
-  if (concert.status === 'CANCELLED') {
-    return 'Đã hủy';
-  }
-
-  if (concert.lifecycleStatus === 'ONGOING') {
-    return 'Đang diễn ra';
-  }
-
-  if (concert.lifecycleStatus === 'ENDED') {
-    return 'Đã kết thúc';
-  }
-
-  return 'Sắp diễn ra';
-}
-
-function getOrganizerStatusVariant(concert: OrganizerConcertListItem): string {
-  if (concert.status === 'CANCELLED') {
-    return 'cancelled';
-  }
-
-  if (concert.lifecycleStatus === 'ONGOING') {
-    return 'ongoing';
-  }
-
-  if (concert.lifecycleStatus === 'ENDED') {
-    return 'ended';
-  }
-
-  return 'upcoming';
 }
 
 function toActionErrorMessage(error: ApiError): string {
