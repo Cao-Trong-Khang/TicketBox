@@ -19,7 +19,7 @@ import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env'],
+      envFilePath: ['.env', 'backend/.env'],
     }),
     AppConfigModule,
     RedisCacheModule,

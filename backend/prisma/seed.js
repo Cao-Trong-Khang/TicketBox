@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const { seedOrderHistory } = require('./order-history-seed');
 
 const prisma = new PrismaClient();
 
@@ -263,6 +264,7 @@ async function main() {
 
   const seededConcerts = await seedConcerts(organizerUser.id);
   await seedCheckInDemo(seededConcerts[0]);
+  await seedOrderHistory(prisma);
 }
 
 async function seedConcerts(organizerId) {
