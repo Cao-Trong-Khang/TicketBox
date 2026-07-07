@@ -4,6 +4,7 @@ import {
   OrganizerConcertDetail,
   OrganizerConcertListItem,
   OrganizerConcertPayload,
+  OrganizerConcertRevenue,
   OrganizerTicketType,
   OrganizerTicketTypePayload,
 } from './types';
@@ -62,6 +63,12 @@ export function getOrganizerConcertDetail(
   id: string,
 ): Promise<OrganizerConcertDetail> {
   return apiFetch<OrganizerConcertDetail>(`/organizer/concerts/${id}`);
+}
+
+export function getOrganizerConcertRevenue(
+  id: string,
+): Promise<OrganizerConcertRevenue> {
+  return apiFetch<OrganizerConcertRevenue>(`/organizer/concerts/${id}/revenue`);
 }
 
 export function updateOrganizerConcert(

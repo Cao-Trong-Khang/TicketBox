@@ -7,11 +7,11 @@ import { ConcertsListPage } from '../features/concerts/pages/ConcertsListPage';
 import { OrganizerConcertCreatePage } from '../features/organizer-concerts/pages/OrganizerConcertCreatePage';
 import { OrganizerConcertDashboardPage } from '../features/organizer-concerts/pages/OrganizerConcertDashboardPage';
 import { OrganizerConcertEditPage } from '../features/organizer-concerts/pages/OrganizerConcertEditPage';
+import { OrganizerConcertRevenuePage } from '../features/organizer-concerts/pages/OrganizerConcertRevenuePage';
 import { OrganizerTicketTypeManagementPage } from '../features/organizer-concerts/pages/OrganizerTicketTypeManagementPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { OrderPendingPage } from '../features/orders/pages/OrderPendingPage';
 import { OrderHistoryPage } from '../features/orders/pages/OrderHistoryPage';
-import { AdminDashboardPage } from '../features/admin/pages/AdminDashboardPage';
 import { getPostLoginRedirect, getStoredRoles, isAuthenticated, userHasRole } from '../features/auth/session';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -62,6 +62,14 @@ export function AppRouter() {
         }
       />
       <Route
+        path="/organizer/concerts/:id/revenue"
+        element={
+          <RequireOrganizer>
+            <OrganizerConcertRevenuePage />
+          </RequireOrganizer>
+        }
+      />
+      <Route
         path="/organizer/concerts/:concertId/ticket-types"
         element={
           <RequireOrganizer>
@@ -70,14 +78,6 @@ export function AppRouter() {
         }
       />
       <Route path="/orders/:orderId" element={<RequireAuth><OrderPendingPage /></RequireAuth>} />
-      <Route
-        path="/admin/dashboard"
-        element={
-          <RequireOrganizer>
-            <AdminDashboardPage />
-          </RequireOrganizer>
-        }
-      />
       <Route
         path="/admin/concerts/:concertId/artist-bio"
         element={

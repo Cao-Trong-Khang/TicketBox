@@ -5,6 +5,13 @@ import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
 import { cancelOrganizerConcert, getOrganizerConcerts } from '../api';
+import { OrganizerConcertCard } from '../components/OrganizerConcertCard';
+import {
+  canCancelConcert,
+  canEditConcert,
+  getOrganizerStatusLabel,
+  getOrganizerStatusVariant,
+} from '../status-helpers';
 import { OrganizerConcertListItem } from '../types';
 
 export function OrganizerConcertDashboardPage() {
@@ -138,118 +145,26 @@ export function OrganizerConcertDashboardPage() {
         )}
 
         {!isLoading && !error && concerts.length > 0 && (
-          <div className="organizer-dashboard-list">
+          <div className="concerts-grid organizer-dashboard-grid">
             {concerts.map((concert) => (
-              <article key={concert.id} className="organizer-concert-card">
-                <div className="organizer-concert-card-main">
-                  <div>
-                    <div className="organizer-concert-card-topline">
-                      <h2>{concert.title}</h2>
-                      <span
-                        className={`organizer-status organizer-status--${getOrganizerStatusVariant(concert)}`}
-                      >
-                        {getOrganizerStatusLabel(concert)}
-                      </span>
-                    </div>
-                    <p className="organizer-concert-subtitle">
-                      {concert.artistName || 'Đang cập nhật nghệ sĩ'}
-                    </p>
-                  </div>
-
-                  <div className="organizer-concert-meta">
-                    <p>{concert.venueName}</p>
-                    <p>{`Concert: ${formatDateTime(concert.performanceStartAt)}`}</p>
-                    <p>{`Mở bán vé: ${formatDateRange(concert.startsAt, concert.endsAt)}`}</p>
-                  </div>
-                </div>
-
-                <div className="organizer-concert-actions" aria-label={`Concert actions for ${concert.title}`}>
-                  <Button
-                    type="button"
-                    disabled={!canEditConcert(concert)}
-                    onClick={() => navigate(`/organizer/concerts/${concert.id}/edit`)}
-                  >
-                    Sửa
-                  </Button>
-                  <Button
-                    type="button"
-                    className="button-danger"
-                    disabled={!canCancelConcert(concert) || pendingCancelId === concert.id}
-                    onClick={() => void handleCancel(concert.id)}
-                  >
-                    {pendingCancelId === concert.id ? 'Đang hủy...' : 'Hủy'}
-                  </Button>
-                </div>
-              </article>
+              <OrganizerConcertCard
+                key={concert.id}
+                concert={concert}
+                canCancel={canCancelConcert(concert)}
+                canEdit={canEditConcert(concert)}
+                isCancelling={pendingCancelId === concert.id}
+                onCancel={() => void handleCancel(concert.id)}
+                onEdit={() => navigate(`/organizer/concerts/${concert.id}/edit`)}
+                onRevenue={() => navigate(`/organizer/concerts/${concert.id}/revenue`)}
+                statusLabel={getOrganizerStatusLabel(concert)}
+                statusVariant={getOrganizerStatusVariant(concert)}
+              />
             ))}
           </div>
         )}
       </div>
     </section>
   );
-}
-
-function formatDateRange(startsAt: string, endsAt: string | null): string {
-  const formatter = new Intl.DateTimeFormat('vi-VN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  });
-
-  const startLabel = formatter.format(new Date(startsAt));
-
-  if (!endsAt) {
-    return startLabel;
-  }
-
-  return `${startLabel} - ${formatter.format(new Date(endsAt))}`;
-}
-
-function formatDateTime(value: string): string {
-  return formatDateRange(value, null);
-}
-
-function canEditConcert(concert: OrganizerConcertListItem): boolean {
-  return concert.status !== 'CANCELLED' && concert.lifecycleStatus === 'UPCOMING';
-}
-
-function canCancelConcert(concert: OrganizerConcertListItem): boolean {
-  return concert.status !== 'CANCELLED' && concert.lifecycleStatus === 'UPCOMING';
-}
-
-function getOrganizerStatusLabel(concert: OrganizerConcertListItem): string {
-  if (concert.status === 'CANCELLED') {
-    return 'Đã hủy';
-  }
-
-  if (concert.lifecycleStatus === 'ONGOING') {
-    return 'Đang diễn ra';
-  }
-
-  if (concert.lifecycleStatus === 'ENDED') {
-    return 'Đã kết thúc';
-  }
-
-  return 'Sắp diễn ra';
-}
-
-function getOrganizerStatusVariant(concert: OrganizerConcertListItem): string {
-  if (concert.status === 'CANCELLED') {
-    return 'cancelled';
-  }
-
-  if (concert.lifecycleStatus === 'ONGOING') {
-    return 'ongoing';
-  }
-
-  if (concert.lifecycleStatus === 'ENDED') {
-    return 'ended';
-  }
-
-  return 'upcoming';
 }
 
 function toActionErrorMessage(error: ApiError): string {

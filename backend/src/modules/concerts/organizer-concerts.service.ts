@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { ConcertStatus, Prisma } from "@prisma/client";
+import { ConcertStatus, OrderStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { ROLE_CODES } from "../rbac/rbac.constants";
 import { RedisCacheService } from "../redis-cache/redis-cache.service";
@@ -18,6 +18,12 @@ import {
 import { OrganizerConcertCreateDto } from "./dto/organizer-concert-create.dto";
 import { OrganizerConcertDetailDto } from "./dto/organizer-concert-detail.dto";
 import { OrganizerConcertListItemDto } from "./dto/organizer-concert-list-item.dto";
+import {
+  OrganizerConcertRevenueConcertDto,
+  OrganizerConcertRevenueDto,
+  OrganizerConcertRevenueSummaryDto,
+  OrganizerConcertRevenueTicketTypeDto,
+} from "./dto/organizer-concert-revenue.dto";
 import { OrganizerConcertUpdateDto } from "./dto/organizer-concert-update.dto";
 import { sanitizeSeatingSvgMarkup } from "./svg-sanitizer";
 
@@ -27,6 +33,8 @@ type OrganizerConcertListQueryResult = {
   title: string;
   artistName: string | null;
   venueName: string;
+  venueAddress: string | null;
+  bannerUrl: string | null;
   startsAt: Date;
   endsAt: Date | null;
   performanceStartAt: Date | null;
@@ -53,6 +61,17 @@ export type OrganizerConcertDetailQueryResult = {
 };
 
 type OrganizerConcertLifecycleStatus = "UPCOMING" | "ONGOING" | "ENDED";
+
+type OrganizerRevenueTicketTypeQueryResult = {
+  id: string;
+  code: string;
+  name: string;
+  priceVnd: number;
+  totalQuantity: number;
+  reservedQuantity: number;
+  soldQuantity: number;
+  status: string;
+};
 
 @Injectable()
 export class OrganizerConcertsService {
@@ -81,6 +100,8 @@ export class OrganizerConcertsService {
         title: true,
         artistName: true,
         venueName: true,
+        venueAddress: true,
+        bannerUrl: true,
         startsAt: true,
         endsAt: true,
         performanceStartAt: true,
@@ -155,6 +176,110 @@ export class OrganizerConcertsService {
     const concert = await this.findOwnedConcertOrThrow(organizerId, concertId);
 
     return this.toOrganizerDetail(concert);
+  }
+
+  async getOwnedConcertRevenue(
+    organizerId: string,
+    concertId: string,
+  ): Promise<OrganizerConcertRevenueDto> {
+    await this.ensureOrganizerRole(organizerId);
+
+    const concert = await this.findOwnedConcertOrThrow(organizerId, concertId);
+    const [ticketTypes, paidOrders, paidOrderItems] = await Promise.all([
+      this.prisma.ticketType.findMany({
+        where: {
+          concertId,
+        },
+        orderBy: [{ priceVnd: "asc" }, { code: "asc" }],
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          priceVnd: true,
+          totalQuantity: true,
+          reservedQuantity: true,
+          soldQuantity: true,
+          status: true,
+        },
+      }),
+      this.prisma.order.findMany({
+        where: {
+          concertId,
+          status: OrderStatus.PAID,
+          paidAt: {
+            not: null,
+          },
+        },
+        select: {
+          id: true,
+          totalAmountVnd: true,
+        },
+      }),
+      this.prisma.orderItem.findMany({
+        where: {
+          order: {
+            concertId,
+            status: OrderStatus.PAID,
+            paidAt: {
+              not: null,
+            },
+          },
+        },
+        select: {
+          ticketTypeId: true,
+          quantity: true,
+          subtotalVnd: true,
+        },
+      }),
+    ]);
+
+    const revenueByTicketTypeId = new Map<string, number>();
+
+    for (const item of paidOrderItems) {
+      revenueByTicketTypeId.set(
+        item.ticketTypeId,
+        (revenueByTicketTypeId.get(item.ticketTypeId) ?? 0) + item.subtotalVnd,
+      );
+    }
+
+    const totalRevenueVnd = paidOrders.reduce(
+      (sum, order) => sum + order.totalAmountVnd,
+      0,
+    );
+    const totalSoldQuantity = ticketTypes.reduce(
+      (sum, ticketType) => sum + ticketType.soldQuantity,
+      0,
+    );
+    const totalReservedQuantity = ticketTypes.reduce(
+      (sum, ticketType) => sum + ticketType.reservedQuantity,
+      0,
+    );
+    const totalTicketQuantity = ticketTypes.reduce(
+      (sum, ticketType) => sum + ticketType.totalQuantity,
+      0,
+    );
+    const totalAvailableQuantity = ticketTypes.reduce(
+      (sum, ticketType) => sum + this.getAvailableQuantity(ticketType),
+      0,
+    );
+
+    return {
+      concert: this.toOrganizerRevenueConcert(concert),
+      summary: this.toOrganizerRevenueSummary({
+        totalRevenueVnd,
+        totalSoldQuantity,
+        totalReservedQuantity,
+        totalAvailableQuantity,
+        totalTicketQuantity,
+        paidOrderCount: paidOrders.length,
+      }),
+      ticketTypes: ticketTypes.map((ticketType) =>
+        this.toOrganizerRevenueTicketType(
+          ticketType,
+          revenueByTicketTypeId.get(ticketType.id) ?? 0,
+        ),
+      ),
+    };
   }
 
   async updateOwnedConcert(
@@ -482,6 +607,20 @@ export class OrganizerConcertsService {
     return concert.performanceStartAt ?? concert.startsAt;
   }
 
+  private getAvailableQuantity(
+    ticketType: Pick<
+      OrganizerRevenueTicketTypeQueryResult,
+      "totalQuantity" | "reservedQuantity" | "soldQuantity"
+    >,
+  ): number {
+    return Math.max(
+      0,
+      ticketType.totalQuantity -
+        ticketType.reservedQuantity -
+        ticketType.soldQuantity,
+    );
+  }
+
   private toOrganizerListItem(
     concert: OrganizerConcertListQueryResult,
   ): OrganizerConcertListItemDto {
@@ -492,6 +631,8 @@ export class OrganizerConcertsService {
       title: concert.title,
       artistName: concert.artistName,
       venueName: concert.venueName,
+      venueAddress: concert.venueAddress,
+      bannerUrl: concert.bannerUrl,
       startsAt: concert.startsAt.toISOString(),
       endsAt: concert.endsAt?.toISOString() ?? null,
       performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
@@ -519,6 +660,68 @@ export class OrganizerConcertsService {
       performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
       createdAt: concert.createdAt.toISOString(),
       updatedAt: concert.updatedAt.toISOString(),
+    };
+  }
+
+  private toOrganizerRevenueConcert(
+    concert: OrganizerConcertDetailQueryResult,
+  ): OrganizerConcertRevenueConcertDto {
+    return {
+      id: concert.id,
+      status: concert.status,
+      lifecycleStatus: this.getLifecycleStatus(concert),
+      title: concert.title,
+      artistName: concert.artistName,
+      venueName: concert.venueName,
+      venueAddress: concert.venueAddress,
+      bannerUrl: concert.bannerUrl,
+      startsAt: concert.startsAt.toISOString(),
+      endsAt: concert.endsAt?.toISOString() ?? null,
+      performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
+    };
+  }
+
+  private toOrganizerRevenueSummary(input: {
+    totalRevenueVnd: number;
+    totalSoldQuantity: number;
+    totalReservedQuantity: number;
+    totalAvailableQuantity: number;
+    totalTicketQuantity: number;
+    paidOrderCount: number;
+  }): OrganizerConcertRevenueSummaryDto {
+    return {
+      totalRevenueVnd: input.totalRevenueVnd,
+      totalSoldQuantity: input.totalSoldQuantity,
+      totalReservedQuantity: input.totalReservedQuantity,
+      totalAvailableQuantity: input.totalAvailableQuantity,
+      totalTicketQuantity: input.totalTicketQuantity,
+      soldRate:
+        input.totalTicketQuantity > 0
+          ? input.totalSoldQuantity / input.totalTicketQuantity
+          : 0,
+      paidOrderCount: input.paidOrderCount,
+    };
+  }
+
+  private toOrganizerRevenueTicketType(
+    ticketType: OrganizerRevenueTicketTypeQueryResult,
+    revenueVnd: number,
+  ): OrganizerConcertRevenueTicketTypeDto {
+    return {
+      id: ticketType.id,
+      code: ticketType.code,
+      name: ticketType.name,
+      priceVnd: ticketType.priceVnd,
+      totalQuantity: ticketType.totalQuantity,
+      reservedQuantity: ticketType.reservedQuantity,
+      soldQuantity: ticketType.soldQuantity,
+      availableQuantity: this.getAvailableQuantity(ticketType),
+      revenueVnd,
+      soldRate:
+        ticketType.totalQuantity > 0
+          ? ticketType.soldQuantity / ticketType.totalQuantity
+          : 0,
+      status: ticketType.status,
     };
   }
 }

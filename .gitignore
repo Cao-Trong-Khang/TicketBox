@@ -12,6 +12,10 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Verification artifacts
+verification-*.png
+verification-*.xml
+
 # Android/Gradle local files
 .gradle/
 .kotlin/
