@@ -3,9 +3,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app/App';
 
-function renderApp(initialPath = '/') {
+function renderApp(initialEntry: string | { pathname: string; state?: unknown } = '/') {
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <App />
     </MemoryRouter>,
   );
@@ -204,5 +204,39 @@ describe('frontend auth shell', () => {
     renderApp('/admin/dashboard');
 
     expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
+  });
+
+  it('shows audience history navigation and renders the history route', async () => {
+    localStorage.setItem('accessToken', 'audience-token');
+    localStorage.setItem('userRoles', JSON.stringify(['AUDIENCE']));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => mockJsonResponse([])));
+
+    renderApp('/orders');
+
+    expect(screen.getByRole('link', { name: 'Đơn hàng của tôi' })).toHaveAttribute('href', '/orders');
+    expect(screen.getByRole('link', { name: 'Sự kiện' })).toHaveAttribute('href', '/concerts');
+    expect(await screen.findByRole('heading', { name: 'Lịch sử đơn hàng' })).toBeInTheDocument();
+    expect(await screen.findByText('Chưa có đơn hàng nào.')).toBeInTheDocument();
+  });
+
+  it('keeps the pending order detail route behavior unchanged', async () => {
+    localStorage.setItem('accessToken', 'audience-token');
+    localStorage.setItem('userRoles', JSON.stringify(['AUDIENCE']));
+
+    renderApp({
+      pathname: '/orders/order-1',
+      state: {
+        order: {
+          orderId: 'order-1',
+          orderCode: 'ORD-999',
+          status: 'PENDING',
+          totalAmountVnd: 990000,
+          expiresAt: '2026-07-06T15:00:00.000Z',
+        },
+      },
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Đơn hàng của bạn' })).toBeInTheDocument();
+    expect(screen.getByText('ORD-999')).toBeInTheDocument();
   });
 });
