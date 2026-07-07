@@ -30,5 +30,5 @@
 
 - [x] 5.1 Run backend lint, typecheck/build, focused tests, full backend tests, and the Prisma seed locally with Docker Compose dependencies (AC: locally verifiable implementation).
 - [x] 5.2 Log in as `audience@ticketbox.local`, call `GET /orders/history`, and verify the response contains only owned newest-first demo orders in the exact frontend shape (AC: end-to-end owned history).
-- [ ] 5.3 Open the frontend `/orders` page and verify all five seeded statuses render without frontend contract changes (AC: Web Application consumer integration).
+- [x] 5.3 Open the frontend `/orders` page and verify all five seeded statuses render without frontend contract changes (AC: Web Application consumer integration).
 - [x] 5.4 Document the endpoint, 100-row temporary cap, demo credentials/data namespace, and deferred pagination/payment/detail/ticket/QR scope (AC: bounded contract and non-goals).
