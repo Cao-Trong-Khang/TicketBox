@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrderHistoryDataSource } from './history-api';
@@ -69,6 +69,25 @@ describe('OrderHistoryPage', () => {
     expect(screen.getByText('Đơn đã được hủy')).toBeInTheDocument();
   });
 
+  it('opens a complete order detail dialog and closes it accessibly', async () => {
+    renderPage({ listOrders: () => Promise.resolve([order('PAID')]) });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Xem chi tiết đơn hàng' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Concert PAID' });
+    expect(dialog).toBeInTheDocument();
+    const detail = within(dialog);
+    expect(detail.getByText('Mã đơn ORD-001')).toBeInTheDocument();
+    expect(detail.getByText('Đã thanh toán')).toBeInTheDocument();
+    expect(detail.getByText('Arena Center, Quận 1')).toBeInTheDocument();
+    expect(detail.getByRole('heading', { name: 'Thông tin vé' })).toBeInTheDocument();
+    expect(detail.getByText('VIP')).toBeInTheDocument();
+    expect(detail.getAllByText('2 vé').length).toBeGreaterThan(0);
+    expect(detail.getByText(/1\.200\.000/)).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
   it('does not use localStorage fixtures and retries after an error', async () => {
     localStorage.setItem('order-history-fixture', JSON.stringify([{ orderCode: 'LOCAL-ONLY' }]));
     const listOrders = vi.fn()

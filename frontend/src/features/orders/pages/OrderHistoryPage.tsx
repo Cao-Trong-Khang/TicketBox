@@ -78,6 +78,7 @@ export function OrderHistoryPage({ dataSource = orderHistoryDataSource }: OrderH
 
 function OrderHistoryCard({ order }: { order: OrderHistoryItem }) {
   const [hasImageError, setHasImageError] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const bannerUrl = resolveAssetUrl(order.bannerUrl);
   const showBanner = Boolean(bannerUrl) && !hasImageError;
 
@@ -103,14 +104,126 @@ function OrderHistoryCard({ order }: { order: OrderHistoryItem }) {
           <p><span className="order-history-label">Vé:</span><span>{formatOrderHistoryTicketSummary(order.tickets)}</span></p>
         </div>
         <div className="order-history-footer">
-          <strong>{formatOrderHistoryAmount(order.totalAmountVnd)}</strong>
-          <span>{getStatusHint(order.status)}</span>
+          <div>
+            <strong>{formatOrderHistoryAmount(order.totalAmountVnd)}</strong>
+            <span>{getStatusHint(order.status)}</span>
+          </div>
+          <Button
+            type="button"
+            className="order-history-detail-button"
+            aria-haspopup="dialog"
+            onClick={() => setIsDetailOpen(true)}
+          >
+            Xem chi tiết đơn hàng
+          </Button>
         </div>
+        {isDetailOpen && (
+          <OrderDetailDialog order={order} onClose={() => setIsDetailOpen(false)} />
+        )}
       </div>
     </article>
   );
 }
 
+function OrderDetailDialog({
+  order,
+  onClose,
+}: {
+  order: OrderHistoryItem;
+  onClose: () => void;
+}) {
+  const totalTickets = order.tickets.reduce((sum, ticket) => sum + ticket.quantity, 0);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="order-detail-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="order-detail-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={'order-detail-title-' + order.orderId}
+      >
+        <header className="order-detail-dialog-header">
+          <div>
+            <p className="eyebrow">Chi tiết đơn hàng</p>
+            <h2 id={'order-detail-title-' + order.orderId}>{order.concertTitle}</h2>
+            <p className="order-history-code">Mã đơn {order.orderCode}</p>
+          </div>
+          <button
+            type="button"
+            className="order-detail-close"
+            aria-label="Đóng chi tiết đơn hàng"
+            onClick={onClose}
+            autoFocus
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="order-detail-status-row">
+          <span className={'order-history-status order-history-status-' + order.status}>
+            {getOrderHistoryStatusLabel(order.status)}
+          </span>
+          <span>{getStatusHint(order.status)}</span>
+        </div>
+
+        <dl className="order-detail-summary">
+          <div>
+            <dt>Ngày tạo đơn</dt>
+            <dd>{formatOrderHistoryDate(order.createdAt)}</dd>
+          </div>
+          <div>
+            <dt>Thời gian biểu diễn</dt>
+            <dd>{formatOrderHistoryDate(order.performanceStartAt)}</dd>
+          </div>
+          <div className="order-detail-summary-wide">
+            <dt>Địa điểm</dt>
+            <dd>{formatOrderHistoryVenue(order)}</dd>
+          </div>
+        </dl>
+
+        <section className="order-detail-ticket-section" aria-labelledby={'ticket-list-title-' + order.orderId}>
+          <div className="order-detail-section-heading">
+            <h3 id={'ticket-list-title-' + order.orderId}>Thông tin vé</h3>
+            <span>{totalTickets} vé</span>
+          </div>
+          <ul>
+            {order.tickets.map((ticket) => (
+              <li key={ticket.ticketTypeName}>
+                <span>{ticket.ticketTypeName}</span>
+                <strong>{ticket.quantity} vé</strong>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <footer className="order-detail-total">
+          <span>Tổng thanh toán</span>
+          <strong>{formatOrderHistoryAmount(order.totalAmountVnd)}</strong>
+        </footer>
+      </section>
+    </div>
+  );
+}
 function getStatusHint(status: OrderHistoryItem['status']): string {
   return {
     PENDING: 'Đang chờ xử lý thanh toán',

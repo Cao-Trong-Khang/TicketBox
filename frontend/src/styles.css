@@ -392,6 +392,7 @@ h1 {
 
 .concert-card-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
@@ -599,6 +600,7 @@ h1 {
 
 .order-history-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
@@ -611,6 +613,204 @@ h1 {
 }
 
 
+.order-history-footer > div {
+  display: grid;
+  gap: 4px;
+}
+
+.order-history-footer > div > span {
+  color: var(--muted);
+}
+
+.order-history-detail-button {
+  flex: 0 0 auto;
+}
+
+.order-detail-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.order-detail-dialog {
+  width: min(100%, 720px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.order-detail-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.order-detail-dialog-header h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(1.35rem, 4vw, 1.8rem);
+}
+
+.order-detail-dialog-header .order-history-code {
+  margin: 0;
+}
+
+.order-detail-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  color: var(--ink);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.order-detail-close:hover {
+  color: white;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.order-detail-close:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.order-detail-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0;
+  color: var(--muted);
+}
+
+.order-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.order-detail-summary > div {
+  padding: 14px;
+  background: var(--surface-soft);
+  border-radius: 9px;
+}
+
+.order-detail-summary-wide {
+  grid-column: 1 / -1;
+}
+
+.order-detail-summary dt {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.order-detail-summary dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.order-detail-ticket-section {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.order-detail-section-heading,
+.order-detail-ticket-section li,
+.order-detail-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.order-detail-section-heading h3 {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.order-detail-section-heading span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.order-detail-ticket-section ul {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.order-detail-ticket-section li {
+  padding: 12px 14px;
+  background: var(--surface-soft);
+  border-radius: 8px;
+}
+
+.order-detail-total {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.order-detail-total strong {
+  color: var(--success);
+  font-size: 1.3rem;
+}
+
+@media (max-width: 560px) {
+  .order-detail-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .order-detail-dialog {
+    max-height: 92vh;
+    padding: 18px;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .order-detail-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .order-detail-summary-wide {
+    grid-column: auto;
+  }
+
+  .order-detail-total {
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 6px;
+  }
+}
 .organizer-dashboard-page {
   min-height: calc(100vh - 184px);
 }
