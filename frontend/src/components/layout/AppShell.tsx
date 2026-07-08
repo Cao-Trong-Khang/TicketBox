@@ -53,9 +53,11 @@ export function AppShell({ children }: AppShellProps) {
               >
                 <span>Sự kiện</span>
               </NavLink>
-              <NavLink className="nav-link" to="/orders" end>
-                <span>Đơn hàng của tôi</span>
-              </NavLink>
+              {!isOrganizer && (
+                <NavLink className="nav-link" to="/orders" end>
+                  <span>Đơn hàng của tôi</span>
+                </NavLink>
+              )}
 
               <button
                 className="nav-button"
