@@ -204,6 +204,7 @@ describe('frontend auth shell', () => {
     renderApp('/admin/dashboard');
 
     expect(await screen.findByRole('heading', { name: 'Concert của bạn' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Đơn hàng của tôi' })).not.toBeInTheDocument();
   });
 
   it('shows audience history navigation and renders the history route', async () => {
