@@ -20,5 +20,6 @@
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
     "downlevelIteration": true
-  }
+  },
+  "exclude": ["node_modules", "dist", "prisma"]
 }
