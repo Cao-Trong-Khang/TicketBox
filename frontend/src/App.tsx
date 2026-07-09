@@ -1,4 +1,3 @@
-export { App } from './app/App';
 import { Activity, Bell, CalendarDays, CreditCard, Gauge, Settings, ShieldCheck, Ticket } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { NotificationForm } from './components/NotificationForm';

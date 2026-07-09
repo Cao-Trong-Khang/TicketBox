@@ -5,11 +5,15 @@ import { PaymentFactory } from './payment.factory';
 import { VnpayProvider } from './providers/vnpay.provider';
 import { MomoProvider } from './providers/momo.provider';
 import { CircuitBreaker } from '../../shared/circuit-breaker/circuit-breaker';
-import { getPaymentGatewayConfig } from '../../shared/config/app.config';
+import { getPaymentGatewayConfig } from '../../config/app.config';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [PaymentsController],
   providers: [
+    PrismaService,
     {
       provide: PaymentFactory,
       useFactory: (configService: ConfigService) => {

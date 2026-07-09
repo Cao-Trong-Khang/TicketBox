@@ -42,7 +42,9 @@ export async function createPayment(
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     const message = typeof body['message'] === 'string' ? body['message'] : `HTTP ${response.status}`;
-    throw Object.assign(new Error(message), { statusCode: response.status } satisfies ApiError);
+    const error: Error & { statusCode?: number } = new Error(message);
+    error.statusCode = response.status;
+    throw error;
   }
 
   return response.json() as Promise<CreatePaymentResponse>;

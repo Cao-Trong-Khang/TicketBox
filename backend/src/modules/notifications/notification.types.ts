@@ -1,4 +1,4 @@
-export type NotificationChannelName = 'email' | 'push';
+export type NotificationChannelName = 'email' | 'push' | 'sms' | 'zalo';
 
 export type NotificationStatus = 'pending' | 'sent' | 'failed';
 
