@@ -14,6 +14,8 @@ import { RbacModule } from './modules/rbac/rbac.module';
 import { RedisCacheModule } from './modules/redis-cache/redis-cache.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { VipImportsModule } from './modules/vip-imports/vip-imports.module';
     OrdersModule,
     RateLimitModule,
     HealthModule,
+    PaymentsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

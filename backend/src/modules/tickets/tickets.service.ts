@@ -9,6 +9,7 @@ const DEFAULT_TICKET_QR_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 export type MyTicketDto = {
   id: string;
+  orderId: string;
   concertId: string;
   concertTitle: string;
   concertStartsAt: string;
@@ -32,6 +33,7 @@ export class TicketsService {
       orderBy: [{ concert: { startsAt: 'asc' } }, { ticketCode: 'asc' }],
       select: {
         id: true,
+        orderId: true,
         concertId: true,
         ticketCode: true,
         qrHash: true,
@@ -50,6 +52,7 @@ export class TicketsService {
 
     return tickets.map((ticket) => ({
       id: ticket.id,
+      orderId: ticket.orderId,
       concertId: ticket.concertId,
       concertTitle: ticket.concert.title,
       concertStartsAt: ticket.concert.startsAt.toISOString(),

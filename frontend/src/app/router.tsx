@@ -12,6 +12,7 @@ import { OrganizerTicketTypeManagementPage } from '../features/organizer-concert
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { OrderPendingPage } from '../features/orders/pages/OrderPendingPage';
 import { OrderHistoryPage } from '../features/orders/pages/OrderHistoryPage';
+import { PaymentSuccessPage } from '../features/orders/pages/PaymentSuccessPage';
 import { getPostLoginRedirect, getStoredRoles, isAuthenticated, userHasRole } from '../features/auth/session';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -78,6 +79,7 @@ export function AppRouter() {
         }
       />
       <Route path="/orders/:orderId" element={<RequireAuth><OrderPendingPage /></RequireAuth>} />
+      <Route path="/payments/success" element={<RequireAuth><PaymentSuccessPage /></RequireAuth>} />
       <Route
         path="/admin/concerts/:concertId/artist-bio"
         element={

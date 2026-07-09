@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { resolveAssetUrl } from '../../../lib/assets';
-import type { ApiError } from '../../../lib/api-client';
+import { apiFetch, type ApiError } from '../../../lib/api-client';
 import { orderHistoryDataSource } from '../history-api';
 import type { OrderHistoryDataSource } from '../history-api';
 import {
@@ -132,7 +132,10 @@ function OrderDetailDialog({
   order: OrderHistoryItem;
   onClose: () => void;
 }) {
+  const [individualTickets, setIndividualTickets] = useState<any[]>([]);
+  const [loadingTickets, setLoadingTickets] = useState(false);
   const totalTickets = order.tickets.reduce((sum, ticket) => sum + ticket.quantity, 0);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -147,6 +150,19 @@ function OrderDetailDialog({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [onClose]);
+
+  useEffect(() => {
+    if (order.status === 'PAID') {
+      setLoadingTickets(true);
+      apiFetch<any[]>('/tickets/me')
+        .then((allTickets) => {
+          const filtered = allTickets.filter((t) => t.orderId === order.orderId);
+          setIndividualTickets(filtered);
+        })
+        .catch((err) => console.error('Failed to load tickets:', err))
+        .finally(() => setLoadingTickets(false));
+    }
+  }, [order.orderId, order.status]);
 
   return (
     <div
@@ -201,22 +217,65 @@ function OrderDetailDialog({
           </div>
         </dl>
 
-        <section className="order-detail-ticket-section" aria-labelledby={'ticket-list-title-' + order.orderId}>
+        <section className="order-detail-ticket-section" aria-labelledby={'ticket-list-title-' + order.orderId} style={{ maxHeight: '350px', overflowY: 'auto', paddingRight: '8px' }}>
           <div className="order-detail-section-heading">
             <h3 id={'ticket-list-title-' + order.orderId}>Thông tin vé</h3>
             <span>{totalTickets} vé</span>
           </div>
-          <ul>
-            {order.tickets.map((ticket) => (
-              <li key={ticket.ticketTypeName}>
-                <span>{ticket.ticketTypeName}</span>
-                <strong>{ticket.quantity} vé</strong>
-              </li>
-            ))}
-          </ul>
+          
+          {order.status !== 'PAID' ? (
+            <ul>
+              {order.tickets.map((ticket) => (
+                <li key={ticket.ticketTypeName}>
+                  <span>{ticket.ticketTypeName}</span>
+                  <strong>{ticket.quantity} vé</strong>
+                </li>
+              ))}
+            </ul>
+          ) : loadingTickets ? (
+            <p style={{ textAlign: 'center', padding: '20px', color: '#64748b' }}>Đang tải mã vé E-ticket...</p>
+          ) : individualTickets.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px', marginTop: '12px' }}>
+              {individualTickets.map((ticket) => {
+                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(ticket.signedQrToken)}`;
+                return (
+                  <div key={ticket.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', background: '#f8fafc' }}>
+                    <div style={{ fontWeight: '700', color: '#1e293b', marginBottom: '4px' }}>Vé {ticket.ticketCode}</div>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>Trạng thái: <strong style={{ color: ticket.status === 'USED' ? '#dc2626' : '#16a34a' }}>{ticket.status === 'USED' ? 'ĐÃ CHECK-IN' : 'HOẠT ĐỘNG'}</strong></div>
+                    <div style={{ background: '#ffffff', padding: '8px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                      <img src={qrUrl} alt={`QR Code for Ticket ${ticket.ticketCode}`} style={{ width: '150px', height: '150px', display: 'block' }} />
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px', textAlign: 'center' }}>
+                      Quét mã này tại cổng sự kiện để vào cửa
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p style={{ textAlign: 'center', padding: '20px', color: '#64748b' }}>Không tìm thấy mã vé E-ticket.</p>
+          )}
         </section>
 
-        <footer className="order-detail-total">
+        {order.status === 'PENDING' && (
+          <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+            <div style={{ fontSize: '13px', color: '#b45309', background: '#fffbeb', border: '1px solid #fef3c7', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
+              Mã QR và vé E-ticket sẽ được hiển thị sau khi thanh toán thành công.
+            </div>
+            <Button
+              type="button"
+              style={{ width: '100%', padding: '12px', background: '#0f766e', color: '#fff', fontWeight: '600' }}
+              onClick={() => {
+                onClose();
+                navigate(`/orders/${order.orderId}`);
+              }}
+            >
+              Thanh toán ngay (Pay Now)
+            </Button>
+          </div>
+        )}
+
+        <footer className="order-detail-total" style={{ borderTop: order.status === 'PENDING' ? 'none' : '1px solid #e2e8f0', paddingTop: order.status === 'PENDING' ? '8px' : '16px' }}>
           <span>Tổng thanh toán</span>
           <strong>{formatOrderHistoryAmount(order.totalAmountVnd)}</strong>
         </footer>
