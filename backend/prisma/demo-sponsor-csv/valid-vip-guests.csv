@@ -1,0 +1,4 @@
+concert_title,sponsor_source,external_guest_key,full_name,email,phone,sponsor_company,invited_by,guest_type,allowed_gate,notes
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,SPONSOR-VIP-001,Nguyen Van An,an.vip@example.test,+84901234501,TicketBox Partners,Sponsor Team,Artist Guest,VIP Gate,Demo VIP metadata
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,SPONSOR-VIP-002,Tran Thi Binh,binh.vip@example.test,+84901234502,Media Partner,Press Desk,Press,Gate A,Press entrance
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,,Le Minh Chau,chau.vip@example.test,+84901234503,Production,Producer Office,Production Guest,Backstage,Identity generated from email and phone

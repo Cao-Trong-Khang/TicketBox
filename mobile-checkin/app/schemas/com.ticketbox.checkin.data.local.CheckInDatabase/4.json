@@ -1,0 +1,601 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "79e2deef32835558d0f936369ac709b7",
+    "entities": [
+      {
+        "tableName": "assignments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`assignmentId` TEXT NOT NULL, `concertId` TEXT NOT NULL, `title` TEXT NOT NULL, `venueName` TEXT NOT NULL, `status` TEXT NOT NULL, `gateName` TEXT, `sourceDeviceId` TEXT, `startsAtIso` TEXT NOT NULL, `endsAtIso` TEXT, PRIMARY KEY(`assignmentId`))",
+        "fields": [
+          {
+            "fieldPath": "assignmentId",
+            "columnName": "assignmentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "concertId",
+            "columnName": "concertId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "venueName",
+            "columnName": "venueName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gateName",
+            "columnName": "gateName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "sourceDeviceId",
+            "columnName": "sourceDeviceId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "startsAtIso",
+            "columnName": "startsAtIso",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endsAtIso",
+            "columnName": "endsAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "assignmentId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_assignments_concertId",
+            "unique": false,
+            "columnNames": [
+              "concertId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_assignments_concertId` ON `${TABLE_NAME}` (`concertId`)"
+          },
+          {
+            "name": "index_assignments_sourceDeviceId",
+            "unique": false,
+            "columnNames": [
+              "sourceDeviceId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_assignments_sourceDeviceId` ON `${TABLE_NAME}` (`sourceDeviceId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "snapshots",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`concertId` TEXT NOT NULL, `version` TEXT NOT NULL, `generatedAtIso` TEXT NOT NULL, `storedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`concertId`))",
+        "fields": [
+          {
+            "fieldPath": "concertId",
+            "columnName": "concertId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generatedAtIso",
+            "columnName": "generatedAtIso",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "storedAtEpochMillis",
+            "columnName": "storedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "concertId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "preloaded_tickets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `concertId` TEXT NOT NULL, `ticketCode` TEXT NOT NULL, `qrHash` TEXT NOT NULL, `status` TEXT NOT NULL, `issuedAtIso` TEXT NOT NULL, `checkedInAtIso` TEXT, `attendeeName` TEXT, `attendeeEmail` TEXT, `zoneOrSeat` TEXT, `previousCheckInAtIso` TEXT, `previousGateName` TEXT, `previousStaffName` TEXT, `ticketTypeCode` TEXT NOT NULL, `ticketTypeName` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "concertId",
+            "columnName": "concertId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ticketCode",
+            "columnName": "ticketCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qrHash",
+            "columnName": "qrHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "issuedAtIso",
+            "columnName": "issuedAtIso",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkedInAtIso",
+            "columnName": "checkedInAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "attendeeName",
+            "columnName": "attendeeName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "attendeeEmail",
+            "columnName": "attendeeEmail",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "zoneOrSeat",
+            "columnName": "zoneOrSeat",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "previousCheckInAtIso",
+            "columnName": "previousCheckInAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "previousGateName",
+            "columnName": "previousGateName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "previousStaffName",
+            "columnName": "previousStaffName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ticketTypeCode",
+            "columnName": "ticketTypeCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ticketTypeName",
+            "columnName": "ticketTypeName",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_preloaded_tickets_concertId_qrHash",
+            "unique": true,
+            "columnNames": [
+              "concertId",
+              "qrHash"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_preloaded_tickets_concertId_qrHash` ON `${TABLE_NAME}` (`concertId`, `qrHash`)"
+          },
+          {
+            "name": "index_preloaded_tickets_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_preloaded_tickets_status` ON `${TABLE_NAME}` (`status`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "preloaded_vip_guests",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `concertId` TEXT NOT NULL, `qrHash` TEXT, `externalGuestKey` TEXT, `fullName` TEXT NOT NULL, `email` TEXT, `phone` TEXT, `sponsorSource` TEXT NOT NULL, `sponsorCompany` TEXT, `invitedBy` TEXT, `guestType` TEXT, `allowedGate` TEXT, `status` TEXT NOT NULL, `checkedInAtIso` TEXT, `notes` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "concertId",
+            "columnName": "concertId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qrHash",
+            "columnName": "qrHash",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "externalGuestKey",
+            "columnName": "externalGuestKey",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "fullName",
+            "columnName": "fullName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "email",
+            "columnName": "email",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "phone",
+            "columnName": "phone",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "sponsorSource",
+            "columnName": "sponsorSource",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sponsorCompany",
+            "columnName": "sponsorCompany",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "invitedBy",
+            "columnName": "invitedBy",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "guestType",
+            "columnName": "guestType",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "allowedGate",
+            "columnName": "allowedGate",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkedInAtIso",
+            "columnName": "checkedInAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_preloaded_vip_guests_concertId_qrHash",
+            "unique": true,
+            "columnNames": [
+              "concertId",
+              "qrHash"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_preloaded_vip_guests_concertId_qrHash` ON `${TABLE_NAME}` (`concertId`, `qrHash`)"
+          },
+          {
+            "name": "index_preloaded_vip_guests_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_preloaded_vip_guests_status` ON `${TABLE_NAME}` (`status`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "local_scan_logs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`localScanId` TEXT NOT NULL, `sourceDeviceId` TEXT NOT NULL, `concertId` TEXT NOT NULL, `qrHash` TEXT NOT NULL, `displayCode` TEXT, `attendeeName` TEXT, `ticketTypeName` TEXT, `zoneOrSeat` TEXT, `gateName` TEXT, `previousCheckInAtIso` TEXT, `previousGateName` TEXT, `previousStaffName` TEXT, `entityType` TEXT NOT NULL, `localResult` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `retryCount` INTEGER NOT NULL, `nextRetryAtEpochMillis` INTEGER, `backendResultCode` TEXT, `backendStatus` TEXT, `backendCheckInId` TEXT, `scannedAtEpochMillis` INTEGER NOT NULL, `syncedAtIso` TEXT, `serverCheckInAtIso` TEXT, `message` TEXT, PRIMARY KEY(`localScanId`))",
+        "fields": [
+          {
+            "fieldPath": "localScanId",
+            "columnName": "localScanId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceDeviceId",
+            "columnName": "sourceDeviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "concertId",
+            "columnName": "concertId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qrHash",
+            "columnName": "qrHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayCode",
+            "columnName": "displayCode",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "attendeeName",
+            "columnName": "attendeeName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ticketTypeName",
+            "columnName": "ticketTypeName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "zoneOrSeat",
+            "columnName": "zoneOrSeat",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "gateName",
+            "columnName": "gateName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "previousCheckInAtIso",
+            "columnName": "previousCheckInAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "previousGateName",
+            "columnName": "previousGateName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "previousStaffName",
+            "columnName": "previousStaffName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "entityType",
+            "columnName": "entityType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localResult",
+            "columnName": "localResult",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncStatus",
+            "columnName": "syncStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "retryCount",
+            "columnName": "retryCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextRetryAtEpochMillis",
+            "columnName": "nextRetryAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "backendResultCode",
+            "columnName": "backendResultCode",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "backendStatus",
+            "columnName": "backendStatus",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "backendCheckInId",
+            "columnName": "backendCheckInId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "scannedAtEpochMillis",
+            "columnName": "scannedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAtIso",
+            "columnName": "syncedAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "serverCheckInAtIso",
+            "columnName": "serverCheckInAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "message",
+            "columnName": "message",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "localScanId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_local_scan_logs_sourceDeviceId_localScanId",
+            "unique": true,
+            "columnNames": [
+              "sourceDeviceId",
+              "localScanId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_local_scan_logs_sourceDeviceId_localScanId` ON `${TABLE_NAME}` (`sourceDeviceId`, `localScanId`)"
+          },
+          {
+            "name": "index_local_scan_logs_concertId",
+            "unique": false,
+            "columnNames": [
+              "concertId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_scan_logs_concertId` ON `${TABLE_NAME}` (`concertId`)"
+          },
+          {
+            "name": "index_local_scan_logs_qrHash",
+            "unique": false,
+            "columnNames": [
+              "qrHash"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_scan_logs_qrHash` ON `${TABLE_NAME}` (`qrHash`)"
+          },
+          {
+            "name": "index_local_scan_logs_displayCode",
+            "unique": false,
+            "columnNames": [
+              "displayCode"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_scan_logs_displayCode` ON `${TABLE_NAME}` (`displayCode`)"
+          },
+          {
+            "name": "index_local_scan_logs_syncStatus",
+            "unique": false,
+            "columnNames": [
+              "syncStatus"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_scan_logs_syncStatus` ON `${TABLE_NAME}` (`syncStatus`)"
+          },
+          {
+            "name": "index_local_scan_logs_scannedAtEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "scannedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_local_scan_logs_scannedAtEpochMillis` ON `${TABLE_NAME}` (`scannedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '79e2deef32835558d0f936369ac709b7')"
+    ]
+  }
+}

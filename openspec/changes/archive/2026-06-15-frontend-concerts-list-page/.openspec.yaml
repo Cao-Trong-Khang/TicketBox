@@ -1,0 +1,12 @@
+schema: change/v1
+name: "2026-06-14-frontend-concerts-list-page"
+title: "Frontend: Public Concerts List Page"
+status: "proposed"
+created: "2026-06-14"
+artifacts:
+  - id: proposal
+    type: proposal
+  - id: design
+    type: design
+  - id: tasks
+    type: tasks

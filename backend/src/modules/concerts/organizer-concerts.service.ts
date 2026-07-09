@@ -1,0 +1,727 @@
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
+import { ConcertStatus, OrderStatus, Prisma } from "@prisma/client";
+import { PrismaService } from "../../prisma/prisma.service";
+import { ROLE_CODES } from "../rbac/rbac.constants";
+import { RedisCacheService } from "../redis-cache/redis-cache.service";
+import {
+  getPublicConcertDetailCacheKey,
+  getPublicTicketTypesCacheKey,
+  PUBLIC_CONCERTS_CACHE_KEY,
+} from "./concerts.cache";
+import { OrganizerConcertCreateDto } from "./dto/organizer-concert-create.dto";
+import { OrganizerConcertDetailDto } from "./dto/organizer-concert-detail.dto";
+import { OrganizerConcertListItemDto } from "./dto/organizer-concert-list-item.dto";
+import {
+  OrganizerConcertRevenueConcertDto,
+  OrganizerConcertRevenueDto,
+  OrganizerConcertRevenueSummaryDto,
+  OrganizerConcertRevenueTicketTypeDto,
+} from "./dto/organizer-concert-revenue.dto";
+import { OrganizerConcertUpdateDto } from "./dto/organizer-concert-update.dto";
+import { sanitizeSeatingSvgMarkup } from "./svg-sanitizer";
+
+type OrganizerConcertListQueryResult = {
+  id: string;
+  status: ConcertStatus;
+  title: string;
+  artistName: string | null;
+  venueName: string;
+  venueAddress: string | null;
+  bannerUrl: string | null;
+  startsAt: Date;
+  endsAt: Date | null;
+  performanceStartAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type OrganizerConcertDetailQueryResult = {
+  id: string;
+  organizerId: string;
+  status: ConcertStatus;
+  title: string;
+  artistName: string | null;
+  description: string | null;
+  venueName: string;
+  venueAddress: string | null;
+  bannerUrl: string | null;
+  seatingSvg: string | null;
+  startsAt: Date;
+  endsAt: Date | null;
+  performanceStartAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type OrganizerConcertLifecycleStatus = "UPCOMING" | "ONGOING" | "ENDED";
+
+type OrganizerRevenueTicketTypeQueryResult = {
+  id: string;
+  code: string;
+  name: string;
+  priceVnd: number;
+  totalQuantity: number;
+  reservedQuantity: number;
+  soldQuantity: number;
+  status: string;
+};
+
+@Injectable()
+export class OrganizerConcertsService {
+  private readonly logger = new Logger(OrganizerConcertsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redisCache: RedisCacheService,
+  ) {}
+
+  async listOwnedConcerts(
+    organizerId: string,
+  ): Promise<OrganizerConcertListItemDto[]> {
+    await this.ensureOrganizerRole(organizerId);
+
+    const concerts = await this.prisma.concert.findMany({
+      where: {
+        organizerId,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: {
+        id: true,
+        status: true,
+        title: true,
+        artistName: true,
+        venueName: true,
+        venueAddress: true,
+        bannerUrl: true,
+        startsAt: true,
+        endsAt: true,
+        performanceStartAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return concerts.map((concert) => this.toOrganizerListItem(concert));
+  }
+
+  async createConcert(
+    organizerId: string,
+    dto: OrganizerConcertCreateDto,
+  ): Promise<OrganizerConcertDetailDto> {
+    await this.ensureOrganizerRole(organizerId);
+
+    const startsAt = this.parseDateString(dto.startsAt, "startsAt");
+    const endsAt = this.parseDateString(dto.endsAt, "endsAt");
+    const performanceStartAt = this.parseDateString(
+      dto.performanceStartAt,
+      "performanceStartAt",
+    );
+    this.assertValidConcertTiming(startsAt, endsAt, performanceStartAt);
+    const sanitizedSeatingSvg = this.sanitizeSeatingSvg(dto.seatingSvg, "create");
+
+    const concert = await this.prisma.concert.create({
+      data: {
+        organizerId,
+        status: ConcertStatus.PUBLISHED,
+        title: dto.title,
+        artistName: dto.artistName,
+        description: dto.description ?? null,
+        venueName: dto.venueName,
+        venueAddress: dto.venueAddress,
+        bannerUrl: dto.bannerUrl ?? null,
+        seatingSvg: sanitizedSeatingSvg,
+        startsAt,
+        endsAt,
+        performanceStartAt,
+      },
+      select: {
+        id: true,
+        organizerId: true,
+        status: true,
+        title: true,
+        artistName: true,
+        description: true,
+        venueName: true,
+        venueAddress: true,
+        bannerUrl: true,
+        seatingSvg: true,
+        startsAt: true,
+        endsAt: true,
+        performanceStartAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    await this.invalidatePublicConcertListCache();
+
+    return this.toOrganizerDetail(concert);
+  }
+
+  async getOwnedConcert(
+    organizerId: string,
+    concertId: string,
+  ): Promise<OrganizerConcertDetailDto> {
+    await this.ensureOrganizerRole(organizerId);
+
+    const concert = await this.findOwnedConcertOrThrow(organizerId, concertId);
+
+    return this.toOrganizerDetail(concert);
+  }
+
+  async getOwnedConcertRevenue(
+    organizerId: string,
+    concertId: string,
+  ): Promise<OrganizerConcertRevenueDto> {
+    await this.ensureOrganizerRole(organizerId);
+
+    const concert = await this.findOwnedConcertOrThrow(organizerId, concertId);
+    const [ticketTypes, paidOrders, paidOrderItems] = await Promise.all([
+      this.prisma.ticketType.findMany({
+        where: {
+          concertId,
+        },
+        orderBy: [{ priceVnd: "asc" }, { code: "asc" }],
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          priceVnd: true,
+          totalQuantity: true,
+          reservedQuantity: true,
+          soldQuantity: true,
+          status: true,
+        },
+      }),
+      this.prisma.order.findMany({
+        where: {
+          concertId,
+          status: OrderStatus.PAID,
+          paidAt: {
+            not: null,
+          },
+        },
+        select: {
+          id: true,
+          totalAmountVnd: true,
+        },
+      }),
+      this.prisma.orderItem.findMany({
+        where: {
+          order: {
+            concertId,
+            status: OrderStatus.PAID,
+            paidAt: {
+              not: null,
+            },
+          },
+        },
+        select: {
+          ticketTypeId: true,
+          quantity: true,
+          subtotalVnd: true,
+        },
+      }),
+    ]);
+
+    const revenueByTicketTypeId = new Map<string, number>();
+
+    for (const item of paidOrderItems) {
+      revenueByTicketTypeId.set(
+        item.ticketTypeId,
+        (revenueByTicketTypeId.get(item.ticketTypeId) ?? 0) + item.subtotalVnd,
+      );
+    }
+
+    const totalRevenueVnd = paidOrders.reduce(
+      (sum, order) => sum + order.totalAmountVnd,
+      0,
+    );
+    const totalSoldQuantity = ticketTypes.reduce(
+      (sum, ticketType) => sum + ticketType.soldQuantity,
+      0,
+    );
+    const totalReservedQuantity = ticketTypes.reduce(
+      (sum, ticketType) => sum + ticketType.reservedQuantity,
+      0,
+    );
+    const totalTicketQuantity = ticketTypes.reduce(
+      (sum, ticketType) => sum + ticketType.totalQuantity,
+      0,
+    );
+    const totalAvailableQuantity = ticketTypes.reduce(
+      (sum, ticketType) => sum + this.getAvailableQuantity(ticketType),
+      0,
+    );
+
+    return {
+      concert: this.toOrganizerRevenueConcert(concert),
+      summary: this.toOrganizerRevenueSummary({
+        totalRevenueVnd,
+        totalSoldQuantity,
+        totalReservedQuantity,
+        totalAvailableQuantity,
+        totalTicketQuantity,
+        paidOrderCount: paidOrders.length,
+      }),
+      ticketTypes: ticketTypes.map((ticketType) =>
+        this.toOrganizerRevenueTicketType(
+          ticketType,
+          revenueByTicketTypeId.get(ticketType.id) ?? 0,
+        ),
+      ),
+    };
+  }
+
+  async updateOwnedConcert(
+    organizerId: string,
+    concertId: string,
+    dto: OrganizerConcertUpdateDto,
+  ): Promise<OrganizerConcertDetailDto> {
+    await this.ensureOrganizerRole(organizerId);
+    this.assertNoNullForRequiredPatchFields(dto);
+
+    const concert = await this.findOwnedConcertOrThrow(organizerId, concertId);
+    this.assertConcertEditable(concert);
+
+    const startsAt = dto.startsAt
+      ? this.parseDateString(dto.startsAt, "startsAt")
+      : concert.startsAt;
+    const endsAt = dto.endsAt
+      ? this.parseDateString(dto.endsAt, "endsAt")
+      : concert.endsAt;
+    const performanceStartAt = dto.performanceStartAt
+      ? this.parseDateString(dto.performanceStartAt, "performanceStartAt")
+      : this.getPerformanceStartAt(concert);
+
+    if (
+      dto.startsAt !== undefined ||
+      dto.endsAt !== undefined ||
+      dto.performanceStartAt !== undefined
+    ) {
+      this.assertValidConcertTiming(startsAt, endsAt, performanceStartAt);
+    }
+
+    const seatingSvgValue =
+      dto.seatingSvg === undefined || dto.seatingSvg === null
+        ? dto.seatingSvg
+        : this.sanitizeSeatingSvg(dto.seatingSvg, "update");
+
+    const concertUpdateData: Prisma.ConcertUpdateInput = {
+      title: dto.title,
+      artistName: dto.artistName,
+      description: dto.description,
+      venueName: dto.venueName,
+      venueAddress: dto.venueAddress,
+      bannerUrl: dto.bannerUrl,
+      seatingSvg: seatingSvgValue,
+      startsAt: dto.startsAt ? startsAt : undefined,
+      endsAt: dto.endsAt ? endsAt : undefined,
+      performanceStartAt:
+        dto.performanceStartAt !== undefined ? performanceStartAt : undefined,
+    };
+
+    const updatedConcert = await this.prisma.concert.update({
+      where: {
+        id: concertId,
+      },
+      data: concertUpdateData,
+      select: {
+        id: true,
+        organizerId: true,
+        status: true,
+        title: true,
+        artistName: true,
+        description: true,
+        venueName: true,
+        venueAddress: true,
+        bannerUrl: true,
+        seatingSvg: true,
+        startsAt: true,
+        endsAt: true,
+        performanceStartAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    await this.invalidatePublicConcertCache(concertId);
+
+    return this.toOrganizerDetail(updatedConcert);
+  }
+
+  private sanitizeSeatingSvg(
+    value: string | null | undefined,
+    context: "create" | "update",
+  ): string | null {
+    try {
+      return sanitizeSeatingSvgMarkup(value);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid SVG";
+      this.logger.warn(`Rejected seating SVG during ${context} for organizer concert: ${message}`);
+      throw error;
+    }
+  }
+
+  async cancelOwnedConcert(
+    organizerId: string,
+    concertId: string,
+  ): Promise<OrganizerConcertDetailDto> {
+    await this.ensureOrganizerRole(organizerId);
+
+    const concert = await this.findOwnedConcertOrThrow(organizerId, concertId);
+    this.assertConcertCancelable(concert);
+
+    const cancelledConcert = await this.prisma.concert.update({
+      where: {
+        id: concertId,
+      },
+      data: {
+        status: ConcertStatus.CANCELLED,
+      },
+      select: {
+        id: true,
+        organizerId: true,
+        status: true,
+        title: true,
+        artistName: true,
+        description: true,
+        venueName: true,
+        venueAddress: true,
+        bannerUrl: true,
+        seatingSvg: true,
+        startsAt: true,
+        endsAt: true,
+        performanceStartAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    await this.invalidatePublicConcertCache(concertId);
+
+    return this.toOrganizerDetail(cancelledConcert);
+  }
+
+  async ensureOrganizerRole(userId: string): Promise<void> {
+    const organizerRole = await this.prisma.role.findUnique({
+      where: {
+        code: ROLE_CODES.organizer,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!organizerRole) {
+      throw new ForbiddenException("Organizer role is not configured");
+    }
+
+    const userRole = await this.prisma.userRole.findFirst({
+      where: {
+        userId,
+        roleId: organizerRole.id,
+      },
+      select: {
+        userId: true,
+      },
+    });
+
+    if (!userRole) {
+      throw new ForbiddenException("Organizer access is required");
+    }
+  }
+
+  async findOwnedConcertOrThrow(
+    organizerId: string,
+    concertId: string,
+  ): Promise<OrganizerConcertDetailQueryResult> {
+    const concert = await this.prisma.concert.findFirst({
+      where: {
+        id: concertId,
+        organizerId,
+      },
+      select: {
+        id: true,
+        organizerId: true,
+        status: true,
+        title: true,
+        artistName: true,
+        description: true,
+        venueName: true,
+        venueAddress: true,
+        bannerUrl: true,
+        seatingSvg: true,
+        startsAt: true,
+        endsAt: true,
+        performanceStartAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!concert) {
+      throw new NotFoundException("Concert not found");
+    }
+
+    return concert;
+  }
+
+  private assertNoNullForRequiredPatchFields(
+    dto: OrganizerConcertUpdateDto,
+  ): void {
+    const fields = [
+      "title",
+      "artistName",
+      "venueName",
+      "venueAddress",
+      "startsAt",
+      "endsAt",
+      "performanceStartAt",
+    ] as const;
+
+    for (const field of fields) {
+      if (dto[field] === null) {
+        throw new BadRequestException(`${field} must not be null`);
+      }
+    }
+  }
+
+  private parseDateString(value: string, fieldName: string): Date {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException(`${fieldName} must be a valid date`);
+    }
+
+    return date;
+  }
+
+  private assertValidDateRange(startsAt: Date, endsAt: Date | null): void {
+    if (!endsAt || startsAt >= endsAt) {
+      throw new BadRequestException("startsAt must be earlier than endsAt");
+    }
+  }
+
+  private assertValidConcertTiming(
+    startsAt: Date,
+    endsAt: Date | null,
+    performanceStartAt: Date,
+  ): void {
+    this.assertValidDateRange(startsAt, endsAt);
+
+    if (!endsAt || endsAt >= performanceStartAt) {
+      throw new BadRequestException(
+        "endsAt must be earlier than performanceStartAt",
+      );
+    }
+  }
+
+  private assertConcertEditable(
+    concert: OrganizerConcertDetailQueryResult,
+  ): void {
+    if (concert.status === ConcertStatus.CANCELLED) {
+      throw new ConflictException("Concert đã hủy nên không thể chỉnh sửa.");
+    }
+
+    if (this.getLifecycleStatus(concert) !== "UPCOMING") {
+      throw new ConflictException(
+        "Concert đang diễn ra hoặc đã kết thúc nên không thể chỉnh sửa.",
+      );
+    }
+  }
+
+  private assertConcertCancelable(
+    concert: OrganizerConcertDetailQueryResult,
+  ): void {
+    if (concert.status === ConcertStatus.CANCELLED) {
+      throw new ConflictException("Concert đã hủy nên không thể hủy.");
+    }
+
+    if (this.getLifecycleStatus(concert) !== "UPCOMING") {
+      throw new ConflictException(
+        "Concert đang diễn ra hoặc đã kết thúc nên không thể hủy.",
+      );
+    }
+  }
+
+  private async invalidatePublicConcertListCache(): Promise<void> {
+    await this.invalidateCacheKeys([PUBLIC_CONCERTS_CACHE_KEY]);
+  }
+
+  private async invalidatePublicConcertCache(concertId: string): Promise<void> {
+    await this.invalidateCacheKeys([
+      PUBLIC_CONCERTS_CACHE_KEY,
+      getPublicConcertDetailCacheKey(concertId),
+      getPublicTicketTypesCacheKey(concertId),
+    ]);
+  }
+
+  private async invalidateCacheKeys(cacheKeys: string[]): Promise<void> {
+    const results = await Promise.allSettled(
+      cacheKeys.map((cacheKey) => this.redisCache.del(cacheKey)),
+    );
+
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        const errorMessage =
+          result.reason instanceof Error
+            ? result.reason.message
+            : "Unknown Redis error";
+        this.logger.warn(
+          `Public cache invalidation failed for key "${cacheKeys[index]}": ${errorMessage}`,
+        );
+      }
+    }
+  }
+
+  private getLifecycleStatus(
+    concert: Pick<OrganizerConcertDetailQueryResult, "startsAt" | "endsAt">,
+    now = new Date(),
+  ): OrganizerConcertLifecycleStatus {
+    const endsAt = concert.endsAt ?? concert.startsAt;
+
+    if (now < concert.startsAt) {
+      return "UPCOMING";
+    }
+
+    if (now <= endsAt) {
+      return "ONGOING";
+    }
+
+    return "ENDED";
+  }
+
+  private getPerformanceStartAt(
+    concert: Pick<OrganizerConcertDetailQueryResult, "startsAt" | "performanceStartAt">,
+  ): Date {
+    return concert.performanceStartAt ?? concert.startsAt;
+  }
+
+  private getAvailableQuantity(
+    ticketType: Pick<
+      OrganizerRevenueTicketTypeQueryResult,
+      "totalQuantity" | "reservedQuantity" | "soldQuantity"
+    >,
+  ): number {
+    return Math.max(
+      0,
+      ticketType.totalQuantity -
+        ticketType.reservedQuantity -
+        ticketType.soldQuantity,
+    );
+  }
+
+  private toOrganizerListItem(
+    concert: OrganizerConcertListQueryResult,
+  ): OrganizerConcertListItemDto {
+    return {
+      id: concert.id,
+      status: concert.status,
+      lifecycleStatus: this.getLifecycleStatus(concert),
+      title: concert.title,
+      artistName: concert.artistName,
+      venueName: concert.venueName,
+      venueAddress: concert.venueAddress,
+      bannerUrl: concert.bannerUrl,
+      startsAt: concert.startsAt.toISOString(),
+      endsAt: concert.endsAt?.toISOString() ?? null,
+      performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
+      createdAt: concert.createdAt.toISOString(),
+      updatedAt: concert.updatedAt.toISOString(),
+    };
+  }
+
+  private toOrganizerDetail(
+    concert: OrganizerConcertDetailQueryResult,
+  ): OrganizerConcertDetailDto {
+    return {
+      id: concert.id,
+      status: concert.status,
+      lifecycleStatus: this.getLifecycleStatus(concert),
+      title: concert.title,
+      artistName: concert.artistName,
+      description: concert.description,
+      venueName: concert.venueName,
+      venueAddress: concert.venueAddress,
+      bannerUrl: concert.bannerUrl,
+      seatingSvg: concert.seatingSvg,
+      startsAt: concert.startsAt.toISOString(),
+      endsAt: concert.endsAt?.toISOString() ?? null,
+      performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
+      createdAt: concert.createdAt.toISOString(),
+      updatedAt: concert.updatedAt.toISOString(),
+    };
+  }
+
+  private toOrganizerRevenueConcert(
+    concert: OrganizerConcertDetailQueryResult,
+  ): OrganizerConcertRevenueConcertDto {
+    return {
+      id: concert.id,
+      status: concert.status,
+      lifecycleStatus: this.getLifecycleStatus(concert),
+      title: concert.title,
+      artistName: concert.artistName,
+      venueName: concert.venueName,
+      venueAddress: concert.venueAddress,
+      bannerUrl: concert.bannerUrl,
+      startsAt: concert.startsAt.toISOString(),
+      endsAt: concert.endsAt?.toISOString() ?? null,
+      performanceStartAt: this.getPerformanceStartAt(concert).toISOString(),
+    };
+  }
+
+  private toOrganizerRevenueSummary(input: {
+    totalRevenueVnd: number;
+    totalSoldQuantity: number;
+    totalReservedQuantity: number;
+    totalAvailableQuantity: number;
+    totalTicketQuantity: number;
+    paidOrderCount: number;
+  }): OrganizerConcertRevenueSummaryDto {
+    return {
+      totalRevenueVnd: input.totalRevenueVnd,
+      totalSoldQuantity: input.totalSoldQuantity,
+      totalReservedQuantity: input.totalReservedQuantity,
+      totalAvailableQuantity: input.totalAvailableQuantity,
+      totalTicketQuantity: input.totalTicketQuantity,
+      soldRate:
+        input.totalTicketQuantity > 0
+          ? input.totalSoldQuantity / input.totalTicketQuantity
+          : 0,
+      paidOrderCount: input.paidOrderCount,
+    };
+  }
+
+  private toOrganizerRevenueTicketType(
+    ticketType: OrganizerRevenueTicketTypeQueryResult,
+    revenueVnd: number,
+  ): OrganizerConcertRevenueTicketTypeDto {
+    return {
+      id: ticketType.id,
+      code: ticketType.code,
+      name: ticketType.name,
+      priceVnd: ticketType.priceVnd,
+      totalQuantity: ticketType.totalQuantity,
+      reservedQuantity: ticketType.reservedQuantity,
+      soldQuantity: ticketType.soldQuantity,
+      availableQuantity: this.getAvailableQuantity(ticketType),
+      revenueVnd,
+      soldRate:
+        ticketType.totalQuantity > 0
+          ? ticketType.soldQuantity / ticketType.totalQuantity
+          : 0,
+      status: ticketType.status,
+    };
+  }
+}

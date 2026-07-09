@@ -62,7 +62,7 @@ flowchart TB
     subgraph ticketbox["TicketBox System"]
         web["Web Application<br/>[Container: Web Frontend]<br/>Provides the audience area for concert browsing and checkout, and the organizer admin area for concert management and reporting."]
 
-        mobile["Check-in Mobile App<br/>[Container: React Native + SQLite/WatermelonDB]<br/>Allows check-in staff to scan QR codes, validate tickets and VIP guests, store offline scans, and synchronize when online."]
+        mobile["Check-in Mobile App<br/>[Container: Android/Kotlin + Room/WorkManager]<br/>Allows check-in staff to scan QR codes, validate tickets and VIP guests, store offline scans, and synchronize when online."]
 
         api["Backend API<br/>[Container: NestJS Modular Monolith]<br/>Exposes REST APIs, enforces RBAC, handles checkout, payment callbacks, ticket issuance, concert management, and check-in synchronization."]
 
@@ -212,31 +212,40 @@ erDiagram
 
     USERS ||--o{ CONCERTS : organizes
     CONCERTS ||--o{ TICKET_TYPES : offers
-    CONCERTS ||--o{ ORDERS : receives
+
     USERS ||--o{ ORDERS : places
+    CONCERTS ||--o{ ORDERS : receives
     ORDERS ||--o{ ORDER_ITEMS : contains
     TICKET_TYPES ||--o{ ORDER_ITEMS : selected
-    ORDER_ITEMS ||--o{ TICKETS : issues
-    USERS ||--o{ TICKETS : owns
+
     ORDERS ||--o{ PAYMENT_TRANSACTIONS : paid_by
-    TICKETS ||--o{ CHECK_INS : checked_in_by
+
+    ORDERS ||--o{ TICKETS : issues
+    ORDER_ITEMS ||--o{ TICKETS : generates
+    USERS ||--o{ TICKETS : owns
+    CONCERTS ||--o{ TICKETS : belongs_to
+    TICKET_TYPES ||--o{ TICKETS : has_type
+
+    TICKETS ||--o{ CHECK_INS : checked_by
+    VIP_GUESTS ||--o{ CHECK_INS : checked_by
+    CONCERTS ||--o{ CHECK_INS : has
+    USERS ||--o{ CHECK_INS : performs
+
+    USERS ||--o{ NOTIFICATIONS : receives
+    CONCERTS ||--o{ NOTIFICATIONS : related_to
+
+    CONCERTS ||--o{ ARTIST_BIO_JOBS : has
+    USERS ||--o{ ARTIST_BIO_JOBS : uploads
 
     CONCERTS ||--o{ VIP_GUEST_IMPORTS : imports
     VIP_GUEST_IMPORTS ||--o{ VIP_GUESTS : contains
-    VIP_GUESTS ||--o{ CHECK_INS : checked_in_by
-
-    CONCERTS ||--o{ ARTIST_DOCUMENTS : has
-    ARTIST_DOCUMENTS ||--o{ AI_ARTIST_BIOS : generates
-
-    USERS ||--o{ NOTIFICATIONS : receives
-    USERS ||--o{ AUDIT_LOGS : performs
+    CONCERTS ||--o{ VIP_GUESTS : has
 
     USERS {
         uuid id PK
         string email UK
         string password_hash
-        string full_name
-        string phone
+        string display_name
         string status
         datetime created_at
         datetime updated_at
@@ -246,22 +255,28 @@ erDiagram
         uuid id PK
         string code UK
         string name
+        datetime created_at
+        datetime updated_at
     }
 
     PERMISSIONS {
         uuid id PK
         string code UK
         string description
+        datetime created_at
+        datetime updated_at
     }
 
     USER_ROLES {
-        uuid user_id FK
-        uuid role_id FK
+        uuid user_id PK, FK
+        uuid role_id PK, FK
+        datetime created_at
     }
 
     ROLE_PERMISSIONS {
-        uuid role_id FK
-        uuid permission_id FK
+        uuid role_id PK, FK
+        uuid permission_id PK, FK
+        datetime created_at
     }
 
     CONCERTS {
@@ -269,13 +284,14 @@ erDiagram
         uuid organizer_id FK
         string title
         string artist_name
+        string description
         string venue_name
-        text venue_address
-        text seating_svg
+        string venue_address
+        string banner_url
+        string seating_svg
         string status
-        datetime sale_start_at
         datetime starts_at
-        datetime cancelled_at
+        datetime ends_at
         datetime created_at
         datetime updated_at
     }
@@ -291,6 +307,7 @@ erDiagram
         int sold_quantity
         int per_user_limit
         datetime sale_start_at
+        datetime sale_end_at
         string status
         datetime created_at
         datetime updated_at
@@ -298,12 +315,14 @@ erDiagram
 
     ORDERS {
         uuid id PK
+        string order_code UK
         uuid user_id FK
         uuid concert_id FK
         string status
         int total_amount_vnd
         datetime expires_at
         datetime paid_at
+        string idempotency_key
         datetime created_at
         datetime updated_at
     }
@@ -314,6 +333,7 @@ erDiagram
         uuid ticket_type_id FK
         int quantity
         int unit_price_vnd
+        int subtotal_vnd
     }
 
     PAYMENT_TRANSACTIONS {
@@ -331,21 +351,67 @@ erDiagram
 
     TICKETS {
         uuid id PK
+        string ticket_code UK
+        string qr_hash UK
+        uuid order_id FK
         uuid order_item_id FK
         uuid owner_user_id FK
         uuid concert_id FK
         uuid ticket_type_id FK
-        string qr_hash UK
         string status
         datetime issued_at
         datetime checked_in_at
         datetime created_at
     }
 
+    CHECK_INS {
+        uuid id PK
+        uuid ticket_id FK
+        uuid vip_guest_id FK
+        uuid concert_id FK
+        uuid staff_user_id FK
+        string source_device_id
+        string mode
+        string status
+        string sync_status
+        datetime scanned_at
+        datetime synced_at
+        string note
+        datetime created_at
+    }
+
+    NOTIFICATIONS {
+        uuid id PK
+        uuid user_id FK
+        uuid concert_id FK
+        string type
+        string channel
+        string status
+        string subject
+        string body
+        datetime scheduled_at
+        datetime sent_at
+        datetime read_at
+        datetime created_at
+    }
+
+    ARTIST_BIO_JOBS {
+        uuid id PK
+        uuid concert_id FK
+        uuid uploaded_by FK
+        string file_name
+        string storage_key
+        string extracted_text
+        string generated_bio
+        string failure_reason
+        string status
+        datetime created_at
+        datetime updated_at
+    }
+
     VIP_GUEST_IMPORTS {
         uuid id PK
         uuid concert_id FK
-        string source_name
         string file_name
         string status
         int total_rows
@@ -367,65 +433,6 @@ erDiagram
         string phone
         string status
         datetime checked_in_at
-        datetime created_at
-    }
-
-    CHECK_INS {
-        uuid id PK
-        uuid ticket_id FK
-        uuid vip_guest_id FK
-        uuid staff_user_id FK
-        string source_device_id
-        string status
-        string sync_status
-        datetime scanned_at
-        datetime synced_at
-        datetime created_at
-    }
-
-    ARTIST_DOCUMENTS {
-        uuid id PK
-        uuid concert_id FK
-        string file_name
-        string storage_key
-        string status
-        text extracted_text
-        datetime uploaded_at
-        datetime created_at
-    }
-
-    AI_ARTIST_BIOS {
-        uuid id PK
-        uuid document_id FK
-        uuid concert_id FK
-        string status
-        text generated_bio
-        string failure_reason
-        datetime generated_at
-        datetime created_at
-    }
-
-    NOTIFICATIONS {
-        uuid id PK
-        uuid user_id FK
-        uuid concert_id FK
-        string type
-        string channel
-        string status
-        string subject
-        text body
-        datetime scheduled_at
-        datetime sent_at
-        datetime created_at
-    }
-
-    AUDIT_LOGS {
-        uuid id PK
-        uuid actor_user_id FK
-        string action
-        string target_type
-        uuid target_id
-        text metadata_json
         datetime created_at
     }
 ```

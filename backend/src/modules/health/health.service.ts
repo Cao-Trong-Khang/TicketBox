@@ -5,7 +5,7 @@ import {
   getKafkaConfig,
   getPostgresConfig,
   getRedisConfig,
-} from '../../shared/config/app.config';
+} from '../../config/app.config';
 
 @Injectable()
 export class HealthService {

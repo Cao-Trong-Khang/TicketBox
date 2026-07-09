@@ -1,0 +1,5 @@
+concert_title,sponsor_source,external_guest_key,full_name,email,phone
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,SPONSOR-BAD-001,,missing-name@example.test,+84909990001
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,SPONSOR-BAD-002,Invalid Email Guest,not-an-email,+84909990002
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,,No Contact Guest,,
+Anh Trai Say Hi Concert 2026,LOCAL_DEMO,SPONSOR-GOOD-001,Valid Mixed Guest,valid.mixed@example.test,+84909990003

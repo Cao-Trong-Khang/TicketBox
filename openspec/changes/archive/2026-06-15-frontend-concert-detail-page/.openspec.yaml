@@ -1,0 +1,12 @@
+schema: change/v1
+name: "frontend-concert-detail-page"
+title: "Frontend: Concert Detail Page"
+status: "proposed"
+created: "2026-06-15"
+artifacts:
+  - id: proposal
+    type: proposal
+  - id: design
+    type: design
+  - id: tasks
+    type: tasks

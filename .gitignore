@@ -1,5 +1,7 @@
-# OpenAI Codex
+# AI Agent
 .codex/
+.agent/
+.github/
 
 # Dependencies
 node_modules/
@@ -8,6 +10,16 @@ node_modules/
 dist/
 build/
 coverage/
+*.tsbuildinfo
+
+# Verification artifacts
+verification-*.png
+verification-*.xml
+
+# Android/Gradle local files
+.gradle/
+.kotlin/
+local.properties
 
 # Logs
 *.log

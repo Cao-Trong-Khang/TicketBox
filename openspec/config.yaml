@@ -25,7 +25,7 @@ context: |
   Main runtime components:
 
   - Web Application: audience area and organizer admin area.
-  - Check-in Mobile App: React Native with local SQLite/WatermelonDB storage.
+  - Check-in Mobile App: Native Android (Kotlin) utilizing Room Database for offline-first storage, WorkManager for background synchronization, and Jetpack Compose for UI.
   - Backend API: NestJS modular monolith.
   - Background Workers: asynchronous jobs for notifications, reminders, CSV import, AI bio generation, and analytics.
   - PostgreSQL: authoritative transactional database.
