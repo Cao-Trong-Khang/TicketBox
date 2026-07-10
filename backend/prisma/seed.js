@@ -378,6 +378,13 @@ async function main() {
                 active: true,
             }
         });
+        await prisma.checkInStaffAssignment.create({
+            data: {
+                userId: staff.id,
+                concertId: mainConcert.id,
+                gateLabel: gates[i % gates.length],
+            }
+        });
         await prisma.checkInAssignment.create({
             data: {
                 staffUserId: staff.id,
@@ -385,6 +392,13 @@ async function main() {
                 gateName: gates[(i + 1) % gates.length],
                 sourceDeviceId: `dev-device-${staff.id.substring(0, 8)}`,
                 active: true,
+            }
+        });
+        await prisma.checkInStaffAssignment.create({
+            data: {
+                userId: staff.id,
+                concertId: secConcert.id,
+                gateLabel: gates[(i + 1) % gates.length],
             }
         });
         await prisma.checkInAssignment.create({
