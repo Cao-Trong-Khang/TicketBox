@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   UseGuards,
@@ -13,10 +14,18 @@ import { CreateOrderRequestDto } from './dto/create-order.request.dto';
 import { CreateOrderResponseDto } from './dto/create-order.response.dto';
 import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import { RateLimitGuard } from '../rate-limit/rate-limit.guard';
+import { AuthenticatedUser } from '../auth/types';
+import { OrderHistoryItemDto } from './dto/order-history.response.dto';
 
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
+  @Get('history')
+  @UseGuards(JwtAuthGuard)
+  async getOrderHistory(@Req() req: Request): Promise<OrderHistoryItemDto[]> {
+    const userId = (req.user as AuthenticatedUser).id;
+    return this.ordersService.getOrderHistory(userId);
+  }
 
   @Post()
   @UseGuards(JwtAuthGuard, RateLimitGuard)

@@ -380,7 +380,7 @@ export class CheckInService {
             )
           : this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, scanTiming.timing, {
               status: CheckInStatus.INVALID_QR,
-              note: scanTiming.reason,
+              note: (scanTiming as any).reason,
             }),
       );
 
@@ -456,7 +456,7 @@ export class CheckInService {
     if (!verifiedTicketQr.valid) {
       return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         status: CheckInStatus.INVALID_QR,
-        note: verifiedTicketQr.reason,
+        note: (verifiedTicketQr as any).reason,
       });
     }
 
@@ -625,7 +625,7 @@ export class CheckInService {
     if (!verifiedVipQr.valid) {
       return this.createCheckIn(tx, staffUserId, concertId, sourceDeviceId, scan, timing, {
         status: CheckInStatus.INVALID_QR,
-        note: verifiedVipQr.reason,
+        note: (verifiedVipQr as any).reason,
       });
     }
 

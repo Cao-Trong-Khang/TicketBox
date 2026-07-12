@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { CreateOrderRequestDto } from './dto/create-order.request.dto';
 import { CreateOrderResponseDto } from './dto/create-order.response.dto';
+import { OrderHistoryItemDto } from './dto/order-history.response.dto';
 
 @Injectable()
 export class OrdersService {
@@ -16,6 +17,55 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly redisCache: RedisCacheService,
   ) {}
+  async getOrderHistory(userId: string): Promise<OrderHistoryItemDto[]> {
+    const orders = await this.prisma.order.findMany({
+      where: { userId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 100,
+      select: {
+        id: true,
+        orderCode: true,
+        status: true,
+        createdAt: true,
+        totalAmountVnd: true,
+        concert: {
+          select: {
+            title: true,
+            performanceStartAt: true,
+            startsAt: true,
+            venueName: true,
+            venueAddress: true,
+            bannerUrl: true,
+          },
+        },
+        items: {
+          select: {
+            quantity: true,
+            ticketType: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    return orders.map((order) => ({
+      orderId: order.id,
+      orderCode: order.orderCode,
+      status: order.status,
+      createdAt: order.createdAt.toISOString(),
+      performanceStartAt: (
+        order.concert.performanceStartAt ?? order.concert.startsAt
+      ).toISOString(),
+      concertTitle: order.concert.title,
+      venueName: order.concert.venueName,
+      venueAddress: order.concert.venueAddress,
+      bannerUrl: order.concert.bannerUrl,
+      totalAmountVnd: order.totalAmountVnd,
+      tickets: order.items.map((item) => ({
+        ticketTypeName: item.ticketType.name,
+        quantity: item.quantity,
+      })),
+    }));
+  }
 
   async createOrder(
     userId: string,

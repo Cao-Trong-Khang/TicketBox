@@ -1,11 +1,11 @@
 ## Purpose
 
-This capability lets an Organizer upload a PDF press kit for a concert they own, observe asynchronous extraction and AI generation, regenerate or manually edit the result, and make only the latest completed biography visible to Audience users. It depends on the Web Application, NestJS Backend API, PostgreSQL, Kafka, Background Worker, MinIO, Redis concert-detail cache, and an external AI Model or local mock adapter. Check-in Staff have no access to its admin operations.
+This capability lets an Organizer upload a PDF artist profile or concert press kit for a concert they own, have the system extract and clean the content asynchronously, send controlled text to an AI model, and publish a short artist biography on the public concert detail page. It depends on the Web Application, NestJS Backend API, PostgreSQL, Kafka, Background Worker, MinIO, Redis concert-detail cache, and an external AI Model or local mock adapter. Audience users can only read completed public biographies, and Check-in Staff have no access to Artist Bio admin operations.
 
 ## Requirements
 
 ### Requirement: Organizer press-kit upload
-The system SHALL expose `POST /admin/concerts/:concertId/documents` for an authenticated Organizer with the required permission and ownership of the target concert. It MUST accept multipart field `file`, accept only a valid PDF no larger than 10 MB, store it in private MinIO storage, create an `artist_documents` record with status `uploaded`, publish `ai.bio.requested`, and return HTTP 202 with `{ document_id, status: "uploaded" }` only after the event is acknowledged.
+The system SHALL expose `POST /admin/concerts/:concertId/documents` for an authenticated Organizer with the required permission and ownership of the target concert. It MUST accept multipart field `file` containing an artist profile PDF or concert press-kit PDF, accept only a valid PDF no larger than 10 MB, store it in private MinIO storage, create an `artist_documents` record with status `uploaded`, publish `ai.bio.requested`, and return HTTP 202 with `{ document_id, status: "uploaded" }` only after the event is acknowledged.
 
 #### Scenario: Owned concert PDF is accepted asynchronously
 - **WHEN** an authorized Organizer uploads a valid PDF of at most 10 MB for a concert they own
@@ -29,6 +29,10 @@ Every artist-document admin endpoint MUST require Bearer authentication, the Org
 #### Scenario: Cross-concert document reference is denied
 - **WHEN** an Organizer supplies a document id that does not belong to the concert id in the route
 - **THEN** the system rejects the request without exposing the other concert's document data
+
+#### Scenario: Audience and Check-in Staff cannot use admin operations
+- **WHEN** an authenticated user without the `ORGANIZER` role calls an Artist Bio admin endpoint
+- **THEN** the system returns HTTP 403 and performs no document, object, biography, or Kafka mutation
 
 ### Requirement: Document listing and detail status
 The system SHALL expose owned-concert document listing and detail endpoints. The list MUST include document status and upload time. Detail MUST include `document_id`, `status`, `uploaded_at`, and, when available, extracted text, generated biography, sanitized failure reason, and generation time.
@@ -64,7 +68,7 @@ The Background Worker MUST download the PDF from MinIO, extract text outside the
 - **THEN** the system marks processing failed with `Could not extract text. Please upload a text-based PDF.` and does not retry or call the AI model
 
 ### Requirement: AI biography generation through an adapter
-The worker MUST send a controlled prompt and no more than 4,000 characters of cleaned press-kit text to the configured OpenAI, Gemini, or mock adapter. A successful result MUST be stored in `ai_artist_bios` with status `done`, `generated_bio`, and `generated_at`, and the associated document MUST become `done`.
+The worker MUST send a controlled prompt and no more than 4,000 characters of cleaned artist-profile or press-kit text to the configured OpenAI, Gemini, or mock adapter. A successful result MUST be a concise biography suitable for the public concert detail page, MUST be stored in `ai_artist_bios` with status `done`, `generated_bio`, and `generated_at`, and the associated document MUST become `done`.
 
 #### Scenario: AI adapter generates a biography
 - **WHEN** extraction succeeds and the configured AI adapter returns a valid biography
@@ -115,7 +119,7 @@ The system SHALL expose `PUT /admin/concerts/:concertId/documents/:documentId/bi
 - **THEN** the system returns a conflict error without creating an unrelated biography
 
 ### Requirement: Conditional public biography exposure
-`GET /concerts/:concertId` MUST remain unauthenticated and include `artist_bio` only from the latest `ai_artist_bios` record for that concert whose status is `done`, ordered by biography creation time descending. The property MUST be omitted entirely when no completed biography exists, including while processing or after failure.
+`GET /concerts/:concertId` MUST remain unauthenticated so Audience users can view concert details, and it MUST include `artist_bio` only from the latest `ai_artist_bios` record for that concert whose status is `done`, ordered by biography creation time descending. The property MUST be omitted entirely when no completed biography exists, including while processing or after failure.
 
 #### Scenario: Latest completed biography is public
 - **WHEN** a published concert has one or more completed biographies
@@ -130,11 +134,11 @@ The system SHALL expose `PUT /admin/concerts/:concertId/documents/:documentId/bi
 - **THEN** public concert browsing and detail remain available independently of the generation workflow
 
 ### Requirement: Organizer admin user experience
-The Organizer Web Application MUST accept `.pdf` only, reject files over 10 MB client-side, upload through the admin API, and poll document detail every 3â€“5 seconds while processing. It MUST stop polling at a terminal state and show generated content, failure reason, Regenerate, and Edit Manually controls as applicable.
+The Organizer Web Application MUST accept `.pdf` only, reject files over 10 MB client-side, upload through the admin API, and poll document detail every 3-5 seconds while processing. It MUST stop polling at a terminal state and show generated content, failure reason, Regenerate, and Edit Manually controls as applicable.
 
 #### Scenario: UI tracks generation to completion
 - **WHEN** an Organizer uploads a valid PDF and the job is processing
-- **THEN** the UI refreshes status every 3â€“5 seconds and stops when it displays `done` or `failed`
+- **THEN** the UI refreshes status every 3-5 seconds and stops when it displays `done` or `failed`
 
 #### Scenario: Client validation catches an oversized file
 - **WHEN** an Organizer selects a PDF larger than 10 MB

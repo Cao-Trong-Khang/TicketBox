@@ -1,7 +1,7 @@
-﻿import { ReactNode, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { ReactNode, useEffect, useState } from 'react';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { LogOut, Ticket } from 'lucide-react';
-import { clearSession, isAuthenticated } from '../../features/auth/session';
+import { clearSession, isAuthenticated, userHasRole } from '../../features/auth/session';
 
 type AppShellProps = {
   children: ReactNode;
@@ -16,6 +16,7 @@ function readAuthState() {
 export function AppShell({ children }: AppShellProps) {
   const navigate = useNavigate();
   const [authState, setAuthState] = useState(readAuthState);
+  const isOrganizer = authState.hasToken && userHasRole('ORGANIZER');
 
   useEffect(() => {
     const syncToken = () => setAuthState(readAuthState());
@@ -44,14 +45,29 @@ export function AppShell({ children }: AppShellProps) {
 
         <nav className="nav-links" aria-label="Primary">
           {authState.hasToken && (
-            <button
-              className="nav-button"
-              type="button"
-              onClick={handleLogout}
-            >
-              <LogOut size={18} aria-hidden="true" />
-              <span>Đăng xuất</span>
-            </button>
+            <>
+              <NavLink
+                className="nav-link"
+                to={isOrganizer ? '/organizer/concerts' : '/concerts'}
+                end
+              >
+                <span>Sự kiện</span>
+              </NavLink>
+              {!isOrganizer && (
+                <NavLink className="nav-link" to="/orders" end>
+                  <span>Đơn hàng của tôi</span>
+                </NavLink>
+              )}
+
+              <button
+                className="nav-button"
+                type="button"
+                onClick={handleLogout}
+              >
+                <LogOut size={18} aria-hidden="true" />
+                <span>Đăng xuất</span>
+              </button>
+            </>
           )}
         </nav>
       </header>

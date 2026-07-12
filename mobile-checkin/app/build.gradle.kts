@@ -18,7 +18,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         val backendApiUrl = providers.gradleProperty("TICKETBOX_BACKEND_API_URL")
-            .orElse("http://127.0.0.1:3000/")
+            .orElse("http://10.0.2.2:3000/")
             .get()
         buildConfigField("String", "BACKEND_API_URL", "\"$backendApiUrl\"")
 
