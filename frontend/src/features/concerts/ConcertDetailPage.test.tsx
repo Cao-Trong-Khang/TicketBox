@@ -83,7 +83,7 @@ describe('ConcertDetailPage banner display', () => {
     expect(document.querySelector('.concert-seatmap-svg-content')).toBeInTheDocument();
   });
 
-  it('renders concert description and Artist Bio as separate sections', async () => {
+  it('renders Artist Bio instead of the legacy concert description', async () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         id: 'concert-1', title: 'Concert detail', artistName: 'Artist', description: 'Independent event description',
@@ -96,8 +96,8 @@ describe('ConcertDetailPage banner display', () => {
         <Routes><Route path={'/concerts/:id'} element={<ConcertDetailPage />} /></Routes>
       </MemoryRouter>,
     );
-    expect(await screen.findByText('Independent event description')).toBeInTheDocument();
-    expect(screen.getByText('Independent artist biography')).toBeInTheDocument();
+    expect(await screen.findByText('Independent artist biography')).toBeInTheDocument();
+    expect(screen.queryByText('Independent event description')).not.toBeInTheDocument();
     expect(document.querySelector('.artist-biography')).toBeInTheDocument();
   });
 });

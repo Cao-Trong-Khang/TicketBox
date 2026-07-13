@@ -21,7 +21,9 @@ try {
         } else if (value.startsWith("'") && value.endsWith("'")) {
           value = value.substring(1, value.length - 1);
         }
-        process.env[key] = value;
+        if (process.env[key] === undefined) {
+          process.env[key] = value;
+        }
       }
     });
   }

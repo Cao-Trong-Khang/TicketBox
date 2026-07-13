@@ -89,7 +89,7 @@ export class ArtistBioWorkerService {
       });
       if (generating.count !== 1) return;
 
-      const generatedBio = await this.generateWithRetry(cleanedText);
+      const generatedBio = await this.generateWithRetry(cleanedText, event.previous_bio);
       const now = new Date();
       const [completedBio, completedDocument] = await this.prisma.$transaction([
         this.prisma.aiArtistBio.updateMany({
@@ -136,11 +136,11 @@ export class ArtistBioWorkerService {
     }
   }
 
-  private async generateWithRetry(text: string): Promise<string> {
+  private async generateWithRetry(text: string, previousBio?: string): Promise<string> {
     let attempt = 0;
     while (attempt < 2) {
       attempt += 1;
-      try { return await this.ai.generate(text); }
+      try { return await this.ai.generate(text, previousBio); }
       catch (error) {
         if (!(error instanceof AiProviderError)) throw error;
         if (error.kind === 'rate_limit' && attempt < 2) { await this.sleep(this.config.aiRateLimitRetryMs); continue; }

@@ -49,6 +49,10 @@ export function OrganizerConcertEditPage() {
       ? String(location.state.feedback)
       : null,
   );
+  const initialArtistBioDocumentId =
+    typeof location.state === 'object' && location.state !== null && 'artistBioDocumentId' in location.state
+      ? String(location.state.artistBioDocumentId || '') || null
+      : null;
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<{ kind: 'create' } | { kind: 'edit'; ticketTypeId: string }>({ kind: 'create' });
   useEffect(() => {
@@ -265,10 +269,12 @@ export function OrganizerConcertEditPage() {
               isSubmitting={isSubmitting}
               isReadonly={isReadonly}
               bannerInputLabel="Replace banner"
-              descriptionAssistant={() => (
+              artistBioPanel={(applyArtistBiography) => (
                 <ArtistBioPanel
                   concertId={concert.id}
+                  initialDocumentId={initialArtistBioDocumentId}
                   isReadonly={isReadonly}
+                  onBiographySaved={applyArtistBiography}
                 />
               )}
               onSubmit={handleSubmit}

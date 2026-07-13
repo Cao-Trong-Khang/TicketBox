@@ -2,6 +2,7 @@ import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { ArtistDocumentsController } from '../artist-bio/artist-documents.controller';
+import { ArtistBioPreviewController } from '../artist-bio/artist-bio-preview.controller';
 import { CheckInStaffAssignmentController } from '../check-in/check-in-staff-assignment.controller';
 import { BannersController } from '../concerts/banners.controller';
 import { OrganizerConcertsController } from '../concerts/organizer-concerts.controller';
@@ -84,6 +85,11 @@ const permissionMatrix: Array<{
     controller: ArtistDocumentsController,
     methods: ['upload', 'list', 'detail', 'updateBio', 'regenerate'],
     permission: PERMISSION_CODES.concertUpdate,
+  },
+  {
+    controller: ArtistBioPreviewController,
+    methods: ['preview'],
+    permission: PERMISSION_CODES.concertCreate,
   },
   {
     controller: VipImportsController,

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrganizerConcertCreatePage } from './pages/OrganizerConcertCreatePage';
 import { OrganizerConcertEditPage } from './pages/OrganizerConcertEditPage';
 
+const UPLOAD_BIO = 'T\u1ea3i l\u00ean';
+
 describe('Organizer concert banner upload flows', () => {
   beforeEach(() => {
     class MockFileReader {
@@ -134,7 +136,7 @@ describe('Organizer concert banner upload flows', () => {
     });
   });
 
-  it('keeps a completed Artist Bio separate from the concert description', async () => {
+  it('copies a completed AI Artist Bio into the final Artist Biography field', async () => {
     const concertId = '11111111-1111-4111-8111-111111111111';
     const concert = {
       id: concertId, status: 'PUBLISHED', lifecycleStatus: 'UPCOMING', title: 'AI concert', artistName: 'Artist',
@@ -147,7 +149,8 @@ describe('Organizer concert banner upload flows', () => {
       .mockResolvedValueOnce(jsonResponse(concert))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse([document]))
-      .mockResolvedValueOnce(jsonResponse(document));
+      .mockResolvedValueOnce(jsonResponse(document))
+      .mockResolvedValueOnce(jsonResponse({ generated_bio: 'Independent artist biography' }));
     vi.stubGlobal('fetch', fetchMock);
 
     render(
@@ -156,18 +159,21 @@ describe('Organizer concert banner upload flows', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByDisplayValue('Independent event description')).toBeInTheDocument();
     expect(await screen.findByDisplayValue('Independent artist biography')).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(screen.getByDisplayValue('Independent event description')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu tiểu sử' }));
+    await waitFor(() => expect(screen.getAllByDisplayValue('Independent artist biography')).toHaveLength(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
     expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false);
   });
 
-  it('uploads a selected press kit only after concert creation and navigates to edit', async () => {
+  it('previews a selected press kit before creation and saves the approved biography on final submit', async () => {
     const concertId = '11111111-1111-4111-8111-111111111111';
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ generated_bio: 'Generated preview biography' }))
       .mockResolvedValueOnce(jsonResponse({ id: concertId }))
       .mockResolvedValueOnce(jsonResponse({ id: 'ticket-1' }))
-      .mockResolvedValueOnce(jsonResponse({ document_id: 'doc-1', status: 'uploaded' }, 202))
+      .mockResolvedValueOnce(jsonResponse({ document_id: 'doc-1', status: 'done' }, 202))
       .mockResolvedValueOnce(jsonResponse({ id: 'ticket-1', status: 'ACTIVE' }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -183,19 +189,30 @@ describe('Organizer concert banner upload flows', () => {
     fillRequiredConcertFields();
     addTicketDraft();
     const pdf = new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' });
-    fireEvent.change(screen.getByLabelText(/Press kit PDF cho AI Artist Bio/), { target: { files: [pdf] } });
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+    fireEvent.change(screen.getByLabelText(/Press kit PDF/), { target: { files: [pdf] } });
+    fireEvent.click(screen.getByRole('button', { name: UPLOAD_BIO }));
+
+    expect(await screen.findByDisplayValue('Generated preview biography')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tiểu sử nghệ sĩ')).toHaveValue('');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/admin/artist-bio/preview');
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu tiểu sử' }));
+    expect(screen.getByLabelText('Tiểu sử nghệ sĩ')).toHaveValue('Generated preview biography');
+
+    fireEvent.click(screen.getByRole('button', { name: /concert$/ }));
 
     expect(await screen.findByText('Edit destination')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/organizer/concerts');
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls[1][0]).toBe('http://localhost:3000/organizer/concerts');
     const uploadCall = fetchMock.mock.calls.find(([url]) => url === `http://localhost:3000/admin/concerts/${concertId}/documents`);
     expect(uploadCall?.[1]?.body).toBeInstanceOf(FormData);
+    expect((uploadCall?.[1]?.body as FormData).get('generated_bio')).toBe('Generated preview biography');
   });
 
-  it('still navigates after a press-kit queue failure and completes ticket setup', async () => {
+  it('still navigates after a press-kit save failure and completes ticket setup', async () => {
     const concertId = '11111111-1111-4111-8111-111111111111';
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ generated_bio: 'Generated preview biography' }))
       .mockResolvedValueOnce(jsonResponse({ id: concertId }))
       .mockResolvedValueOnce(jsonResponse({ id: 'ticket-1' }))
       .mockResolvedValueOnce(jsonResponse({ message: 'Queue unavailable' }, 503))
@@ -212,8 +229,13 @@ describe('Organizer concert banner upload flows', () => {
     );
     fillRequiredConcertFields();
     addTicketDraft();
-    fireEvent.change(screen.getByLabelText(/Press kit PDF cho AI Artist Bio/), { target: { files: [new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' })] } });
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+    fireEvent.change(screen.getByLabelText(/Press kit PDF/), { target: { files: [new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' })] } });
+    fireEvent.click(screen.getByRole('button', { name: UPLOAD_BIO }));
+    expect(await screen.findByDisplayValue('Generated preview biography')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tiểu sử nghệ sĩ')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu tiểu sử' }));
+    expect(screen.getByLabelText('Tiểu sử nghệ sĩ')).toHaveValue('Generated preview biography');
+    fireEvent.click(screen.getByRole('button', { name: /concert$/ }));
 
     expect(await screen.findByText('Recovered edit destination')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/ticket-types/ticket-1/activate'))).toBe(true);
@@ -221,14 +243,15 @@ describe('Organizer concert banner upload flows', () => {
 
   it.each([
     ['ticket setup only', 202],
-    ['ticket setup and press-kit queue', 503],
+    ['ticket setup and press-kit save', 503],
   ])('keeps the concert recoverable when %s fails', async (_label, bioStatus) => {
     const concertId = '11111111-1111-4111-8111-111111111111';
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ generated_bio: 'Generated preview biography' }))
       .mockResolvedValueOnce(jsonResponse({ id: concertId }))
       .mockResolvedValueOnce(jsonResponse({ message: 'Ticket setup failed' }, 503))
       .mockResolvedValueOnce(bioStatus === 202
-        ? jsonResponse({ document_id: 'doc-1', status: 'uploaded' }, 202)
+        ? jsonResponse({ document_id: 'doc-1', status: 'done' }, 202)
         : jsonResponse({ message: 'Queue unavailable' }, 503));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -242,8 +265,13 @@ describe('Organizer concert banner upload flows', () => {
     );
     fillRequiredConcertFields();
     addTicketDraft();
-    fireEvent.change(screen.getByLabelText(/Press kit PDF cho AI Artist Bio/), { target: { files: [new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' })] } });
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+    fireEvent.change(screen.getByLabelText(/Press kit PDF/), { target: { files: [new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' })] } });
+    fireEvent.click(screen.getByRole('button', { name: UPLOAD_BIO }));
+    expect(await screen.findByDisplayValue('Generated preview biography')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tiểu sử nghệ sĩ')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu tiểu sử' }));
+    expect(screen.getByLabelText('Tiểu sử nghệ sĩ')).toHaveValue('Generated preview biography');
+    fireEvent.click(screen.getByRole('button', { name: /concert$/ }));
 
     expect(await screen.findByText('Partial recovery destination')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/documents'))).toBe(true);
