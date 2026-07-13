@@ -1,9 +1,9 @@
-import assert from 'node:assert/strict';
+import * as assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import test from 'node:test';
+import { test } from 'node:test';
 import { ImportErrorType, ImportStatus, Prisma, VipGuestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { sha256 } from './vip-csv';

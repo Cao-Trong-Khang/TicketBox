@@ -12,6 +12,9 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { AuthenticatedUser } from "../auth/types";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { PERMISSION_CODES } from "../rbac/rbac.constants";
 import {
   BannerUploadService,
   DEFAULT_BANNER_MAX_FILE_SIZE,
@@ -23,7 +26,8 @@ type AuthenticatedRequest = {
 };
 
 @Controller("organizer/concerts/banners")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@Permissions(PERMISSION_CODES.concertCreate)
 export class BannersController {
   constructor(private readonly bannerUploadService: BannerUploadService) {}
 

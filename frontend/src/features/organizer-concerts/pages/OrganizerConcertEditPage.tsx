@@ -15,7 +15,7 @@ import { OrganizerConcertForm } from '../components/OrganizerConcertForm';
 import { ArtistBioPanel } from '../../artist-bio/components/ArtistBioPanel';
 import { isOrganizerConcertReadonly } from '../concert-lifecycle';
 import { OrganizerTicketTypeForm } from '../components/OrganizerTicketTypeForm';
-import { toConcertFormValues, toConcertPayload } from '../form-helpers';
+import { toConcertFormValues } from '../form-helpers';
 import {
   formatTicketTypePrice,
   sortTicketTypes,
@@ -53,7 +53,6 @@ export function OrganizerConcertEditPage() {
     typeof location.state === 'object' && location.state !== null && 'artistBioDocumentId' in location.state
       ? String(location.state.artistBioDocumentId || '') || null
       : null;
-  const [pendingArtistBioDocumentId, setPendingArtistBioDocumentId] = useState<string | null>(initialArtistBioDocumentId);
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<{ kind: 'create' } | { kind: 'edit'; ticketTypeId: string }>({ kind: 'create' });
   useEffect(() => {
@@ -151,27 +150,6 @@ export function OrganizerConcertEditPage() {
       setActionError(toApiError(err));
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const persistGeneratedDescription = async (
-    biography: string,
-    applyDescription: (value: string) => void,
-  ) => {
-    applyDescription(biography);
-    setPendingArtistBioDocumentId(null);
-    if (!id || !concert || isOrganizerConcertReadonly(concert)) return;
-    try {
-      const payload = toConcertPayload({
-        ...toConcertFormValues(concert),
-        description: biography,
-      });
-      const updatedConcert = await updateOrganizerConcert(id, payload);
-      setConcert(updatedConcert);
-      setFeedback('AI Artist Bio đã được lưu vào Mô tả và đồng bộ với trang chi tiết concert.');
-      setActionError(null);
-    } catch (err: unknown) {
-      setActionError(toApiError(err));
     }
   };
 
@@ -291,13 +269,12 @@ export function OrganizerConcertEditPage() {
               isSubmitting={isSubmitting}
               isReadonly={isReadonly}
               bannerInputLabel="Replace banner"
-              descriptionAssistant={(applyDescription, focusDescription) => (
+              artistBioPanel={(applyArtistBiography) => (
                 <ArtistBioPanel
                   concertId={concert.id}
-                  initialAutoApplyDocumentId={pendingArtistBioDocumentId}
+                  initialDocumentId={initialArtistBioDocumentId}
                   isReadonly={isReadonly}
-                  onBiographyReady={(biography) => void persistGeneratedDescription(biography, applyDescription)}
-                  onEditDescription={focusDescription}
+                  onBiographySaved={applyArtistBiography}
                 />
               )}
               onSubmit={handleSubmit}

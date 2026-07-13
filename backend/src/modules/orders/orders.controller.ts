@@ -14,21 +14,26 @@ import { CreateOrderRequestDto } from './dto/create-order.request.dto';
 import { CreateOrderResponseDto } from './dto/create-order.response.dto';
 import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import { RateLimitGuard } from '../rate-limit/rate-limit.guard';
+import { Permissions } from '../rbac/permissions.decorator';
+import { PermissionsGuard } from '../rbac/permissions.guard';
+import { PERMISSION_CODES } from '../rbac/rbac.constants';
 import { AuthenticatedUser } from '../auth/types';
 import { OrderHistoryItemDto } from './dto/order-history.response.dto';
 
 @Controller('orders')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
   @Get('history')
-  @UseGuards(JwtAuthGuard)
+  @Permissions(PERMISSION_CODES.ticketReadOwn)
   async getOrderHistory(@Req() req: Request): Promise<OrderHistoryItemDto[]> {
     const userId = (req.user as AuthenticatedUser).id;
     return this.ordersService.getOrderHistory(userId);
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard, RateLimitGuard)
+  @UseGuards(RateLimitGuard)
+  @Permissions(PERMISSION_CODES.ticketPurchase)
   @RateLimit({
     keyPrefix: 'orders-create',
     limit: 5,

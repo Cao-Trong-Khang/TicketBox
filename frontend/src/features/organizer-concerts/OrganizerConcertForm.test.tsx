@@ -2,6 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrganizerConcertForm } from './components/OrganizerConcertForm';
 
+const UPLOAD_BIO = 'T\u1ea3i l\u00ean';
+const SAVE_BIO = 'L\u01b0u ti\u1ec3u s\u1eed';
+
 describe('OrganizerConcertForm', () => {
   beforeEach(() => {
     class MockFileReader {
@@ -100,7 +103,7 @@ describe('OrganizerConcertForm', () => {
       target: { value: '2026-08-20T18:00' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+    fireEvent.click(screen.getByRole('button', { name: /concert$/ }));
 
     expect(
       await screen.findByText(
@@ -158,42 +161,74 @@ describe('OrganizerConcertForm', () => {
 
   it('validates and defers a selected AI Artist Bio PDF', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    render(<OrganizerConcertForm showArtistBioUpload submitLabel="Tạo concert" onSubmit={onSubmit} />);
+    const onGenerateArtistBio = vi.fn()
+      .mockResolvedValueOnce('Generated biography')
+      .mockResolvedValueOnce('Regenerated biography');
+    render(<OrganizerConcertForm showArtistBioUpload submitLabel="Tạo concert" onGenerateArtistBio={onGenerateArtistBio} onSubmit={onSubmit} />);
 
-    const input = screen.getByLabelText(/Press kit PDF cho AI Artist Bio/);
+    const input = screen.getByLabelText(/Press kit PDF/);
+    expect(screen.getByRole('button', { name: UPLOAD_BIO })).toBeDisabled();
     fireEvent.change(input, { target: { files: [new File(['text'], 'press-kit.txt', { type: 'text/plain' })] } });
     expect(await screen.findByText('Chỉ chấp nhận tệp PDF.')).toBeInTheDocument();
 
     const pdf = new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' });
     fireEvent.change(input, { target: { files: [pdf] } });
     expect(await screen.findByText('Đã chọn: press-kit.pdf')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: UPLOAD_BIO })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Gỡ bỏ file' }));
+    expect(screen.queryByText('Đã chọn: press-kit.pdf')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: UPLOAD_BIO })).toBeDisabled();
+    expect((input as HTMLInputElement).value).toBe('');
+
+    fireEvent.change(input, { target: { files: [pdf] } });
+    expect(await screen.findByText('Đã chọn: press-kit.pdf')).toBeInTheDocument();
 
     fillValidConcertForm();
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo concert' }));
+    fireEvent.click(screen.getByRole('button', { name: /concert$/ }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: UPLOAD_BIO }));
+    await waitFor(() => expect(onGenerateArtistBio).toHaveBeenCalledWith(pdf, null));
+    expect(onSubmit).not.toHaveBeenCalled();
+    const aiBiography = await screen.findByRole('textbox', { name: 'Tiểu sử nghệ sĩ do AI tạo' });
+    const finalBiography = screen.getByLabelText('Tiểu sử nghệ sĩ');
+    expect(aiBiography).toHaveValue('Generated biography');
+    expect(finalBiography).toHaveValue('');
+    fireEvent.change(aiBiography, { target: { value: 'Edited biography' } });
+    expect(finalBiography).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: SAVE_BIO }));
+    expect(finalBiography).toHaveValue('Edited biography');
+    expect(await screen.findByRole('status')).toHaveTextContent('b\u1ea3n nh\u00e1p');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo lại tiểu sử' }));
+    await waitFor(() => expect(onGenerateArtistBio).toHaveBeenLastCalledWith(pdf, 'Edited biography'));
+    expect(await screen.findByRole('textbox', { name: 'Tiểu sử nghệ sĩ do AI tạo' })).toHaveValue('Regenerated biography');
+    expect(finalBiography).toHaveValue('Edited biography');
+    fireEvent.click(screen.getByRole('button', { name: /concert$/ }));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: SAVE_BIO }));
+    expect(finalBiography).toHaveValue('Regenerated biography');
+    fireEvent.click(screen.getByRole('button', { name: /concert$/ }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     expect(onSubmit.mock.calls[0][1].selectedArtistBioFile).toBe(pdf);
+    expect(onSubmit.mock.calls[0][1].generatedArtistBio).toBe('Regenerated biography');
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('artistBioFile');
   });
 
-  it('lets the AI assistant fill Description before the organizer saves', async () => {
+  it('shows the AI Artist Bio panel and the final Artist Biography field', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(
       <OrganizerConcertForm
         submitLabel="Lưu thay đổi"
         onSubmit={onSubmit}
-        descriptionAssistant={(applyDescription) => (
-          <button type="button" onClick={() => applyDescription('AI generated description')}>Apply AI description</button>
-        )}
+        artistBioPanel={() => <div>Artist Bio editor</div>}
       />,
     );
-    fillValidConcertForm();
-    fireEvent.click(screen.getByRole('button', { name: 'Apply AI description' }));
-    const description = screen.getByLabelText('Mô tả');
-    expect(description).toHaveValue('AI generated description');
-    expect(screen.getByRole('button', { name: 'Apply AI description' }).compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({ description: 'AI generated description' });
+    expect(screen.getByText('Artist Bio editor')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tiểu sử nghệ sĩ')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Mô tả')).not.toBeInTheDocument();
   });
 
   it('preserves existing seatingSvg when no new SVG file is selected during edit', async () => {

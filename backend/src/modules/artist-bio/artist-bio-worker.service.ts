@@ -52,31 +52,79 @@ export class ArtistBioWorkerService {
 
   async process(event: AiBioRequestedEvent): Promise<void> {
     const document = await this.prisma.artistDocument.findFirst({ where: { id: event.document_id, concertId: event.concert_id }, include: { bio: true } });
-    if (!document || document.status === ArtistDocumentStatus.DONE) return;
+    if (!document || document.status !== ArtistDocumentStatus.UPLOADED) return;
 
-    await this.prisma.$transaction([
-      this.prisma.artistDocument.update({ where: { id: document.id }, data: { status: ArtistDocumentStatus.EXTRACTING } }),
-      this.prisma.aiArtistBio.upsert({ where: { documentId: document.id }, create: { documentId: document.id, concertId: document.concertId, status: AiArtistBioStatus.GENERATING }, update: { status: AiArtistBioStatus.GENERATING, failureReason: null } }),
-    ]);
+    const claimed = await this.prisma.artistDocument.updateMany({
+      where: {
+        id: document.id,
+        concertId: document.concertId,
+        status: ArtistDocumentStatus.UPLOADED,
+      },
+      data: { status: ArtistDocumentStatus.EXTRACTING },
+    });
+    if (claimed.count !== 1) return;
 
     try {
+      await this.prisma.aiArtistBio.upsert({
+        where: { documentId: document.id },
+        create: {
+          documentId: document.id,
+          concertId: document.concertId,
+          status: AiArtistBioStatus.GENERATING,
+        },
+        update: { status: AiArtistBioStatus.GENERATING, failureReason: null },
+      });
+
       const pdf = await this.retry(() => this.storage.download(document.storageKey), 3, (error) => error instanceof StorageTimeoutError, 500);
       const cleanedText = await this.extractor.extract(pdf);
-      await this.prisma.artistDocument.update({ where: { id: document.id }, data: { status: ArtistDocumentStatus.EXTRACTED, extractedText: cleanedText } });
-      await this.prisma.artistDocument.update({ where: { id: document.id }, data: { status: ArtistDocumentStatus.GENERATING } });
-      const generatedBio = await this.generateWithRetry(cleanedText);
+      const extracted = await this.prisma.artistDocument.updateMany({
+        where: { id: document.id, status: ArtistDocumentStatus.EXTRACTING },
+        data: { status: ArtistDocumentStatus.EXTRACTED, extractedText: cleanedText },
+      });
+      if (extracted.count !== 1) return;
+
+      const generating = await this.prisma.artistDocument.updateMany({
+        where: { id: document.id, status: ArtistDocumentStatus.EXTRACTED },
+        data: { status: ArtistDocumentStatus.GENERATING },
+      });
+      if (generating.count !== 1) return;
+
+      const generatedBio = await this.generateWithRetry(cleanedText, event.previous_bio);
       const now = new Date();
-      await this.prisma.$transaction([
-        this.prisma.aiArtistBio.update({ where: { documentId: document.id }, data: { status: AiArtistBioStatus.DONE, generatedBio, failureReason: null, generatedAt: now } }),
-        this.prisma.artistDocument.update({ where: { id: document.id }, data: { status: ArtistDocumentStatus.DONE } }),
+      const [completedBio, completedDocument] = await this.prisma.$transaction([
+        this.prisma.aiArtistBio.updateMany({
+          where: { documentId: document.id, status: AiArtistBioStatus.GENERATING },
+          data: { status: AiArtistBioStatus.DONE, generatedBio, failureReason: null, generatedAt: now },
+        }),
+        this.prisma.artistDocument.updateMany({
+          where: { id: document.id, status: ArtistDocumentStatus.GENERATING },
+          data: { status: ArtistDocumentStatus.DONE },
+        }),
       ]);
+      if (completedBio.count !== 1 || completedDocument.count !== 1) return;
       await this.redis.del(`concerts:detail:${document.concertId}`);
     } catch (error) {
       const reason = error instanceof PdfTextExtractionError ? PDF_EXTRACTION_FAILURE : this.safeFailure(error);
-      await this.prisma.$transaction([
-        this.prisma.aiArtistBio.upsert({ where: { documentId: document.id }, create: { documentId: document.id, concertId: document.concertId, status: AiArtistBioStatus.FAILED, failureReason: reason }, update: { status: AiArtistBioStatus.FAILED, failureReason: reason } }),
-        this.prisma.artistDocument.update({ where: { id: document.id }, data: { status: ArtistDocumentStatus.FAILED } }),
+      const [, failedDocument] = await this.prisma.$transaction([
+        this.prisma.aiArtistBio.updateMany({
+          where: { documentId: document.id, status: AiArtistBioStatus.GENERATING },
+          data: { status: AiArtistBioStatus.FAILED, failureReason: reason },
+        }),
+        this.prisma.artistDocument.updateMany({
+          where: {
+            id: document.id,
+            status: {
+              in: [
+                ArtistDocumentStatus.EXTRACTING,
+                ArtistDocumentStatus.EXTRACTED,
+                ArtistDocumentStatus.GENERATING,
+              ],
+            },
+          },
+          data: { status: ArtistDocumentStatus.FAILED },
+        }),
       ]);
+      if (failedDocument.count !== 1) return;
       this.logger.warn(`AI biography document ${document.id} failed: ${reason}`);
     }
   }
@@ -88,11 +136,11 @@ export class ArtistBioWorkerService {
     }
   }
 
-  private async generateWithRetry(text: string): Promise<string> {
+  private async generateWithRetry(text: string, previousBio?: string): Promise<string> {
     let attempt = 0;
     while (attempt < 2) {
       attempt += 1;
-      try { return await this.ai.generate(text); }
+      try { return await this.ai.generate(text, previousBio); }
       catch (error) {
         if (!(error instanceof AiProviderError)) throw error;
         if (error.kind === 'rate_limit' && attempt < 2) { await this.sleep(this.config.aiRateLimitRetryMs); continue; }

@@ -7,6 +7,7 @@ export type AiBioRequestedEvent = {
   concert_id: string;
   storage_key: string;
   attempt: number;
+  previous_bio?: string;
 };
 
 export type ArtistDocumentListItemDto = {

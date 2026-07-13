@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Req, UploadedFile, UseFilters, UseGuards, UseInterceptors, Body } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Req, UploadedFile, UseFilters, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthenticatedUser } from '../auth/types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -23,8 +23,8 @@ export class ArtistDocumentsController {
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: PDF_MAX_BYTES } }))
-  upload(@Req() req: AuthenticatedRequest, @Param('concertId', new ParseUUIDPipe({ version: '4' })) concertId: string, @UploadedFile() file?: UploadedPdf) {
-    return this.service.upload(req.user, concertId, file);
+  upload(@Req() req: AuthenticatedRequest, @Param('concertId', new ParseUUIDPipe({ version: '4' })) concertId: string, @UploadedFile() file?: UploadedPdf, @Body('generated_bio') generatedBio?: string) {
+    return this.service.upload(req.user, concertId, file, generatedBio);
   }
 
   @Get()
@@ -35,6 +35,12 @@ export class ArtistDocumentsController {
   @Get(':documentId')
   detail(@Req() req: AuthenticatedRequest, @Param('concertId', new ParseUUIDPipe({ version: '4' })) concertId: string, @Param('documentId', new ParseUUIDPipe({ version: '4' })) documentId: string) {
     return this.service.detail(req.user, concertId, documentId);
+  }
+
+  @Delete(':documentId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Req() req: AuthenticatedRequest, @Param('concertId', new ParseUUIDPipe({ version: '4' })) concertId: string, @Param('documentId', new ParseUUIDPipe({ version: '4' })) documentId: string): Promise<void> {
+    await this.service.remove(req.user, concertId, documentId);
   }
 
   @Put(':documentId/bio')

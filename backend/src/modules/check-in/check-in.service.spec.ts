@@ -1,5 +1,5 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import {
   CheckIn,

@@ -21,7 +21,8 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env', 'backend/.env'],
+      ignoreEnvFile: process.env.DOCKER_RUNTIME === 'true',
+      envFilePath: ['.env', '../.env', 'backend/.env'],
     }),
     AppConfigModule,
     RedisCacheModule,

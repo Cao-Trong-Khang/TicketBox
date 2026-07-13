@@ -95,6 +95,7 @@ services:
       context: ./backend
     environment:
       NODE_ENV: development
+      DOCKER_RUNTIME: "true"
       PORT: 3000
       FRONTEND_ORIGIN: http://localhost:5173
       POSTGRES_HOST: postgres
@@ -112,8 +113,9 @@ services:
       FCM_PROJECT_ID: ticketbox
       AI_BIO_TOPIC: ai.bio.requested
       AI_BIO_GROUP_ID: ticketbox-ai-bio-worker
-      AI_PROVIDER: mock
-      AI_MODEL: mock-biography-v1
+      AI_PROVIDER: gemini
+      AI_MODEL: gemini-2.5-flash
+      AI_API_KEY: ${GEMINI_API_KEY}
       AI_TIMEOUT_MS: 30000
       AI_RATE_LIMIT_RETRY_MS: 60000
       AI_TEXT_MAX_CHARS: 4000
@@ -161,6 +163,7 @@ services:
     command: npm run ai-bio:worker
     environment:
       NODE_ENV: development
+      DOCKER_RUNTIME: "true"
       DATABASE_URL: postgresql://ticketbox:ticketbox@postgres:5432/ticketbox?schema=public
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092

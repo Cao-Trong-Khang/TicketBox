@@ -1,10 +1,10 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { Prisma, RefreshToken, Role, User, UserRole, UserStatus } from '@prisma/client';
-import request from 'supertest';
+import request = require('supertest');
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { OrganizerConcertsService } from '../concerts/organizer-concerts.service';
@@ -13,6 +13,7 @@ import { ConcertsModule } from '../concerts/concerts.module';
 import { OrdersService } from '../orders/orders.service';
 import { OrdersModule } from '../orders/orders.module';
 import { ROLE_CODES } from '../rbac/rbac.constants';
+import { PermissionService } from '../rbac/permission.service';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { RATE_LIMIT_EXCEEDED_MESSAGE } from './rate-limit.constants';
 
@@ -173,6 +174,8 @@ async function createTestApp(
     .useValue(prisma)
     .overrideProvider(RedisCacheService)
     .useValue(redis)
+    .overrideProvider(PermissionService)
+    .useValue({ userHasPermissions: async () => true })
     .overrideProvider(OrdersService)
     .useValue({
       createOrder: async (userId: string) => ({
