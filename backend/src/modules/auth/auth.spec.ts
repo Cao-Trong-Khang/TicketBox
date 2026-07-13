@@ -1,6 +1,6 @@
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, INestApplication, UseGuards, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { Permission, Prisma, RefreshToken, Role, RolePermission, User, UserRole, UserStatus } from '@prisma/client';
@@ -8,9 +8,12 @@ import * as bcrypt from 'bcrypt';
 import request = require('supertest');
 import { RbacModule } from '../rbac/rbac.module';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
+import { Permissions } from '../rbac/permissions.decorator';
+import { PermissionsGuard } from '../rbac/permissions.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { AuthModule } from './auth.module';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 type TestState = {
   users: User[];
@@ -20,6 +23,28 @@ type TestState = {
   rolePermissions: RolePermission[];
   refreshTokens: RefreshToken[];
 };
+
+@Controller('permission-matrix')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+class PermissionMatrixController {
+  @Get('audience')
+  @Permissions(PERMISSION_CODES.ticketPurchase)
+  audience() {
+    return { ok: true };
+  }
+
+  @Get('organizer')
+  @Permissions(PERMISSION_CODES.concertUpdate)
+  organizer() {
+    return { ok: true };
+  }
+
+  @Get('check-in-staff')
+  @Permissions(PERMISSION_CODES.checkinScan)
+  checkInStaff() {
+    return { ok: true };
+  }
+}
 
 test('auth and RBAC endpoints use database permissions without JWT role claims', async () => {
   process.env.JWT_ACCESS_SECRET = 'test-jwt-secret';
@@ -168,6 +193,58 @@ test('auth and RBAC endpoints use database permissions without JWT role claims',
       .get('/rbac-test/ticket-purchase')
       .set('Authorization', `Bearer ${organizerLogin.accessToken}`)
       .expect(200);
+
+  } finally {
+    await app.close();
+  }
+});
+
+test('Audience, Organizer, and Check-in Staff enforce the HTTP permission matrix', async () => {
+  process.env.JWT_ACCESS_SECRET = 'test-jwt-secret';
+  process.env.JWT_ACCESS_TOKEN_TTL = '1h';
+
+  const state = createSeededState();
+  const app = await createTestApp(createPrismaMock(state));
+
+  try {
+    const audience = await createRegisteredUser(app, 'matrix-audience@example.com');
+    const organizer = await createRegisteredUser(app, 'matrix-organizer@example.com');
+    const checkInStaff = await createRegisteredUser(app, 'matrix-checkin@example.com');
+    replaceUserRoles(state, audience.id, [ROLE_CODES.audience]);
+    replaceUserRoles(state, organizer.id, [ROLE_CODES.organizer]);
+    replaceUserRoles(state, checkInStaff.id, [ROLE_CODES.checkinStaff]);
+
+    const roleMatrix = [
+      {
+        role: ROLE_CODES.audience,
+        token: (await login(app, audience.email)).accessToken,
+        allowedPath: '/permission-matrix/audience',
+      },
+      {
+        role: ROLE_CODES.organizer,
+        token: (await login(app, organizer.email)).accessToken,
+        allowedPath: '/permission-matrix/organizer',
+      },
+      {
+        role: ROLE_CODES.checkinStaff,
+        token: (await login(app, checkInStaff.email)).accessToken,
+        allowedPath: '/permission-matrix/check-in-staff',
+      },
+    ];
+    const protectedPaths = roleMatrix.map((entry) => entry.allowedPath);
+
+    for (const entry of roleMatrix) {
+      for (const path of protectedPaths) {
+        const response = await request(app.getHttpServer())
+          .get(path)
+          .set('Authorization', `Bearer ${entry.token}`);
+        assert.equal(
+          response.status,
+          path === entry.allowedPath ? 200 : 403,
+          `${entry.role} received an unexpected status for ${path}`,
+        );
+      }
+    }
   } finally {
     await app.close();
   }
@@ -182,6 +259,7 @@ async function createTestApp(prisma: Partial<PrismaService>): Promise<INestAppli
       AuthModule,
       RbacModule,
     ],
+    controllers: [PermissionMatrixController],
   })
     .overrideProvider(PrismaService)
     .useValue(prisma)
