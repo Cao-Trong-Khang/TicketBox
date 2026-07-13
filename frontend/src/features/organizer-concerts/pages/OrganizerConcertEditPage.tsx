@@ -291,13 +291,12 @@ export function OrganizerConcertEditPage() {
               isSubmitting={isSubmitting}
               isReadonly={isReadonly}
               bannerInputLabel="Replace banner"
-              descriptionAssistant={(applyDescription, focusDescription) => (
+              descriptionAssistant={(applyDescription) => (
                 <ArtistBioPanel
                   concertId={concert.id}
                   initialAutoApplyDocumentId={pendingArtistBioDocumentId}
                   isReadonly={isReadonly}
                   onBiographyReady={(biography) => void persistGeneratedDescription(biography, applyDescription)}
-                  onEditDescription={focusDescription}
                 />
               )}
               onSubmit={handleSubmit}

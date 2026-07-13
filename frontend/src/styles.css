@@ -1827,6 +1827,7 @@ h1 {
 .artist-bio-layout textarea { width: 100%; margin: 10px 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; resize: vertical; font: inherit; }
 .artist-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .artist-biography p { white-space: pre-wrap; }
+.artist-biography label { display: block; font-weight: 700; color: var(--ink); }
 @media (max-width: 720px) { .artist-bio-layout { grid-template-columns: 1fr; } }
 
 .concert-admin-tools {
