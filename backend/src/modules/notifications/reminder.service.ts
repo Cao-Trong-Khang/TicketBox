@@ -26,7 +26,7 @@ export class ReminderService {
       // Query concerts starting between 24 and 25 hours from now
       const upcomingConcerts = await this.prisma.concert.findMany({
         where: {
-          startsAt: {
+          performanceStartAt: {
             gte: twentyFourHoursFromNow,
             lte: twentyFiveHoursFromNow,
           },
@@ -64,7 +64,7 @@ export class ReminderService {
                 data: {
                   email: ticket.owner.email,
                   concertTitle: concert.title,
-                  startsAt: concert.startsAt.toISOString(),
+                  startsAt: (concert.performanceStartAt ?? concert.startsAt).toISOString(),
                   venueName: concert.venueName,
                 },
               },
