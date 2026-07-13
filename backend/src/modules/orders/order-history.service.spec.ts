@@ -1,5 +1,5 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { OrderStatus } from "@prisma/client";
 import { OrdersService } from "./orders.service";
 

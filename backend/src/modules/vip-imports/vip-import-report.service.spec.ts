@@ -1,5 +1,5 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { ForbiddenException } from '@nestjs/common';
 import { ImportErrorType, ImportStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';

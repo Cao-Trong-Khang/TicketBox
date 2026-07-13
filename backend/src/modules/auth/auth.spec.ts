@@ -1,11 +1,11 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { Permission, Prisma, RefreshToken, Role, RolePermission, User, UserRole, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import request from 'supertest';
+import request = require('supertest');
 import { RbacModule } from '../rbac/rbac.module';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { PrismaService } from '../../prisma/prisma.service';

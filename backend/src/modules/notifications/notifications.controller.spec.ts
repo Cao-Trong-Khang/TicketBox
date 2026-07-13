@@ -1,35 +1,30 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { NotificationFactory } from './notification.factory';
+import type {
+  NotificationChannelName,
+  NotificationProvider,
+} from './notification.types';
 import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
-import { CircuitBreaker } from '../../shared/circuit-breaker/circuit-breaker';
-import { EmailProvider } from './providers/email.provider';
-import { PushProvider } from './providers/push.provider';
 
-function makeCircuitBreaker(): CircuitBreaker {
-  return new CircuitBreaker({ failureThreshold: 3, resetTimeoutMs: 30000, halfOpenSuccessThreshold: 2 });
+function makeProvider(name: NotificationChannelName): NotificationProvider {
+  return {
+    name,
+    async send() {
+      return {
+        messageId: `${name}-test-message`,
+        channel: name,
+        status: 'sent',
+      };
+    },
+  };
 }
 
 function makeController(): NotificationsController {
   const factory = new NotificationFactory([
-    new EmailProvider({
-      circuitBreaker: makeCircuitBreaker(),
-      config: {
-        host: 'localhost',
-        port: 1025,
-        user: '',
-        password: '',
-        fromAddress: 'noreply@ticketbox.local',
-      },
-    }),
-    new PushProvider({
-      circuitBreaker: makeCircuitBreaker(),
-      config: {
-        serverKey: 'test-server-key',
-        projectId: 'ticketbox-test',
-      },
-    }),
+    makeProvider('email'),
+    makeProvider('push'),
   ]);
   const service = new NotificationsService(factory);
   return new NotificationsController(service);

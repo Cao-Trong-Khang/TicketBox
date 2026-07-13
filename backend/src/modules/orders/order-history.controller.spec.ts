@@ -1,10 +1,10 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { ConfigService } from "@nestjs/config";
 import { JwtModule, JwtService } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { Test } from "@nestjs/testing";
-import request from "supertest";
+import request = require('supertest');
 import { JwtStrategy } from "../auth/jwt.strategy";
 import { RateLimitGuard } from "../rate-limit/rate-limit.guard";
 import { OrdersController } from "./orders.controller";

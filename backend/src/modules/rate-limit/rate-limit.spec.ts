@@ -1,10 +1,10 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { Prisma, RefreshToken, Role, User, UserRole, UserStatus } from '@prisma/client';
-import request from 'supertest';
+import request = require('supertest');
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { OrganizerConcertsService } from '../concerts/organizer-concerts.service';

@@ -1,5 +1,5 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import {
   INestApplication,
   NotFoundException,
@@ -8,7 +8,7 @@ import {
 import { ConfigModule } from "@nestjs/config";
 import { Test } from "@nestjs/testing";
 import * as jwt from "jsonwebtoken";
-import request from "supertest";
+import request = require('supertest');
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuthModule } from "../auth/auth.module";
 import { RedisCacheService } from "../redis-cache/redis-cache.service";
