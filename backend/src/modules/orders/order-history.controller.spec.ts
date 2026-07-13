@@ -7,6 +7,7 @@ import { Test } from "@nestjs/testing";
 import request = require('supertest');
 import { JwtStrategy } from "../auth/jwt.strategy";
 import { RateLimitGuard } from "../rate-limit/rate-limit.guard";
+import { PermissionService } from "../rbac/permission.service";
 import { OrdersController } from "./orders.controller";
 import { OrdersService } from "./orders.service";
 
@@ -34,6 +35,10 @@ test("GET /orders/history requires JWT and uses only its subject as owner", asyn
             return [];
           },
         },
+      },
+      {
+        provide: PermissionService,
+        useValue: { userHasPermissions: async () => true },
       },
     ],
   })

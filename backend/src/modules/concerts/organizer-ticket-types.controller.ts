@@ -12,6 +12,9 @@ import {
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RateLimit } from "../rate-limit/rate-limit.decorator";
 import { RateLimitGuard } from "../rate-limit/rate-limit.guard";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { PERMISSION_CODES } from "../rbac/rbac.constants";
 import { AuthenticatedUser } from "../auth/types";
 import { OrganizerTicketTypeCreateDto } from "./dto/organizer-ticket-type-create.dto";
 import { OrganizerTicketTypeDto } from "./dto/organizer-ticket-type.dto";
@@ -23,7 +26,8 @@ type AuthenticatedRequest = {
 };
 
 @Controller("organizer/concerts/:concertId/ticket-types")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@Permissions(PERMISSION_CODES.concertTicketTypeManage)
 export class OrganizerTicketTypesController {
   constructor(
     private readonly organizerTicketTypesService: OrganizerTicketTypesService,

@@ -12,6 +12,9 @@ import {
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RateLimit } from "../rate-limit/rate-limit.decorator";
 import { RateLimitGuard } from "../rate-limit/rate-limit.guard";
+import { Permissions } from "../rbac/permissions.decorator";
+import { PermissionsGuard } from "../rbac/permissions.guard";
+import { PERMISSION_CODES } from "../rbac/rbac.constants";
 import { AuthenticatedUser } from "../auth/types";
 import { OrganizerConcertCreateDto } from "./dto/organizer-concert-create.dto";
 import { OrganizerConcertDetailDto } from "./dto/organizer-concert-detail.dto";
@@ -25,13 +28,14 @@ type AuthenticatedRequest = {
 };
 
 @Controller("organizer/concerts")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class OrganizerConcertsController {
   constructor(
     private readonly organizerConcertsService: OrganizerConcertsService,
   ) {}
 
   @Get()
+  @Permissions(PERMISSION_CODES.concertRead)
   listOwnedConcerts(
     @Req() request: AuthenticatedRequest,
   ): Promise<OrganizerConcertListItemDto[]> {
@@ -39,6 +43,7 @@ export class OrganizerConcertsController {
   }
 
   @Post()
+  @Permissions(PERMISSION_CODES.concertCreate)
   @UseGuards(RateLimitGuard)
   @RateLimit({
     keyPrefix: "organizer-mutation",
@@ -54,6 +59,7 @@ export class OrganizerConcertsController {
   }
 
   @Get(":id")
+  @Permissions(PERMISSION_CODES.concertRead)
   getOwnedConcert(
     @Req() request: AuthenticatedRequest,
     @Param("id", new ParseUUIDPipe({ version: "4" })) concertId: string,
@@ -65,6 +71,7 @@ export class OrganizerConcertsController {
   }
 
   @Get(":id/revenue")
+  @Permissions(PERMISSION_CODES.concertAnalyticsRead)
   getOwnedConcertRevenue(
     @Req() request: AuthenticatedRequest,
     @Param("id", new ParseUUIDPipe({ version: "4" })) concertId: string,
@@ -76,6 +83,7 @@ export class OrganizerConcertsController {
   }
 
   @Patch(":id")
+  @Permissions(PERMISSION_CODES.concertUpdate)
   @UseGuards(RateLimitGuard)
   @RateLimit({
     keyPrefix: "organizer-mutation",
@@ -96,6 +104,7 @@ export class OrganizerConcertsController {
   }
 
   @Post(":id/cancel")
+  @Permissions(PERMISSION_CODES.concertCancel)
   @UseGuards(RateLimitGuard)
   @RateLimit({
     keyPrefix: "organizer-mutation",

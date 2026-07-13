@@ -13,6 +13,7 @@ import { ConcertsModule } from '../concerts/concerts.module';
 import { OrdersService } from '../orders/orders.service';
 import { OrdersModule } from '../orders/orders.module';
 import { ROLE_CODES } from '../rbac/rbac.constants';
+import { PermissionService } from '../rbac/permission.service';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { RATE_LIMIT_EXCEEDED_MESSAGE } from './rate-limit.constants';
 
@@ -173,6 +174,8 @@ async function createTestApp(
     .useValue(prisma)
     .overrideProvider(RedisCacheService)
     .useValue(redis)
+    .overrideProvider(PermissionService)
+    .useValue({ userHasPermissions: async () => true })
     .overrideProvider(OrdersService)
     .useValue({
       createOrder: async (userId: string) => ({

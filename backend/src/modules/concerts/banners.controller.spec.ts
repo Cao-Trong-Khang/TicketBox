@@ -8,6 +8,7 @@ import request = require('supertest');
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuthModule } from "../auth/auth.module";
 import { RedisCacheService } from "../redis-cache/redis-cache.service";
+import { PermissionService } from "../rbac/permission.service";
 import { BannerDownloadService } from "./banner-download.service";
 import { BannerUploadService } from "./banner-upload.service";
 import { ConcertsModule } from "./concerts.module";
@@ -191,6 +192,8 @@ async function createBannersTestApp(options: {
     .useValue({
       del: async () => undefined,
     })
+    .overrideProvider(PermissionService)
+    .useValue({ userHasPermissions: async () => true })
     .overrideProvider(BannerUploadService)
     .useValue(options.bannerUploadService ?? { upload: async () => ({ bannerUrl: "/uploads/banners/fallback.jpg" }) })
     .overrideProvider(BannerDownloadService)
