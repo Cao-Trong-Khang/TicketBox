@@ -187,7 +187,9 @@ abstract class CheckInDao {
     @Query(
         """
         SELECT COUNT(*) FROM local_scan_logs
-        WHERE concertId = :concertId AND localResult IN ('accepted', 'stale_snapshot')
+        WHERE concertId = :concertId
+          AND entityType = 'ticket'
+          AND localResult IN ('accepted', 'stale_snapshot')
         """,
     )
     abstract suspend fun acceptedScanCountForConcert(concertId: String): Int

@@ -25,6 +25,7 @@ import com.ticketbox.checkin.data.local.PreloadedVipGuestEntity
 import com.ticketbox.checkin.domain.VipStatusFilter
 import com.ticketbox.checkin.domain.deriveVipDashboardCounts
 import com.ticketbox.checkin.domain.filterVipGuests
+import com.ticketbox.checkin.domain.vipGuestDisplayState
 import com.ticketbox.checkin.domain.vipGuestTypes
 import com.ticketbox.checkin.domain.vipSponsors
 import com.ticketbox.checkin.ui.components.DetailRow
@@ -56,11 +57,12 @@ fun VipScreen(
         assignment.concertId,
         assignment.gateName,
     ).collectAsState(initial = emptyList())
+    val scans by repository.observeScanHistory(assignment.concertId).collectAsState(initial = emptyList())
     var query by remember { mutableStateOf("") }
     var sponsorFilter by remember { mutableStateOf<String?>(null) }
     var typeFilter by remember { mutableStateOf<String?>(null) }
     var statusFilter by remember { mutableStateOf(VipStatusFilter.All) }
-    val counts = deriveVipDashboardCounts(guests)
+    val counts = deriveVipDashboardCounts(guests, scans)
     val sponsors = vipSponsors(guests)
     val guestTypes = vipGuestTypes(guests)
     val filteredGuests = filterVipGuests(
@@ -69,6 +71,7 @@ fun VipScreen(
         sponsor = sponsorFilter,
         guestType = typeFilter,
         statusFilter = statusFilter,
+        scans = scans,
     )
 
     LazyColumn(
@@ -186,7 +189,11 @@ fun VipScreen(
             }
         } else {
             items(filteredGuests, key = { it.id }) { guest ->
-                VipGuestCard(guest, onClick = { onSelectGuest(guest) })
+                VipGuestCard(
+                    guest = guest,
+                    statusLabel = vipGuestDisplayState(guest, scans).label,
+                    onClick = { onSelectGuest(guest) },
+                )
             }
         }
     }
@@ -196,6 +203,7 @@ fun VipScreen(
 fun VipGuestDetailScreen(
     assignment: AssignmentEntity,
     guest: PreloadedVipGuestEntity,
+    statusLabel: String = guest.status,
     onBack: () -> Unit,
     onConfirm: () -> Unit,
 ) {
@@ -222,7 +230,7 @@ fun VipGuestDetailScreen(
                 DetailRow("Invited By", guest.invitedBy ?: "N/A")
                 DetailRow("Type", guest.guestType ?: "VIP")
                 DetailRow("Allowed Gate", guest.allowedGate ?: assignment.gateName ?: "Any gate")
-                DetailRow("Status", guest.status)
+                DetailRow("Status", statusLabel)
                 DetailRow("Notes", guest.notes ?: "N/A")
             }
         }
