@@ -146,9 +146,7 @@ describe('AI artist biography UI', () => {
       .mockImplementationOnce(() => json(generating))
       .mockImplementationOnce(() => json(done));
     vi.stubGlobal('fetch', fetchMock);
-    const onBiographyReady = vi.fn();
-
-    render(<ArtistBioPanel concertId={concertId} onBiographyReady={onBiographyReady} />);
+    render(<ArtistBioPanel concertId={concertId} />);
     fireEvent.change(screen.getByLabelText(/Press kit PDF/), {
       target: { files: [new File(['%PDF demo'], 'press-kit.pdf', { type: 'application/pdf' })] },
     });
@@ -162,7 +160,6 @@ describe('AI artist biography UI', () => {
 
     await act(async () => { poll?.(); });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
-    expect(onBiographyReady).toHaveBeenCalledWith('Biography appeared automatically.');
     expect(screen.getByLabelText('Artist biography')).toHaveValue('Biography appeared automatically.');
     expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
   });

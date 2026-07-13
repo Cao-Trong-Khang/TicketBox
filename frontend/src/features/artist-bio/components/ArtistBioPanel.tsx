@@ -1,4 +1,4 @@
-import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useState } from 'react';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { ApiError } from '../../../lib/api-client';
@@ -16,16 +16,12 @@ const TERMINAL = new Set(['done', 'failed']);
 
 type ArtistBioPanelProps = {
   concertId: string;
-  initialAutoApplyDocumentId?: string | null;
   isReadonly?: boolean;
-  onBiographyReady?: (biography: string) => void;
 };
 
 export function ArtistBioPanel({
   concertId,
-  initialAutoApplyDocumentId = null,
   isReadonly = false,
-  onBiographyReady,
 }: ArtistBioPanelProps) {
   const [documents, setDocuments] = useState<ArtistDocumentListItem[]>([]);
   const [active, setActive] = useState<ArtistDocumentDetail | null>(null);
@@ -33,15 +29,6 @@ export function ArtistBioPanel({
   const [biographyDraft, setBiographyDraft] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const autoApplyDocumentIds = useRef(
-    new Set(initialAutoApplyDocumentId ? [initialAutoApplyDocumentId] : []),
-  );
-  const onBiographyReadyRef = useRef(onBiographyReady);
-
-  useEffect(() => {
-    onBiographyReadyRef.current = onBiographyReady;
-  }, [onBiographyReady]);
-
   const selectDetail = useCallback((detail: ArtistDocumentDetail) => {
     setActive(detail);
     setBiographyDraft(detail.generated_bio ?? '');
@@ -52,12 +39,6 @@ export function ArtistBioPanel({
           : item,
       ),
     );
-    if (
-      detail.generated_bio &&
-      autoApplyDocumentIds.current.delete(detail.document_id)
-    ) {
-      onBiographyReadyRef.current?.(detail.generated_bio);
-    }
   }, []);
 
   function showError(reason: unknown) {
@@ -128,7 +109,6 @@ export function ArtistBioPanel({
     setError('');
     try {
       const result = await uploadArtistDocument(concertId, file);
-      autoApplyDocumentIds.current.add(result.document_id);
       const detail = await getArtistDocument(concertId, result.document_id);
       setDocuments((items) => [{ ...detail }, ...items]);
       selectDetail(detail);
@@ -146,7 +126,6 @@ export function ArtistBioPanel({
     setError('');
     try {
       const result = await regenerateArtistBio(concertId, active.document_id);
-      autoApplyDocumentIds.current.add(result.document_id);
       const detail = await getArtistDocument(concertId, result.document_id);
       setDocuments((items) => [{ ...detail }, ...items]);
       selectDetail(detail);

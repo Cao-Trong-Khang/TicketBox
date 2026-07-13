@@ -279,7 +279,7 @@ export function ConcertDetailPage() {
           </section>
         )}
 
-        {!concertDetail.description && concertDetail.artist_bio && (
+        {concertDetail.artist_bio && (
           <section className="concert-description artist-biography" aria-label="Tiểu sử nghệ sĩ">
             <h2>Tiểu sử nghệ sĩ</h2>
             <p>{concertDetail.artist_bio}</p>

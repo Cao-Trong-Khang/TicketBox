@@ -134,40 +134,32 @@ describe('Organizer concert banner upload flows', () => {
     });
   });
 
-  it('persists a completed AI biography into concert description automatically', async () => {
+  it('keeps a completed Artist Bio separate from the concert description', async () => {
     const concertId = '11111111-1111-4111-8111-111111111111';
     const concert = {
       id: concertId, status: 'PUBLISHED', lifecycleStatus: 'UPCOMING', title: 'AI concert', artistName: 'Artist',
-      description: null, venueName: 'Venue', venueAddress: 'Address', bannerUrl: null, seatingSvg: null,
+      description: 'Independent event description', venueName: 'Venue', venueAddress: 'Address', bannerUrl: null, seatingSvg: null,
       startsAt: '2099-08-01T12:00:00.000Z', endsAt: '2099-08-01T15:00:00.000Z', performanceStartAt: '2099-08-01T19:00:00.000Z',
       createdAt: '2099-08-01T10:00:00.000Z', updatedAt: '2099-08-01T10:00:00.000Z',
     };
-    const document = { document_id: 'doc-1', file_name: 'press-kit.pdf', status: 'done', uploaded_at: '2099-08-01T10:01:00.000Z', generated_bio: 'Persisted AI description' };
+    const document = { document_id: 'doc-1', file_name: 'press-kit.pdf', status: 'done', uploaded_at: '2099-08-01T10:01:00.000Z', generated_bio: 'Independent artist biography' };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(concert))
       .mockResolvedValueOnce(jsonResponse([]))
-      .mockResolvedValueOnce(jsonResponse([document]))
-      .mockResolvedValueOnce(jsonResponse(document))
-      .mockResolvedValueOnce(jsonResponse({ ...concert, description: 'Persisted AI description', updatedAt: '2099-08-01T10:02:00.000Z' }))
       .mockResolvedValueOnce(jsonResponse([document]))
       .mockResolvedValueOnce(jsonResponse(document));
     vi.stubGlobal('fetch', fetchMock);
 
     render(
-      <MemoryRouter initialEntries={[{ pathname: `/organizer/concerts/${concertId}/edit`, state: { artistBioDocumentId: 'doc-1' } }]}>
+      <MemoryRouter initialEntries={[`/organizer/concerts/${concertId}/edit`]}>
         <Routes><Route path={'/organizer/concerts/:id/edit'} element={<OrganizerConcertEditPage />} /></Routes>
       </MemoryRouter>,
     );
 
-    expect(await screen.findByDisplayValue('Persisted AI description')).toBeInTheDocument();
-    await waitFor(() => {
-      const patchCall = fetchMock.mock.calls.find(([, options]) => options?.method === 'PATCH');
-      expect(patchCall).toBeDefined();
-      expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({ description: 'Persisted AI description' });
-    });
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'AI Artist Bio đã được lưu vào Mô tả và đồng bộ với trang chi tiết concert.',
-    );
+    expect(await screen.findByDisplayValue('Independent event description')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Independent artist biography')).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false);
   });
 
   it('uploads a selected press kit only after concert creation and navigates to edit', async () => {

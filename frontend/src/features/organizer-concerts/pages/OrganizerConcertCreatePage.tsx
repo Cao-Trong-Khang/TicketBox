@@ -74,8 +74,9 @@ export function OrganizerConcertCreatePage() {
       if (tickets.status === 'rejected') messages.push('Một số loại vé chưa hoàn tất; vui lòng kiểm tra lại bên dưới.');
       if (biography.status === 'rejected') messages.push('Press kit chưa được tải lên; bạn có thể thử lại trong phần AI Artist Bio.');
       if (biography.status === 'fulfilled' && options.selectedArtistBioFile) messages.push('AI Artist Bio đã được xếp hàng xử lý.');
-      const artistBioDocumentId = biography.status === 'fulfilled' ? biography.value?.document_id ?? null : null;
-      navigate(`/organizer/concerts/${createdConcert.id}/edit`, { state: { feedback: messages.join(' '), artistBioDocumentId } });
+      navigate(`/organizer/concerts/${createdConcert.id}/edit`, {
+        state: { feedback: messages.join(' ') },
+      });
     } catch (err: unknown) {
       setError(toApiError(err));
     } finally {
