@@ -49,6 +49,40 @@ test('completed Kafka event is idempotently ignored', async () => {
   assert.equal(writes, 0);
 });
 
+test('duplicate Kafka event is ignored when another worker already claimed the document', async () => {
+  let storageDownloads = 0;
+  let bioWrites = 0;
+  const prisma = {
+    artistDocument: {
+      findFirst: async () => ({
+        id: 'doc',
+        concertId: 'concert',
+        storageKey: 'key',
+        status: ArtistDocumentStatus.UPLOADED,
+        bio: null,
+      }),
+      updateMany: async () => ({ count: 0 }),
+    },
+    aiArtistBio: {
+      upsert: async () => { bioWrites += 1; },
+    },
+  };
+  const storage = {
+    download: async () => {
+      storageDownloads += 1;
+      return Buffer.from('pdf');
+    },
+  };
+  const worker = new ArtistBioWorkerService(
+    config(), prisma as never, storage as never, {} as never, {} as never, {} as never, {} as never,
+  );
+
+  await worker.process({ document_id: 'doc', concert_id: 'concert', storage_key: 'key', attempt: 1 });
+
+  assert.equal(storageDownloads, 0);
+  assert.equal(bioWrites, 0);
+});
+
 test('short extracted text is represented by the permanent extraction error', () => {
   const error = new PdfTextExtractionError('Could not extract text. Please upload a text-based PDF.');
   assert.equal(error.message, 'Could not extract text. Please upload a text-based PDF.');
