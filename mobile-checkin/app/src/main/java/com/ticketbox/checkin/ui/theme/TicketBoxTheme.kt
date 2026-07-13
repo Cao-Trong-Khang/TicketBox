@@ -84,12 +84,12 @@ fun TicketBoxTheme(content: @Composable () -> Unit) {
 fun statusVariantFor(label: String): TicketBoxStatusVariant {
     val normalized = label.lowercase()
     return when {
+        listOf("duplicate", "conflict", "already").any(normalized::contains) ->
+            TicketBoxStatusVariant.Warning
         listOf("success", "active", "synced", "checked", "valid", "online").any(normalized::contains) ->
             TicketBoxStatusVariant.Success
         listOf("invalid", "failed", "error", "cancel", "not found", "refunded").any(normalized::contains) ->
             TicketBoxStatusVariant.Error
-        listOf("duplicate", "conflict", "already").any(normalized::contains) ->
-            TicketBoxStatusVariant.Warning
         listOf("offline", "pending", "recorded", "stale").any(normalized::contains) ->
             TicketBoxStatusVariant.Info
         else -> TicketBoxStatusVariant.Neutral

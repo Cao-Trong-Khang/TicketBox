@@ -5,9 +5,10 @@ import { OrdersService } from './orders.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { RedisCacheModule } from '../redis-cache/redis-cache.module';
 import { OrderExpirationService } from './order-expiration.service';
+import { RbacModule } from '../rbac/rbac.module';
 
 @Module({
-  imports: [PrismaModule, RedisCacheModule, RateLimitModule],
+  imports: [PrismaModule, RedisCacheModule, RateLimitModule, RbacModule],
   controllers: [OrdersController],
   providers: [OrdersService, OrderExpirationService],
   exports: [OrdersService],

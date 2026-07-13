@@ -1,5 +1,5 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import * as assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { BadRequestException } from "@nestjs/common";
 import { sanitizeSeatingSvgMarkup } from "./svg-sanitizer";
 

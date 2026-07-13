@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { RateLimitModule } from "../rate-limit/rate-limit.module";
+import { RbacModule } from "../rbac/rbac.module";
 import { RedisCacheModule } from "../redis-cache/redis-cache.module";
 import { ConcertsController } from "./concerts.controller";
 import { ConcertsService } from "./concerts.service";
@@ -15,7 +16,7 @@ import { OrganizerTicketTypesController } from "./organizer-ticket-types.control
 import { OrganizerTicketTypesService } from "./organizer-ticket-types.service";
 
 @Module({
-  imports: [AuthModule, RedisCacheModule, RateLimitModule],
+  imports: [AuthModule, RedisCacheModule, RateLimitModule, RbacModule],
   controllers: [
     ConcertsController,
     OrganizerConcertsController,

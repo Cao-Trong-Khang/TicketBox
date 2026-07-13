@@ -83,11 +83,11 @@ describe('ConcertDetailPage banner display', () => {
     expect(document.querySelector('.concert-seatmap-svg-content')).toBeInTheDocument();
   });
 
-  it('uses the persisted concert description and hides a duplicate artist bio section', async () => {
+  it('renders Artist Bio instead of the legacy concert description', async () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(jsonResponse({
-        id: 'concert-1', title: 'Concert detail', artistName: 'Artist', description: 'Persisted AI description',
-        artist_bio: 'Persisted AI description', venueName: 'Venue', venueAddress: 'Address', bannerUrl: null, seatingSvg: null,
+        id: 'concert-1', title: 'Concert detail', artistName: 'Artist', description: 'Independent event description',
+        artist_bio: 'Independent artist biography', venueName: 'Venue', venueAddress: 'Address', bannerUrl: null, seatingSvg: null,
         startsAt: '2099-08-01T12:00:00.000Z', endsAt: '2099-08-01T15:00:00.000Z', performanceStartAt: '2099-08-01T19:00:00.000Z',
       }))
       .mockResolvedValueOnce(jsonResponse([])));
@@ -96,8 +96,9 @@ describe('ConcertDetailPage banner display', () => {
         <Routes><Route path={'/concerts/:id'} element={<ConcertDetailPage />} /></Routes>
       </MemoryRouter>,
     );
-    expect(await screen.findByText('Persisted AI description')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Tiểu sử nghệ sĩ' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Independent artist biography')).toBeInTheDocument();
+    expect(screen.queryByText('Independent event description')).not.toBeInTheDocument();
+    expect(document.querySelector('.artist-biography')).toBeInTheDocument();
   });
 });
 

@@ -51,14 +51,22 @@ data class VipDashboardCounts(
     val remaining: Int,
 )
 
+data class VipGuestDisplayState(
+    val label: String,
+    val checkedIn: Boolean,
+)
+
 fun deriveDashboardCounts(
     tickets: List<PreloadedTicketEntity>,
     vipGuests: List<PreloadedVipGuestEntity>,
     scans: List<LocalScanLogEntity>,
 ): DashboardCounts {
     val locallyAccepted = scans.count {
-        it.localResult == LocalScanResult.Accepted.wireValue ||
-            it.localResult == LocalScanResult.StaleSnapshot.wireValue
+        it.entityType == LocalEntityType.Ticket.wireValue &&
+            (
+                it.localResult == LocalScanResult.Accepted.wireValue ||
+                    it.localResult == LocalScanResult.StaleSnapshot.wireValue
+            )
     }
     val checkedIn = (tickets.count { it.status == "USED" || it.checkedInAtIso != null } + locallyAccepted)
         .coerceAtMost(tickets.size)
@@ -119,8 +127,11 @@ fun filterScanHistory(
     }
 }
 
-fun deriveVipDashboardCounts(guests: List<PreloadedVipGuestEntity>): VipDashboardCounts {
-    val checkedIn = guests.count { it.status == "CHECKED_IN" || it.checkedInAtIso != null }
+fun deriveVipDashboardCounts(
+    guests: List<PreloadedVipGuestEntity>,
+    scans: List<LocalScanLogEntity> = emptyList(),
+): VipDashboardCounts {
+    val checkedIn = guests.count { vipGuestDisplayState(it, scans).checkedIn }
     return VipDashboardCounts(
         total = guests.size,
         checkedIn = checkedIn,
@@ -146,11 +157,12 @@ fun filterVipGuests(
     sponsor: String?,
     guestType: String?,
     statusFilter: VipStatusFilter,
+    scans: List<LocalScanLogEntity> = emptyList(),
 ): List<PreloadedVipGuestEntity> {
     val normalizedQuery = query.trim().lowercase()
     return guests.filter { guest ->
         val sponsorLabel = guest.sponsorCompany ?: guest.sponsorSource
-        val checkedIn = guest.status == "CHECKED_IN" || guest.checkedInAtIso != null
+        val checkedIn = vipGuestDisplayState(guest, scans).checkedIn
         val matchesStatus = when (statusFilter) {
             VipStatusFilter.All -> true
             VipStatusFilter.CheckedIn -> checkedIn
@@ -167,5 +179,67 @@ fun filterVipGuests(
         val matchesSponsor = sponsor == null || sponsorLabel == sponsor
         val matchesType = guestType == null || guest.guestType == guestType
         matchesQuery && matchesSponsor && matchesType && matchesStatus
+    }
+}
+
+fun vipGuestDisplayState(
+    guest: PreloadedVipGuestEntity,
+    scans: List<LocalScanLogEntity> = emptyList(),
+): VipGuestDisplayState {
+    val guestQrCredentials = listOfNotNull(guest.qrHash)
+    val scanState = scans
+        .mapNotNull { scan ->
+            if (
+                scan.concertId == guest.concertId &&
+                scan.entityType == LocalEntityType.VipGuest.wireValue &&
+                scan.qrHash in guestQrCredentials
+            ) {
+                vipGuestScanDisplayState(scan)?.let { scan.scannedAtEpochMillis to it }
+            } else {
+                null
+            }
+        }
+        .maxByOrNull { it.first }
+        ?.second
+    if (scanState != null) {
+        return scanState
+    }
+
+    return when {
+        guest.status == "CHECKED_IN" || guest.checkedInAtIso != null ->
+            VipGuestDisplayState(label = "Checked In", checkedIn = true)
+        guest.status == "ACTIVE" ->
+            VipGuestDisplayState(label = "Remaining", checkedIn = false)
+        else ->
+            VipGuestDisplayState(label = guest.status.replace('_', ' '), checkedIn = false)
+    }
+}
+
+private fun vipGuestScanDisplayState(scan: LocalScanLogEntity): VipGuestDisplayState? {
+    if (scan.syncStatus == "conflict" || scan.backendResultCode == "conflict") {
+        return VipGuestDisplayState(label = "Conflict", checkedIn = true)
+    }
+
+    if (scan.backendResultCode == "duplicate" || scan.localResult == LocalScanResult.Duplicate.wireValue) {
+        return VipGuestDisplayState(label = "Already Checked In", checkedIn = true)
+    }
+
+    if (scan.backendResultCode == "accepted") {
+        return VipGuestDisplayState(label = "Checked In", checkedIn = true)
+    }
+
+    val locallyAccepted =
+        scan.localResult == LocalScanResult.Accepted.wireValue ||
+            scan.localResult == LocalScanResult.StaleSnapshot.wireValue
+
+    if (!locallyAccepted) {
+        return null
+    }
+
+    return when (scan.syncStatus) {
+        "pending" -> VipGuestDisplayState(label = "Pending Sync", checkedIn = true)
+        "failed" -> VipGuestDisplayState(label = "Sync Failed", checkedIn = true)
+        "synced" -> VipGuestDisplayState(label = "Checked In", checkedIn = true)
+        else -> VipGuestDisplayState(label = "Pending Sync", checkedIn = true)
     }
 }

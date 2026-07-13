@@ -18,6 +18,7 @@ class MobileViewStateTest {
         val scans = listOf(
             scan("scan-1", localResult = "accepted", syncStatus = "pending"),
             scan("scan-2", localResult = "invalid", syncStatus = "failed"),
+            scan("vip-scan-1", localResult = "accepted", syncStatus = "pending", entityType = "vip_guest"),
         )
 
         val counts = deriveDashboardCounts(tickets, guests, scans)
@@ -26,7 +27,7 @@ class MobileViewStateTest {
         assertEquals(2, counts.checkedInTickets)
         assertEquals(1, counts.remainingTickets)
         assertEquals(2, counts.vipGuests)
-        assertEquals(2, counts.pendingOffline)
+        assertEquals(3, counts.pendingOffline)
     }
 
     @Test
@@ -95,6 +96,59 @@ class MobileViewStateTest {
         )
     }
 
+    @Test
+    fun vipRowsUseLocalAndAuthoritativeScanStateBeforeNextPreload() {
+        val guests = listOf(
+            vipGuest("guest-1", status = "ACTIVE"),
+            vipGuest("guest-2", status = "ACTIVE"),
+            vipGuest("guest-3", status = "ACTIVE"),
+            vipGuest("guest-4", status = "ACTIVE"),
+        )
+        val scans = listOf(
+            scan(
+                "guest-1-pending",
+                localResult = "accepted",
+                syncStatus = "pending",
+                entityType = "vip_guest",
+                qrHash = "qr-guest-1",
+            ),
+            scan(
+                "guest-2-synced",
+                localResult = "accepted",
+                syncStatus = "synced",
+                backendResultCode = "accepted",
+                entityType = "vip_guest",
+                qrHash = "qr-guest-2",
+            ),
+            scan(
+                "guest-3-conflict",
+                localResult = "accepted",
+                syncStatus = "conflict",
+                backendResultCode = "conflict",
+                entityType = "vip_guest",
+                qrHash = "qr-guest-3",
+            ),
+        )
+
+        assertEquals("Pending Sync", vipGuestDisplayState(guests[0], scans).label)
+        assertEquals("Checked In", vipGuestDisplayState(guests[1], scans).label)
+        assertEquals("Conflict", vipGuestDisplayState(guests[2], scans).label)
+        assertEquals("Remaining", vipGuestDisplayState(guests[3], scans).label)
+
+        val counts = deriveVipDashboardCounts(guests, scans)
+        assertEquals(4, counts.total)
+        assertEquals(3, counts.checkedIn)
+        assertEquals(1, counts.remaining)
+        assertEquals(
+            listOf("guest-1", "guest-2", "guest-3"),
+            filterVipGuests(guests, "", null, null, VipStatusFilter.CheckedIn, scans).map { it.id },
+        )
+        assertEquals(
+            listOf("guest-4"),
+            filterVipGuests(guests, "", null, null, VipStatusFilter.Remaining, scans).map { it.id },
+        )
+    }
+
     private fun ticket(
         id: String,
         status: String,
@@ -136,13 +190,15 @@ class MobileViewStateTest {
         localResult: String,
         syncStatus: String,
         backendResultCode: String? = null,
+        entityType: String = "ticket",
+        qrHash: String = "qr-$id",
     ) = LocalScanLogEntity(
         localScanId = id,
         sourceDeviceId = "device-1",
         concertId = "concert-1",
-        qrHash = "qr-$id",
+        qrHash = qrHash,
         displayCode = id,
-        entityType = "ticket",
+        entityType = entityType,
         localResult = localResult,
         syncStatus = syncStatus,
         retryCount = 0,

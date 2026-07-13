@@ -431,6 +431,7 @@ fun VipGuestCard(
     guest: PreloadedVipGuestEntity,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    statusLabel: String = guest.status,
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -458,7 +459,7 @@ fun VipGuestCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            StatusBadge(guest.status)
+            StatusBadge(statusLabel)
         }
     }
 }

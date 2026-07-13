@@ -7,7 +7,7 @@ import { hasTicketDraftValidationErrors } from '../ticket-type-draft-helpers';
 import { OrganizerConcertPayload, OrganizerTicketTypePayload } from '../types';
 import { ApiError } from '../../../lib/api-client';
 import { useState } from 'react';
-import { uploadArtistDocument } from '../../artist-bio/api';
+import { previewArtistBio, uploadArtistDocument } from '../../artist-bio/api';
 
 export function OrganizerConcertCreatePage() {
   const navigate = useNavigate();
@@ -17,7 +17,7 @@ export function OrganizerConcertCreatePage() {
 
   const handleSubmit = async (
     payload: OrganizerConcertPayload,
-    options: { selectedBannerFile: File | null; selectedArtistBioFile: File | null },
+    options: { selectedBannerFile: File | null; selectedArtistBioFile: File | null; generatedArtistBio: string | null },
   ) => {
     setError(null);
 
@@ -67,15 +67,20 @@ export function OrganizerConcertCreatePage() {
         ? ticketSetup()
         : Promise.resolve();
       const bioResult = options.selectedArtistBioFile
-        ? uploadArtistDocument(createdConcert.id, options.selectedArtistBioFile)
+        ? uploadArtistDocument(createdConcert.id, options.selectedArtistBioFile, options.generatedArtistBio ?? undefined)
         : Promise.resolve(null);
       const [tickets, biography] = await Promise.allSettled([ticketResult, bioResult]);
       const messages = ['Concert đã được tạo và hiển thị công khai.'];
       if (tickets.status === 'rejected') messages.push('Một số loại vé chưa hoàn tất; vui lòng kiểm tra lại bên dưới.');
       if (biography.status === 'rejected') messages.push('Press kit chưa được tải lên; bạn có thể thử lại trong phần AI Artist Bio.');
-      if (biography.status === 'fulfilled' && options.selectedArtistBioFile) messages.push('AI Artist Bio đã được xếp hàng xử lý.');
-      const artistBioDocumentId = biography.status === 'fulfilled' ? biography.value?.document_id ?? null : null;
-      navigate(`/organizer/concerts/${createdConcert.id}/edit`, { state: { feedback: messages.join(' '), artistBioDocumentId } });
+      if (biography.status === 'fulfilled' && biography.value?.status === 'done') messages.push('AI Artist Bio đã được lưu.');
+      if (biography.status === 'fulfilled' && biography.value?.status === 'uploaded') messages.push('AI Artist Bio đã được xếp hàng xử lý.');
+      const artistBioDocumentId = biography.status === 'fulfilled'
+        ? biography.value?.document_id ?? null
+        : null;
+      navigate(`/organizer/concerts/${createdConcert.id}/edit`, {
+        state: { feedback: messages.join(' '), artistBioDocumentId },
+      });
     } catch (err: unknown) {
       setError(toApiError(err));
     } finally {
@@ -124,10 +129,11 @@ export function OrganizerConcertCreatePage() {
             )}
 
             <OrganizerConcertForm
-              submitLabel="Tạo concert"
+              submitLabel={'T\u1ea1o concert'}
               isSubmitting={isSubmitting}
-              bannerInputLabel="Chọn banner concert"
+              bannerInputLabel={'Ch\u1ecdn banner concert'}
               showArtistBioUpload
+              onGenerateArtistBio={async (file, previousBio) => (await previewArtistBio(file, previousBio)).generated_bio}
               onSubmit={handleSubmit}
             >
               <OrganizerTicketTypeDraftSection

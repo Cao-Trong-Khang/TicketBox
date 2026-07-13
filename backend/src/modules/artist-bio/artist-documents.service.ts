@@ -24,7 +24,7 @@ export class ArtistDocumentsService {
     private readonly redis: RedisCacheService,
   ) {}
 
-  async upload(user: AuthenticatedUser, concertId: string, file?: UploadedPdf): Promise<{ document_id: string; status: 'uploaded' }> {
+  async upload(user: AuthenticatedUser, concertId: string, file?: UploadedPdf, generatedBio?: string): Promise<{ document_id: string; status: 'uploaded' | 'done' }> {
     await this.assertOwner(user.id, concertId, true);
     if (!file) throw new BadRequestException('PDF file is required');
     if (file.size > PDF_MAX_BYTES) throw new BadRequestException('PDF must not exceed 10 MB');
@@ -35,11 +35,33 @@ export class ArtistDocumentsService {
     const documentId = randomUUID();
     const storageKey = this.storage.buildStorageKey(concertId, documentId);
     await this.storage.upload(storageKey, file.buffer);
+    const approvedBio = generatedBio?.trim();
+    if (generatedBio !== undefined && !approvedBio) {
+      await this.storage.remove(storageKey).catch(() => undefined);
+      throw new BadRequestException('generated_bio must not be empty');
+    }
+    if (approvedBio && approvedBio.length > 10000) {
+      await this.storage.remove(storageKey).catch(() => undefined);
+      throw new BadRequestException('generated_bio must be 10000 characters or fewer');
+    }
     try {
-      await this.prisma.artistDocument.create({ data: { id: documentId, concertId, fileName, storageKey } });
+      if (approvedBio) {
+        const now = new Date();
+        await this.prisma.$transaction([
+          this.prisma.artistDocument.create({ data: { id: documentId, concertId, fileName, storageKey, status: ArtistDocumentStatus.DONE } }),
+          this.prisma.aiArtistBio.create({ data: { documentId, concertId, status: AiArtistBioStatus.DONE, generatedBio: approvedBio, generatedAt: now } }),
+        ]);
+      } else {
+        await this.prisma.artistDocument.create({ data: { id: documentId, concertId, fileName, storageKey } });
+      }
     } catch (error) {
       await this.storage.remove(storageKey).catch(() => undefined);
       throw error;
+    }
+
+    if (approvedBio) {
+      await this.redis.del(`concerts:detail:${concertId}`);
+      return { document_id: documentId, status: 'done' };
     }
 
     try {
@@ -71,6 +93,32 @@ export class ArtistDocumentsService {
     };
   }
 
+  async remove(user: AuthenticatedUser, concertId: string, documentId: string): Promise<void> {
+    await this.assertOwner(user.id, concertId, true);
+    const document = await this.findDocument(concertId, documentId);
+
+    await this.prisma.$transaction([
+      this.prisma.artistDocument.delete({ where: { id: documentId } }),
+      this.prisma.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          entityType: 'artist_document',
+          entityId: documentId,
+          action: 'DELETE',
+          metadata: { concertId, fileName: document.fileName },
+        },
+      }),
+    ]);
+
+    const remainingReferences = await this.prisma.artistDocument.count({
+      where: { storageKey: document.storageKey },
+    });
+    if (remainingReferences === 0) {
+      await this.storage.remove(document.storageKey).catch(() => undefined);
+    }
+    await this.redis.del(`concerts:detail:${concertId}`);
+  }
+
   async updateBio(user: AuthenticatedUser, concertId: string, documentId: string, generatedBio: string): Promise<{ generated_bio: string }> {
     await this.assertOwner(user.id, concertId, true);
     const document = await this.findDocument(concertId, documentId);
@@ -93,7 +141,13 @@ export class ArtistDocumentsService {
     const newId = randomUUID();
     await this.prisma.artistDocument.create({ data: { id: newId, concertId, fileName: source.fileName, storageKey: source.storageKey } });
     try {
-      await this.publisher.publish({ document_id: newId, concert_id: concertId, storage_key: source.storageKey, attempt: 1 });
+      await this.publisher.publish({
+        document_id: newId,
+        concert_id: concertId,
+        storage_key: source.storageKey,
+        attempt: 1,
+        ...(source.bio?.generatedBio ? { previous_bio: source.bio.generatedBio } : {}),
+      });
     } catch {
       throw new ServiceUnavailableException('Biography regeneration could not be queued; the attempt remains available for retry');
     }

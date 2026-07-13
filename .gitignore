@@ -13,6 +13,8 @@ dist/
 build/
 coverage/
 *.tsbuildinfo
+/backend/src/*.js
+/backend/src/**/*.js
 
 # Verification artifacts
 verification-*.png

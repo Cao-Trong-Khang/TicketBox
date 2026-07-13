@@ -32,6 +32,7 @@ import com.ticketbox.checkin.data.local.LocalScanLogEntity
 import com.ticketbox.checkin.data.local.PreloadedVipGuestEntity
 import com.ticketbox.checkin.data.session.StaffSessionStore
 import com.ticketbox.checkin.domain.LocalScanResult
+import com.ticketbox.checkin.domain.vipGuestDisplayState
 import com.ticketbox.checkin.ui.screens.auth.LoginScreen
 import com.ticketbox.checkin.ui.screens.dashboard.DashboardScreen
 import com.ticketbox.checkin.ui.screens.events.AssignedEventsScreen
@@ -333,9 +334,11 @@ fun StaffCheckInApp(
             if (assignment == null || guest == null) {
                 step = AppStep.EventShell
             } else {
+                val scans by repository.observeScanHistory(assignment.concertId).collectAsState(initial = emptyList())
                 VipGuestDetailScreen(
                     assignment = assignment,
                     guest = guest,
+                    statusLabel = vipGuestDisplayState(guest, scans).label,
                     onBack = { step = AppStep.EventShell },
                     onConfirm = {
                         scope.launch {

@@ -39,6 +39,17 @@ export class EmailProvider implements NotificationProvider {
           <br>
           <p>Trân trọng,<br>TicketBox Team</p>
         `;
+      } else if (request.type === 'event_reminder') {
+        const startsAt = request.data['startsAt'] ? new Date(request.data['startsAt'] as string).toLocaleString('vi-VN', { dateStyle: 'full', timeStyle: 'short' }) : 'sắp tới';
+        html = `
+          <h2>Nhắc nhở sự kiện sắp diễn ra!</h2>
+          <p>Xin chào,</p>
+          <p>Sự kiện <strong>${request.data['concertTitle']}</strong> mà bạn đã mua vé sẽ diễn ra vào lúc <strong>${startsAt}</strong>.</p>
+          <p><strong>Địa điểm:</strong> ${request.data['venueName'] || 'Vui lòng kiểm tra lại trên Website'}</p>
+          <p>Hãy chuẩn bị sẵn mã QR Code trong trang 'Lịch sử Đơn hàng' để được quét mã check-in tại cổng nhé!</p>
+          <br>
+          <p>Chúc bạn có một trải nghiệm thật tuyệt vời,<br>TicketBox Team</p>
+        `;
       }
 
       const info = await this.transporter.sendMail({
@@ -67,9 +78,9 @@ export class EmailProvider implements NotificationProvider {
 
   private buildSubject(type: string): string {
     const subjects: Record<string, string> = {
-      ticket_purchase: 'TicketBox: Your ticket purchase is confirmed!',
-      event_reminder: 'TicketBox: Reminder for your upcoming event',
-      cancellation: 'TicketBox: Your ticket has been cancelled',
+      ticket_purchase: 'TicketBox: Hoàn tất thanh toán thành công!',
+      event_reminder: 'TicketBox: Nhắc nhở sự kiện sắp bắt đầu (trong 24h tới)',
+      cancellation: 'TicketBox: Hoàn tất hủy vé',
     };
 
     return subjects[type] ?? `TicketBox Notification: ${type}`;
