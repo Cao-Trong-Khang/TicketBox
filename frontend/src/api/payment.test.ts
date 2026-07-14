@@ -1,58 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPayment } from '../api/payment';
-import type { CreatePaymentRequest } from '../api/payment';
+import { createPayment } from './payment';
 
-const BASE_REQUEST: CreatePaymentRequest = {
-  provider: 'vnpay',
-  orderId: 'order-test-1',
-  amount: 150000,
-  returnUrl: 'http://localhost:5173/payments/success',
-  webhookUrl: 'http://localhost:3000/payments/webhook',
-};
-
-describe('createPayment', () => {
+describe('secure payment API', () => {
   beforeEach(() => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          paymentUrl: 'https://sandbox.vnpayment.vn/pay?token=abc',
-          providerTransactionId: 'vnp_abc123',
-        }),
-      }),
-    );
+    localStorage.setItem('accessToken', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ paymentId: 'pay-1', status: 'pending', paymentUrl: 'https://provider.test' }) }));
   });
+  afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('calls POST /payments with correct body', async () => {
-    const result = await createPayment(BASE_REQUEST);
-
-    expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+  it('sends only server-authorized initiation fields', async () => {
+    await createPayment({ orderId: 'order-1', provider: 'vnpay', idempotencyKey: 'key-1' });
     const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/payments');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body as string)).toMatchObject({
-      orderId: 'order-test-1',
-      provider: 'vnpay',
-      amount: 150000,
-    });
-    expect(result.providerTransactionId).toBe('vnp_abc123');
-  });
-
-  it('throws when the API returns an error status', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 400,
-        json: async () => ({ message: 'Invalid orderId' }),
-      }),
-    );
-
-    await expect(createPayment(BASE_REQUEST)).rejects.toThrow('Invalid orderId');
+    expect(url).toContain('/payments/initiate');
+    expect(JSON.parse(String(init.body))).toEqual({ orderId: 'order-1', provider: 'vnpay', idempotencyKey: 'key-1' });
+    expect(String(init.body)).not.toContain('amount');
+    expect(String(init.body)).not.toContain('webhookUrl');
   });
 });

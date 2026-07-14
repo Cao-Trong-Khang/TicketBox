@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -54,9 +55,11 @@ enum PaymentProvider {
 
 enum PaymentStatus {
   INITIATED
+  PENDING
   SUCCESS
   FAILED
   TIMEOUT
+  REQUIRES_REVIEW
 
   @@map("payment_status")
 }
@@ -402,20 +405,31 @@ model PaymentTransaction {
 
   provider              PaymentProvider
   providerTransactionId String?         @map("provider_transaction_id")
+  providerRequestId     String           @unique @default(uuid()) @map("provider_request_id")
   idempotencyKey        String          @unique @map("idempotency_key")
+  requestFingerprint    String           @default("legacy") @map("request_fingerprint") @db.VarChar(64)
 
   status    PaymentStatus @default(INITIATED)
   amountVnd Int           @map("amount_vnd")
+  paymentUrl String?       @map("payment_url") @db.Text
+  failureCode String?      @map("failure_code") @db.VarChar(100)
 
   requestedAt DateTime  @default(now()) @map("requested_at")
   confirmedAt DateTime? @map("confirmed_at")
+  initiationLeaseUntil DateTime? @map("initiation_lease_until")
+  reconciliationLeaseUntil DateTime? @map("reconciliation_lease_until")
+  lastReconciledAt DateTime? @map("last_reconciled_at")
+  reconciliationAttempts Int @default(0) @map("reconciliation_attempts")
   createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerTransactionId])
   @@index([orderId])
   @@index([status])
+  @@index([status, updatedAt])
+  @@index([reconciliationLeaseUntil])
   @@map("payment_transactions")
 }
 

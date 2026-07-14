@@ -29,7 +29,10 @@ function renderPage(dataSource: OrderHistoryDataSource) {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('OrderHistoryPage', () => {
   it('shows loading and then the empty state', async () => {
@@ -70,6 +73,14 @@ describe('OrderHistoryPage', () => {
   });
 
   it('opens a complete order detail dialog and closes it accessibly', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify([{
+        id: 'ticket-1', orderId: 'order-1', ticketCode: 'TK-001',
+        status: 'ACTIVE', signedQrToken: 'signed-token',
+      }]),
+    }));
     renderPage({ listOrders: () => Promise.resolve([order('PAID')]) });
 
     fireEvent.click(await screen.findByRole('button', { name: 'Xem chi tiết đơn hàng' }));
@@ -81,7 +92,8 @@ describe('OrderHistoryPage', () => {
     expect(detail.getByText('Đã thanh toán')).toBeInTheDocument();
     expect(detail.getByText('Arena Center, Quận 1')).toBeInTheDocument();
     expect(detail.getByRole('heading', { name: 'Thông tin vé' })).toBeInTheDocument();
-    expect(detail.getByText('VIP')).toBeInTheDocument();
+    expect(await detail.findByText('Vé TK-001')).toBeInTheDocument();
+    expect(detail.getByAltText('QR Code for Ticket TK-001')).toBeInTheDocument();
     expect(detail.getAllByText('2 vé').length).toBeGreaterThan(0);
     expect(detail.getByText(/1\.200\.000/)).toBeInTheDocument();
 

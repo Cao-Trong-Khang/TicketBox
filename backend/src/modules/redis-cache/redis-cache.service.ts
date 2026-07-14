@@ -83,6 +83,21 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  async getStrict(key: string): Promise<string | null> {
+    await this.ensureConnected();
+    return this.redis.get(key);
+  }
+
+  async setStrict(key: string, value: string, ...args: Array<string | number>): Promise<unknown> {
+    await this.ensureConnected();
+    return (this.redis.set as (...values: unknown[]) => Promise<unknown>)(key, value, ...args);
+  }
+
+  async evalStrict(script: string, keys: string[], args: Array<string | number>): Promise<unknown> {
+    await this.ensureConnected();
+    return this.redis.eval(script, keys.length, ...keys, ...args.map(String));
+  }
+
   onModuleDestroy(): void {
     if (this.redis.status !== 'end') {
       this.redis.disconnect();

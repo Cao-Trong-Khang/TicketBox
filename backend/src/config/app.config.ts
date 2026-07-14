@@ -33,8 +33,8 @@ export type CheckInQrConfig = {
 };
 
 export type PaymentGatewayConfig = {
-  vnpay: { paymentUrl: string; returnUrl: string; ipnUrl: string; hashSecret: string; tmnCode: string; webhookSecret: string };
-  momo: { paymentUrl: string; returnUrl: string; ipnUrl: string; hashSecret: string; partnerCode: string; accessKey: string; webhookSecret: string };
+  vnpay: { paymentUrl: string; queryUrl: string; returnUrl: string; ipnUrl: string; hashSecret: string; tmnCode: string; webhookSecret: string; timeoutMs: number; queryTimeoutMs: number };
+  momo: { paymentUrl: string; queryUrl: string; returnUrl: string; ipnUrl: string; hashSecret: string; partnerCode: string; accessKey: string; webhookSecret: string; timeoutMs: number; queryTimeoutMs: number };
 };
 
 export type NotificationConfig = {
@@ -45,21 +45,27 @@ export type NotificationConfig = {
 export function getPaymentGatewayConfig(configService: ConfigService): PaymentGatewayConfig {
     return {
         vnpay: {
-            paymentUrl: configService.get<string>('VNPAY_URL', 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'),
+            paymentUrl: readHttpUrl(configService, 'VNPAY_URL', 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'),
+            queryUrl: readHttpUrl(configService, 'VNPAY_QUERY_URL', 'https://sandbox.vnpayment.vn/merchant_webapi/api/transaction'),
             returnUrl: configService.get<string>('VNPAY_RETURN_URL', 'http://localhost:5173/payments/success'),
             ipnUrl: configService.get<string>('VNPAY_IPN_URL', 'http://localhost:3000/payments/webhook'),
-            hashSecret: configService.get<string>('VNPAY_HASH_SECRET', 'vnpay-secret'),
-            tmnCode: configService.get<string>('VNPAY_TMN_CODE', 'TICKETBOX'),
+            hashSecret: readRequired(configService, 'VNPAY_HASH_SECRET', 'vnpay-secret'),
+            tmnCode: readRequired(configService, 'VNPAY_TMN_CODE', 'TICKETBOX'),
             webhookSecret: configService.get<string>('VNPAY_WEBHOOK_SECRET', 'vnpay-webhook-secret'),
+            timeoutMs: readPositiveNumber(configService, 'VNPAY_TIMEOUT_MS', 10_000),
+            queryTimeoutMs: readPositiveNumber(configService, 'VNPAY_QUERY_TIMEOUT_MS', 30_000),
         },
         momo: {
-            paymentUrl: configService.get<string>('MOMO_URL', 'https://test-payment.momo.vn/v2/gateway/api/create'),
+            paymentUrl: readHttpUrl(configService, 'MOMO_URL', 'https://test-payment.momo.vn/v2/gateway/api/create'),
+            queryUrl: readHttpUrl(configService, 'MOMO_QUERY_URL', 'https://test-payment.momo.vn/v2/gateway/api/query'),
             returnUrl: configService.get<string>('MOMO_RETURN_URL', 'http://localhost:5173/payments/success'),
             ipnUrl: configService.get<string>('MOMO_IPN_URL', 'http://localhost:3000/payments/webhook'),
-            hashSecret: configService.get<string>('MOMO_SECRET_KEY', 'momo-secret'),
-            partnerCode: configService.get<string>('MOMO_PARTNER_CODE', 'MOMO'),
-            accessKey: configService.get<string>('MOMO_ACCESS_KEY', 'momo-access-key'),
+            hashSecret: readRequired(configService, 'MOMO_SECRET_KEY', 'momo-secret'),
+            partnerCode: readRequired(configService, 'MOMO_PARTNER_CODE', 'MOMO'),
+            accessKey: readRequired(configService, 'MOMO_ACCESS_KEY', 'momo-access-key'),
             webhookSecret: configService.get<string>('MOMO_WEBHOOK_SECRET', 'momo-webhook-secret'),
+            timeoutMs: readPositiveNumber(configService, 'MOMO_TIMEOUT_MS', 10_000),
+            queryTimeoutMs: readPositiveNumber(configService, 'MOMO_QUERY_TIMEOUT_MS', 30_000),
         },
     };
 }
@@ -188,6 +194,20 @@ function readRequired(configService: ConfigService, key: string, fallback: strin
   const value = configService.get<string>(key, fallback).trim();
   if (!value) throw new Error(`Invalid empty environment value for ${key}`);
   return value;
+}
+
+function readHttpUrl(configService: ConfigService, key: string, fallback: string): string {
+  const value = readRequired(configService, key, fallback);
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('Invalid URL environment value for ' + key);
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Invalid URL protocol for ' + key);
+  }
+  return parsed.toString();
 }
 
 function readList(configService: ConfigService, key: string, fallback: string[]): string[] {

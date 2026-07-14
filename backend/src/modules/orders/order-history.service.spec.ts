@@ -123,7 +123,8 @@ function createHistoryService(
     $transaction: fail,
   };
   const redisCache = { get: fail, set: fail, del: fail };
-  return new OrdersService(prisma as never, redisCache as never);
+  const checkoutLocks = { withLocks: fail };
+  return new OrdersService(prisma as never, redisCache as never, checkoutLocks as never);
 }
 
 function historyRow(status: OrderStatus) {

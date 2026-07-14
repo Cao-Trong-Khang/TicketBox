@@ -702,8 +702,9 @@ async function main() {
         orderId: order.id,
         provider: payProviders[i % payProviders.length],
         idempotencyKey: `pay-idemp-hi-pend-${orderCode}`,
-        status: PaymentStatus.INITIATED,
+        status: i === 0 ? PaymentStatus.TIMEOUT : PaymentStatus.INITIATED,
         amountVnd: tt.priceVnd * quantity,
+        failureCode: i === 0 ? 'DEMO_UNCERTAIN_PROVIDER_TIMEOUT' : null,
         requestedAt: orderTime
       }
     });
@@ -764,7 +765,7 @@ async function main() {
         orderCode,
         userId: buyer.id,
         concertId: sayHiConcert.id,
-        status: OrderStatus.CANCELLED,
+        status: i === 0 ? OrderStatus.FAILED : OrderStatus.CANCELLED,
         totalAmountVnd: tt.priceVnd,
         expiresAt: new Date(orderTime.getTime() + 15 * 60 * 1000),
         paidAt: null,
@@ -782,7 +783,27 @@ async function main() {
         subtotalVnd: tt.priceVnd
       }
     });
+
+    if (i === 0) {
+      await prisma.paymentTransaction.create({
+        data: {
+          orderId: order.id,
+          provider: PaymentProvider.VNPAY,
+          idempotencyKey: 'pay-idemp-hi-failed-' + orderCode,
+          status: PaymentStatus.FAILED,
+          amountVnd: tt.priceVnd,
+          failureCode: 'DEMO_PROVIDER_DECLINED',
+          requestedAt: orderTime,
+          confirmedAt: new Date(orderTime.getTime() + 2 * 60 * 1000),
+        },
+      });
+    }
   }
+
+  // Concurrency demo baseline: audienceUsers[2] already owns two paid CAT1 tickets
+  // from paid orders i=2 and i=22. Two simultaneous requests for two more tickets
+  // must allow at most one winner against CAT1's per-user limit of four.
+  console.log('- Concurrency demo: ' + audienceUsers[2].email + ' has 2/4 paid CAT1 tickets');
 
   // Future Concert: Vũ Cát Tường
   const vctConcert = seededConcerts[2];

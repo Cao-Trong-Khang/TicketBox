@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../../../components/ui/Button';
 import { CreateOrderResponse } from '../types';
-import { createPayment } from '../../../api/payment';
+import { createPayment, getPaymentProviders, ProviderAvailability } from '../../../api/payment';
 
 export function OrderPendingPage() {
   const location = useLocation();
@@ -12,6 +12,15 @@ export function OrderPendingPage() {
   const [provider, setProvider] = useState<'vnpay' | 'momo' |null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<ProviderAvailability[]>([]);
+  const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
+
+  useEffect(() => {
+    getPaymentProviders()
+      .then(setAvailability)
+      .catch(() => setPayError('Không thể kiểm tra cổng thanh toán. Vui lòng thử lại.'))
+      .finally(() => setAvailabilityLoaded(true));
+  }, []);
 
   if (!order) {
     return (
@@ -35,14 +44,12 @@ export function OrderPendingPage() {
     setIsPaying(true);
     setPayError(null);
     try {
-      const response = await createPayment({
-        provider,
-        orderId: order.orderId,
-        amount: order.totalAmountVnd,
-        returnUrl: `${window.location.origin}/payments/success`,
-        webhookUrl: `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/payments/webhook`,
-      });
-      // Redirect to VNPay/MoMo sandbox page
+      const storageKey = `ticketbox:payment-key:${order.orderId}:${provider}`;
+      const idempotencyKey = sessionStorage.getItem(storageKey) ?? crypto.randomUUID();
+      sessionStorage.setItem(storageKey, idempotencyKey);
+      const response = await createPayment({ provider, orderId: order.orderId, idempotencyKey });
+      sessionStorage.setItem('ticketbox:last-payment-id', response.paymentId);
+      if (!response.paymentUrl) throw new Error('Thanh toan dang cho xu ly. Vui long kiem tra lai sau.');
       window.location.href = response.paymentUrl;
     } catch (err) {
       setPayError(err instanceof Error ? err.message : 'Có lỗi xảy ra trong quá trình thanh toán.');
@@ -54,6 +61,11 @@ export function OrderPendingPage() {
     style: 'currency',
     currency: 'VND',
   }).format(order.totalAmountVnd);
+
+  const isUnavailable = (name: 'vnpay' | 'momo') =>
+    availability.some((item) => item.provider === name && item.status !== 'available');
+  const unavailableProviders = availability.filter((item) => item.status !== 'available');
+  const selectedProviderUnavailable = provider ? isUnavailable(provider) : false;
 
   const expiresAtDate = new Date(order.expiresAt);
   const formattedExpiry = new Intl.DateTimeFormat('vi-VN', {
@@ -114,6 +126,7 @@ export function OrderPendingPage() {
                   value="vnpay"
                   checked={provider === 'vnpay'}
                   onChange={() => setProvider('vnpay')}
+                  disabled={availability.some((item) => item.provider === 'vnpay' && item.status !== 'available')}
                   style={{ marginRight: '8px' }}
                 />
                 VNPay
@@ -139,11 +152,23 @@ export function OrderPendingPage() {
                   value="momo"
                   checked={provider === 'momo'}
                   onChange={() => setProvider('momo')}
+                  disabled={availability.some((item) => item.provider === 'momo' && item.status !== 'available')}
                   style={{ marginRight: '8px' }}
                 />
                 MoMo
               </label>
             </div>
+          </div>
+        )}
+
+        {availabilityLoaded && unavailableProviders.length > 0 && (
+          <div role="status" style={{ padding: '12px', marginBottom: '16px', borderRadius: '8px', background: '#fff7ed', color: '#9a3412' }}>
+            {unavailableProviders.length === 2
+              ? 'Cả hai cổng thanh toán đang tạm gián đoạn. Đơn hàng vẫn được giữ; vui lòng thử lại sau.'
+              : unavailableProviders[0].provider.toUpperCase() + ' đang tạm gián đoạn. Bạn có thể chọn cổng thanh toán còn lại.'}
+            {unavailableProviders[0].retryAfterSeconds
+              ? ' Thử lại sau khoảng ' + unavailableProviders[0].retryAfterSeconds + ' giây.'
+              : ''}
           </div>
         )}
 
@@ -156,7 +181,7 @@ export function OrderPendingPage() {
             <Button
               type="button"
               onClick={handlePay}
-              disabled={isPaying}
+              disabled={isPaying || !provider || selectedProviderUnavailable}
               style={{ width: '100%', padding: '14px', fontSize: '16px', fontWeight: '600' }}
             >
               {isPaying ? 'Đang chuyển đến cổng thanh toán...' : 'Thanh toán ngay'}
