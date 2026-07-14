@@ -1,33 +1,47 @@
 export type PaymentProviderName = 'vnpay' | 'momo';
 
-export type PaymentStatus = 'pending' | 'completed' | 'failed';
+export type PaymentOutcome = 'success' | 'failed' | 'pending';
 
-export type CreatePaymentRequest = {
+export type ProviderPaymentRequest = {
   orderId: string;
-  amount: number;
+  amountVnd: number;
+  providerRequestId: string;
   returnUrl: string;
   webhookUrl: string;
   customerEmail?: string;
-  provider: PaymentProviderName;
 };
 
-export type CreatePaymentResponse = {
+export type ProviderPaymentResponse = {
   paymentUrl: string;
-  providerTransactionId: string;
+  providerRequestId: string;
   rawPayload?: Record<string, unknown>;
 };
 
-export type PaymentWebhookPayload = {
-  providerTransactionId: string;
-  status: PaymentStatus;
-  signature?: string;
-  rawPayload: Record<string, unknown>;
+export type ProviderPaymentQuery = {
+  providerRequestId: string;
+  providerTransactionId?: string | null;
+  initiatedAt: Date;
+  amountVnd: number;
+};
+
+export type NormalizedPaymentResult = {
+  provider: PaymentProviderName;
+  providerRequestId: string;
+  providerTransactionId?: string;
+  amountVnd: number;
+  outcome: PaymentOutcome;
+  eventId?: string;
 };
 
 export interface PaymentProvider {
   readonly name: PaymentProviderName;
-
-  createPayment(request: CreatePaymentRequest): Promise<CreatePaymentResponse>;
-
-  verifyWebhook(payload: PaymentWebhookPayload): Promise<boolean>;
+  createPayment(request: ProviderPaymentRequest): Promise<ProviderPaymentResponse>;
+  verifyAndParseWebhook(payload: Record<string, unknown>): NormalizedPaymentResult;
+  queryPayment?(request: ProviderPaymentQuery): Promise<NormalizedPaymentResult | null>;
 }
+
+export type PaymentAvailability = {
+  provider: PaymentProviderName;
+  status: 'available' | 'temporarily_unavailable';
+  retryAfterSeconds?: number;
+};

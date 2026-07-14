@@ -4,18 +4,20 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { ConcertStatus, TicketTypeStatus, OrderStatus } from '@prisma/client';
+import { ConcertStatus, TicketTypeStatus, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { CreateOrderRequestDto } from './dto/create-order.request.dto';
 import { CreateOrderResponseDto } from './dto/create-order.response.dto';
 import { OrderHistoryItemDto } from './dto/order-history.response.dto';
+import { CheckoutLockService } from './checkout-lock.service';
 
 @Injectable()
 export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redisCache: RedisCacheService,
+    private readonly checkoutLocks: CheckoutLockService,
   ) {}
   async getOrderHistory(userId: string): Promise<OrderHistoryItemDto[]> {
     const orders = await this.prisma.order.findMany({
@@ -79,10 +81,12 @@ export class OrdersService {
           idempotencyKey: dto.idempotencyKey,
         },
       },
+      include: { items: { select: { ticketTypeId: true, quantity: true } } },
     });
 
     // [3.2] If found, return immediately
     if (existingOrder) {
+      this.assertExactReplay(existingOrder, dto);
       return this.toCreateOrderResponseDto(existingOrder);
     }
 
@@ -93,8 +97,16 @@ export class OrdersService {
       throw new BadRequestException('Duplicate ticketTypeIds not allowed');
     }
 
-    // [4.1-6.3] Transaction
-    const order = await this.prisma.$transaction(async (tx) => {
+    const lockScopes = [`quota:${userId}:${dto.concertId}`, ...ticketTypeIds.map((id) => `inventory:${id}`)];
+    const order = await this.checkoutLocks.withLocks(lockScopes, () => this.withSerializableRetry(() => this.prisma.$transaction(async (tx) => {
+      const replay = await tx.order.findUnique({
+        where: { userId_idempotencyKey: { userId, idempotencyKey: dto.idempotencyKey } },
+        include: { items: { select: { ticketTypeId: true, quantity: true } } },
+      });
+      if (replay) {
+        this.assertExactReplay(replay, dto);
+        return replay;
+      }
       // [4.1] Validate Concert
       const concert = await tx.concert.findUnique({
         where: { id: dto.concertId },
@@ -124,7 +136,12 @@ export class OrdersService {
         throw new ConflictException('Ticket sales have ended for this concert');
       }
 
-      // [4.2-4.3] Fetch all ticket types once, build map
+      for (const ticketTypeId of [...ticketTypeIds].sort()) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${userId}:${dto.concertId}:${ticketTypeId}`}, 0))`;
+        await tx.$queryRaw`SELECT id FROM ticket_types WHERE id = ${ticketTypeId}::uuid FOR UPDATE`;
+      }
+
+      // Fetch authoritative locked ticket types.
       const ticketTypes = await tx.ticketType.findMany({
         where: {
           id: { in: ticketTypeIds },
@@ -170,7 +187,10 @@ export class OrdersService {
             ticketTypeId: item.ticketTypeId,
             order: {
               userId,
-              status: { in: [OrderStatus.PENDING, OrderStatus.PAID] },
+              OR: [
+                { status: OrderStatus.PAID },
+                { status: OrderStatus.PENDING, expiresAt: { gt: now } },
+              ],
             },
           },
         });
@@ -240,7 +260,7 @@ export class OrdersService {
       }
 
       return createdOrder;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), 3));
 
     // [8.1] Post-transaction: invalidate Redis cache
     await this.redisCache.del(`concerts:${dto.concertId}:ticket-types`);
@@ -255,6 +275,37 @@ export class OrdersService {
       .substring(2, 6)
       .toUpperCase();
     return `TBX${timestamp}${random}`;
+  }
+
+  private assertExactReplay(
+    order: { concertId: string; items: Array<{ ticketTypeId: string; quantity: number }> },
+    dto: CreateOrderRequestDto,
+  ): void {
+    const persisted = order.items
+      .map((item) => item.ticketTypeId + ':' + item.quantity)
+      .sort()
+      .join('|');
+    const requested = dto.items
+      .map((item) => item.ticketTypeId + ':' + item.quantity)
+      .sort()
+      .join('|');
+    if (order.concertId !== dto.concertId || persisted !== requested) {
+      throw new ConflictException({
+        code: 'ORDER_IDEMPOTENCY_CONFLICT',
+        message: 'Idempotency key was used for a different checkout request',
+      });
+    }
+  }
+
+  private async withSerializableRetry<T>(operation: () => Promise<T>, attempts: number): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try { return await operation(); }
+      catch (error) {
+        const retryable = error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2034' || error.code === 'P2002');
+        if (!retryable || attempt >= attempts) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20 * attempt + Math.floor(Math.random() * 30)));
+      }
+    }
   }
 
   private toCreateOrderResponseDto(order: {

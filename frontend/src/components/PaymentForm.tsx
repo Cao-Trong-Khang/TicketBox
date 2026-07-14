@@ -1,17 +1,17 @@
 import { CreditCard, Loader } from 'lucide-react';
 import { useId, useReducer, useRef } from 'react';
 import { createPayment } from '../api/payment';
-import type { CreatePaymentRequest, CreatePaymentResponse, PaymentProviderName } from '../api/payment';
+import type { InitiatePaymentRequest, PaymentResponse, PaymentProviderName } from '../api/payment';
 
 type FormState =
   | { phase: 'idle' }
   | { phase: 'submitting' }
-  | { phase: 'success'; data: CreatePaymentResponse }
+  | { phase: 'success'; data: PaymentResponse }
   | { phase: 'error'; message: string };
 
 type Action =
   | { type: 'submit' }
-  | { type: 'success'; data: CreatePaymentResponse }
+  | { type: 'success'; data: PaymentResponse }
   | { type: 'error'; message: string }
   | { type: 'reset' };
 
@@ -43,20 +43,17 @@ export function PaymentForm() {
     dispatch({ type: 'submit' });
 
     const form = new FormData(e.currentTarget);
-    const request: CreatePaymentRequest = {
+    const request: InitiatePaymentRequest = {
       provider: form.get('provider') as PaymentProviderName,
       orderId: String(form.get('orderId')),
-      amount: Number(form.get('amount')),
-      customerEmail: String(form.get('customerEmail') || ''),
-      returnUrl: `${window.location.origin}/payments/success`,
-      webhookUrl: `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/payments/webhook`,
+      idempotencyKey: crypto.randomUUID(),
     };
 
     try {
-      const data = await createPayment(request, controller.signal);
+      const data = await createPayment(request);
       dispatch({ type: 'success', data });
       // Tự động chuyển hướng sang trang thanh toán VNPAY/MoMo
-      window.location.href = data.paymentUrl;
+      if (data.paymentUrl) window.location.href = data.paymentUrl;
     } catch (err) {
       if (controller.signal.aborted) return;
       dispatch({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' });
@@ -67,12 +64,12 @@ export function PaymentForm() {
     return (
       <div className="result-card result-success">
         <h3>Payment created ✓</h3>
-        <p className="result-label">Transaction ID</p>
-        <code className="result-value">{state.data.providerTransactionId}</code>
+        <p className="result-label">Payment ID</p>
+        <code className="result-value">{state.data.paymentId}</code>
         <p className="result-label">Payment URL</p>
         <a
           className="result-link"
-          href={state.data.paymentUrl}
+          href={state.data.paymentUrl ?? '#'}
           target="_blank"
           rel="noopener noreferrer"
         >
@@ -102,32 +99,7 @@ export function PaymentForm() {
           name="orderId"
           type="text"
           placeholder="order-001"
-          defaultValue={`order-${Date.now()}`}
           required
-        />
-      </div>
-
-      <div className="field">
-        <label htmlFor={`${idPrefix}-amount`}>Amount (VND)</label>
-        <input
-          id={`${idPrefix}-amount`}
-          name="amount"
-          type="number"
-          min="1000"
-          step="1000"
-          placeholder="150000"
-          defaultValue="150000"
-          required
-        />
-      </div>
-
-      <div className="field">
-        <label htmlFor={`${idPrefix}-customerEmail`}>Customer email (optional)</label>
-        <input
-          id={`${idPrefix}-customerEmail`}
-          name="customerEmail"
-          type="email"
-          placeholder="buyer@example.com"
         />
       </div>
 

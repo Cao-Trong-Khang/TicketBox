@@ -188,6 +188,7 @@ function createService(
       }) => createdOrders.get(where.userId_idempotencyKey.idempotencyKey) ?? null,
     },
     $executeRaw: async () => 1,
+    $queryRaw: async () => [],
   };
 
   const prisma = {
@@ -203,5 +204,9 @@ function createService(
     del: async () => undefined,
   };
 
-  return new OrdersService(prisma as never, redisCache as never);
+  const checkoutLocks = {
+    withLocks: async (_scopes: string[], operation: () => Promise<unknown>) => operation(),
+  };
+
+  return new OrdersService(prisma as never, redisCache as never, checkoutLocks as never);
 }
