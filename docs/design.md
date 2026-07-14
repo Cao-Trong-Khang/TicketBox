@@ -1,739 +1,452 @@
+# TicketBox — Technical Design
+
 ## Kiến trúc tổng thể
 
-TicketBox sử dụng kết hợp **Kiến trúc Client-Server**, **Kiến trúc phân lớp** và **Kiến trúc hướng sự kiện**.
+TicketBox là hệ thống client–server với backend **modular monolith** NestJS. Các module nghiệp vụ cùng chạy trong một tiến trình API và dùng chung Prisma/PostgreSQL; chúng không phải microservice. Hai công việc nền được tách thành tiến trình độc lập vì có vòng đời và đặc tính tải khác request HTTP:
 
-Ở cấp hệ thống, TicketBox tuân theo **Kiến trúc Client-Server**. Người dùng khán giả, người dùng ban tổ chức và nhân viên check-in sử dụng các ứng dụng client để gửi yêu cầu đến một backend server tập trung. Hệ thống cung cấp một ứng dụng web với hai khu vực theo vai trò: khu vực công khai dành cho khán giả để duyệt concert và mua vé, và khu vực quản trị dành cho ban tổ chức để quản lý concert và vé. Ứng dụng check-in di động được nhân viên sử dụng tại cổng địa điểm tổ chức. Các client này giao tiếp với backend thông qua HTTPS JSON APIs. Kiến trúc này phù hợp vì TicketBox cần kiểm soát tập trung đối với tồn kho vé, trạng thái thanh toán, quyền người dùng và xác thực check-in.
+- `ai-bio-worker` nhận job từ Kafka, đọc PDF trong MinIO, trích xuất văn bản và gọi mô hình AI.
+- `vip-import-worker` tự quét thư mục CSV mỗi 60 giây và polling tối đa 10 import có trạng thái chờ mỗi 10 giây. “Queue” của luồng này là trạng thái trong PostgreSQL, không phải Kafka.
 
-Bên trong backend, TicketBox tuân theo **Kiến trúc phân lớp**. Lớp Presentation/API cung cấp các REST endpoint và xử lý xác thực request, xác thực người dùng, phân quyền và giới hạn tần suất truy cập. Lớp Business Logic triển khai các quy tắc cốt lõi như kiểm tra tình trạng vé, giới hạn mua vé theo người dùng, tạo đơn hàng, xác nhận thanh toán, phát hành vé điện tử có mã QR, kích hoạt thông báo và đồng bộ check-in ngoại tuyến. Lớp Data Access đóng gói việc truy cập cơ sở dữ liệu, transaction, lock, repository, cache và publish message. Lớp Database lưu trữ dữ liệu chính thức trong PostgreSQL, trong khi Redis hỗ trợ caching, rate limiting, trạng thái phối hợp tạm thời và bảo vệ hệ thống trong các giai đoạn lưu lượng cao.
+Web app React phục vụ cả khán giả và ban tổ chức. Ứng dụng Android Kotlin/Jetpack Compose là client riêng cho nhân viên check-in; app giao tiếp REST với backend và dùng Room để hoạt động ngoại tuyến. Các client không truy cập trực tiếp PostgreSQL, Redis, Kafka hay MinIO.
 
-TicketBox cũng áp dụng **Kiến trúc hướng sự kiện** cho các workflow chậm hoặc dễ lỗi, không nên chặn luồng request chính. Sau các thay đổi trạng thái quan trọng như thanh toán thành công, phát hành vé, tải lên PDF hoặc nhận file CSV, backend publish event đến message broker. Background workers consume các event này để gửi thông báo, lên lịch nhắc nhở trước concert 24 giờ, xử lý import CSV khách VIP của nhà tài trợ, tạo tiểu sử nghệ sĩ bằng AI và cập nhật các projection thống kê. Cách tiếp cận này giảm coupling giữa quy trình mua vé cốt lõi và các workflow bất đồng bộ, đồng thời cho phép retry các tác vụ lỗi mà không chặn người dùng duyệt hoặc mua vé.
+Backend giao tiếp đồng bộ với PostgreSQL qua Prisma, với Redis qua `ioredis`, với MinIO qua MinIO SDK, với SMTP qua Nodemailer và với MoMo qua HTTP. Tích hợp VNPAY tạo URL có chữ ký để trình duyệt chuyển hướng. Riêng pipeline AI dùng Kafka topic `ai.bio.requested`; worker gọi Gemini `gemini-2.5-flash` theo cấu hình Docker. Web gửi signed QR token tới `api.qrserver.com` để nhận ảnh QR hiển thị trên e-ticket. REST/JSON là giao thức giữa client và backend; repository không triển khai GraphQL hoặc WebSocket.
 
-Các thành phần runtime chính gồm:
+Pipeline AI giới hạn PDF ở 10 MB, yêu cầu ít nhất 50 ký tự sau trích xuất và chỉ đưa tối đa 4.000 ký tự vào model. MinIO có timeout 10 giây; worker retry download tối đa 3 lần với backoff 500/1.000 ms. Lời gọi AI có timeout 30 giây và tối đa 2 lần thử; lần retry timeout chờ 500 ms, còn retry do HTTP 429 chờ 60 giây. Trạng thái lỗi được ghi vào `artist_documents`/`ai_artist_bios` thay vì làm thất bại request mua vé.
 
-- Web Application: cung cấp hai khu vực theo vai trò: khu vực dành cho khán giả để duyệt concert, xem khu vực ghế, xem tình trạng vé, checkout và truy cập vé điện tử có mã QR; và khu vực quản trị dành cho ban tổ chức để quản lý concert, cấu hình vé, thiết lập thời gian mở bán và giới hạn mua vé theo người dùng, tải tài liệu nghệ sĩ, import danh sách khách VIP và xem báo cáo doanh số.
-- Mobile Check-in App: cho phép nhân viên check-in quét mã QR vé và xác thực khách trong danh sách VIP, bao gồm cả khi mạng yếu hoặc không khả dụng.
-- Backend API Server: cung cấp API cho client, thực thi RBAC, xử lý checkout, callback thanh toán, phát hành vé, quản lý concert và đồng bộ check-in.
-- Background Workers: xử lý các job bất đồng bộ như thông báo, nhắc nhở, import CSV, tạo bio bằng AI và cập nhật analytics.
-- PostgreSQL Database: đóng vai trò nguồn dữ liệu chính thức cho users, concerts, ticket types, orders, payments, tickets, check-ins, guest lists và audit records.
-- Redis: hỗ trợ rate limiting, caching, lock ngắn hạn, quota counters và trạng thái tạm thời cần thiết cho các giai đoạn mở bán có lưu lượng cao.
-- Message Broker: truyền event từ backend đến background workers để xử lý bất đồng bộ.
-- External Systems: VNPAY/MoMo cho thanh toán, email provider cho xác nhận và nhắc nhở, AI model cho tạo tiểu sử nghệ sĩ và file CSV theo lịch từ nhà tài trợ cho danh sách khách VIP.
+Phạm vi lỗi được cô lập theo thành phần:
 
-Mô hình giao tiếp chủ yếu là request-response cho các thao tác hướng người dùng và event-driven cho xử lý bất đồng bộ. Web và mobile client gọi Backend API qua HTTPS. Backend API đọc và ghi dữ liệu chính thức trong PostgreSQL, sử dụng Redis cho caching và bảo vệ lưu lượng, đồng thời publish event đến message broker. Workers consume event và tương tác với PostgreSQL, Redis, email, AI và nguồn CSV khi cần. Cổng thanh toán giao tiếp với TicketBox thông qua request tạo thanh toán và callback đã được xác minh. Ứng dụng check-in di động có thể hoạt động offline bằng cách lưu bản ghi quét cục bộ và đồng bộ với backend khi kết nối được khôi phục.
+- PostgreSQL hỏng làm các nghiệp vụ có trạng thái không hoạt động.
+- Redis hỏng làm cache chuyển thành cache miss và rate limiting chuyển sang fail-open; request vẫn đi tiếp nhưng PostgreSQL chịu tải lớn hơn.
+- Kafka hoặc AI worker hỏng chỉ làm pipeline tiểu sử bị chờ/lỗi; duyệt concert, mua vé và check-in không phụ thuộc pipeline này.
+- VIP worker hỏng không ảnh hưởng API chính; import giữ nguyên trạng thái trong PostgreSQL để lần polling sau xử lý lại.
+- MinIO hỏng ảnh hưởng upload/download banner và press kit. Lỗi cổng thanh toán không ảnh hưởng các route concert hoặc check-in.
 
-## C4 Diagram: Level 1 - System Context
+Kiến trúc này phù hợp phạm vi đồ án vì transaction của order, tồn kho, payment, ticket và check-in vẫn ở một cơ sở dữ liệu, trong khi hai tác vụ dài được tách khỏi đường request chính. Đánh đổi là API backend và PostgreSQL vẫn là điểm tập trung, còn một số cơ chế như circuit breaker có trạng thái cục bộ theo tiến trình.
+
+Docker Compose khởi chạy `frontend`, `backend`, `ai-bio-worker`, `vip-import-worker`, PostgreSQL 18, Redis 8, Kafka 4.1.1 và MinIO. `minio-init` là job khởi tạo bucket một lần, không phải service nghiệp vụ chạy thường trực. Scheduler hết hạn order và nhắc concert chạy ngay trong `backend` bằng `@nestjs/schedule`.
+
+## C4 Diagram
+
+### Level 1 — System Context
 
 ```mermaid
 flowchart LR
-    audience["Khán giả<br/>[Person]<br/>Duyệt concert, mua vé và nhận vé điện tử có mã QR."]
-    organizer["Ban tổ chức<br/>[Person]<br/>Quản lý concert, loại vé, thời gian mở bán và thống kê doanh số."]
-    staff["Nhân viên check-in<br/>[Person]<br/>Quét mã QR vé và xác thực khách VIP tại cổng địa điểm tổ chức."]
+    Audience["Khán giả"]
+    Organizer["Ban tổ chức"]
+    Staff["Nhân viên check-in"]
+    TicketBox["TicketBox\nBán vé, quản trị và soát vé"]
+    VNPAY["VNPAY Sandbox"]
+    MoMo["MoMo Test Gateway"]
+    SMTP["Máy chủ SMTP"]
+    Gemini["Google Gemini API"]
+    QRServer["goQR / api.qrserver.com"]
+    Sponsor["Thư mục CSV nhà tài trợ"]
 
-    ticketbox["TicketBox<br/>[Software System]<br/>Hệ thống bán vé concert có khả năng xử lý đồng thời cao, hỗ trợ bán vé, xác nhận thanh toán, gửi vé điện tử, quản lý ban tổ chức và check-in có khả năng hoạt động offline."]
-
-    payment["VNPAY / MoMo<br/>[External Software System]<br/>Cổng thanh toán dùng để xử lý thanh toán vé và gửi callback thanh toán."]
-    email["Email Provider<br/>[External Software System]<br/>Gửi email xác nhận mua vé, vé điện tử và email nhắc nhở concert."]
-    ai["AI Model<br/>[External Software System]<br/>Tạo tiểu sử nghệ sĩ ngắn từ văn bản press-kit đã được làm sạch."]
-    csv["Sponsor CSV Files<br/>[External Data Source]<br/>File danh sách khách VIP theo lịch do nhà tài trợ cung cấp."]
-
-    audience -->|"Duyệt concert và mua vé bằng"| ticketbox
-    organizer -->|"Quản lý concert và xem doanh số bằng"| ticketbox
-    staff -->|"Xác thực vé và đồng bộ check-in bằng"| ticketbox
-
-    ticketbox -->|"Tạo yêu cầu thanh toán và xác minh callback bằng"| payment
-    ticketbox -->|"Gửi email xác nhận và nhắc nhở bằng"| email
-    ticketbox -->|"Gửi văn bản press-kit đã làm sạch đến"| ai
-    csv -->|"Cung cấp file danh sách khách VIP theo lịch cho"| ticketbox
+    Audience -->|"Xem concert, mua và nhận vé"| TicketBox
+    Organizer -->|"Quản lý concert, vé, VIP và tiểu sử"| TicketBox
+    Staff -->|"Tải dữ liệu, quét và đồng bộ"| TicketBox
+    TicketBox -->|"URL thanh toán và kết quả trả về"| VNPAY
+    TicketBox -->|"Tạo giao dịch và nhận kết quả"| MoMo
+    TicketBox -->|"Gửi email"| SMTP
+    TicketBox -->|"Tạo tiểu sử từ văn bản PDF"| Gemini
+    TicketBox -->|"Web yêu cầu ảnh từ signed QR token"| QRServer
+    Sponsor -->|"File CSV trong thư mục được mount"| TicketBox
 ```
 
-## C4 Diagram: Level 2 - Container
+VNPAY, MoMo, SMTP, Gemini và goQR là các tích hợp ngoài có đường gọi trong code/configuration. Trình duyệt gọi goQR trực tiếp bằng signed QR token. Push, SMS và Zalo không xuất hiện như hệ thống ngoài vì các provider tương ứng hiện chỉ tạo response trong memory, không gọi dịch vụ mạng.
+
+### Level 2 — Container
 
 ```mermaid
 flowchart TB
-    audience["Khán giả<br/>[Person]<br/>Sử dụng ứng dụng web để duyệt concert, mua vé và xem vé điện tử."]
-    organizer["Ban tổ chức<br/>[Person]<br/>Sử dụng khu vực admin để quản lý concert, vé và thống kê doanh số."]
-    staff["Nhân viên check-in<br/>[Person]<br/>Sử dụng ứng dụng check-in di động để xác thực vé và khách VIP."]
+    Web["Web app\nReact 19 + Vite\nUI khán giả và organizer"]
+    Mobile["Mobile check-in\nAndroid Kotlin + Compose\nCameraX, ML Kit, Room, WorkManager"]
+    API["Backend API\nNestJS modular monolith\nREST, auth, nghiệp vụ, cron"]
+    AIWorker["AI bio worker\nNestJS application context\nKafka consumer và pipeline PDF/AI"]
+    VIPWorker["VIP import worker\nNestJS application context\nScanner filesystem + DB polling"]
+    DB[("PostgreSQL 18\nSystem of record")]
+    Redis[("Redis 8\nCache, fixed-window counters, reminder marker")]
+    Kafka[("Kafka 4.1.1\nTopic ai.bio.requested")]
+    MinIO[("MinIO\nBanner và artist PDF")]
+    Gateway["VNPAY / MoMo"]
+    SMTP["SMTP"]
+    AI["Gemini API"]
+    QRServer["api.qrserver.com\nQR image rendering"]
+    CSV["Mounted CSV directory"]
 
-    payment["VNPAY / MoMo<br/>[External Software System]<br/>Cổng thanh toán cho việc thanh toán vé và callback thanh toán."]
-    email["Email Provider<br/>[External Software System]<br/>Gửi email xác nhận và nhắc nhở."]
-    ai["AI Model<br/>[External Software System]<br/>Tạo tiểu sử nghệ sĩ từ văn bản press-kit đã được làm sạch."]
-    csv["Scheduled CSV Files<br/>[External Data Source]<br/>File danh sách khách VIP của nhà tài trợ được import theo lịch."]
-
-    subgraph ticketbox["TicketBox System"]
-        web["Web Application<br/>[Container: Web Frontend]<br/>Cung cấp khu vực khán giả để duyệt concert và checkout, đồng thời cung cấp khu vực admin cho ban tổ chức để quản lý concert và báo cáo."]
-
-        mobile["Check-in Mobile App<br/>[Container: Android/Kotlin + Room/WorkManager]<br/>Cho phép nhân viên check-in quét mã QR, xác thực vé và khách VIP, lưu lượt quét offline và đồng bộ khi online."]
-
-        api["Backend API<br/>[Container: NestJS Modular Monolith]<br/>Cung cấp REST APIs, thực thi RBAC, xử lý checkout, callback thanh toán, phát hành vé, quản lý concert và đồng bộ check-in."]
-
-        workers["Background Workers<br/>[Container: NestJS Worker Processes]<br/>Consume các job bất đồng bộ cho thông báo, nhắc nhở, import CSV, tạo bio bằng AI và cập nhật analytics."]
-
-        postgres[("PostgreSQL Database<br/>[Container: PostgreSQL]<br/>Kho dữ liệu giao dịch chính thức cho users, concerts, orders, payments, tickets, check-ins, guest lists và audit records.")]
-
-        redis[("Redis<br/>[Container: Redis]<br/>Cung cấp caching, rate limiting, quota counters, lock ngắn hạn và phối hợp tạm thời cho các giai đoạn mở bán có lưu lượng cao.")]
-
-        kafka[("Kafka<br/>[Container: Message Broker]<br/>Truyền event và job bất đồng bộ từ Backend API đến Background Workers.")]
-    end
-
-    audience -->|"Sử dụng khu vực khán giả"| web
-    organizer -->|"Sử dụng khu vực admin"| web
-    staff -->|"Sử dụng mobile app"| mobile
-
-    web -->|"Gửi HTTPS JSON API requests đến"| api
-    mobile -->|"Đồng bộ qua HTTPS JSON API khi online"| api
-
-    api -->|"Đọc và ghi dữ liệu"| postgres
-    api -->|"Sử dụng cho caching, rate limiting, quota và phối hợp"| redis
-    api -->|"Publish event đến"| kafka
-
-    kafka -->|"Chuyển event đến"| workers
-    workers -->|"Đọc và ghi dữ liệu"| postgres
-    workers -->|"Sử dụng trạng thái tạm thời và cache từ"| redis
-
-    api -->|"Tạo yêu cầu thanh toán và xác minh callback bằng"| payment
-    workers -->|"Gửi email bằng"| email
-    workers -->|"Gửi văn bản đã làm sạch đến"| ai
-    csv -->|"Cung cấp file CSV theo lịch cho"| workers
+    Web -->|"REST/JSON + Bearer JWT"| API
+    Web -->|"HTTPS image request"| QRServer
+    Mobile -->|"REST/JSON + Bearer JWT"| API
+    API -->|"Prisma"| DB
+    API -->|"ioredis"| Redis
+    API -->|"MinIO SDK"| MinIO
+    API -->|"Kafka producer: AI jobs"| Kafka
+    Kafka -->|"Kafka consumer"| AIWorker
+    AIWorker -->|"Prisma"| DB
+    AIWorker -->|"Đọc PDF"| MinIO
+    AIWorker -->|"HTTPS"| AI
+    AIWorker -->|"Xóa cache chi tiết"| Redis
+    VIPWorker -->|"Đọc file"| CSV
+    VIPWorker -->|"Claim/persist import"| DB
+    API -->|"Tạo URL hoặc HTTP request"| Gateway
+    API -->|"SMTP qua Nodemailer"| SMTP
 ```
 
-## Sơ đồ kiến trúc mức cao
+## High-Level Architecture Diagram
 
 ```mermaid
 flowchart LR
-    audience["Khán giả"]
-    organizer["Ban tổ chức"]
-    staff["Nhân viên check-in"]
-
-    subgraph Clients["Clients"]
-        W["Web Application<br/>Khu vực khán giả + khu vực admin ban tổ chức"]
-        M["Check-in Mobile App<br/>Dữ liệu sự kiện cục bộ + nhật ký quét offline"]
+    subgraph Clients[Clients]
+        Web[Web React]
+        Android[Android check-in]
     end
 
-    subgraph API["Backend API Layer"]
-        G["Gateway / API Middleware<br/>Authentication, RBAC, rate limiting"]
-        C["Concert APIs<br/>danh sách concert, chi tiết, khu vực SVG, tình trạng vé"]
-        B["Checkout APIs<br/>kiểm tra quota, bảo vệ tồn kho, tạo đơn hàng"]
-        P["Payment APIs<br/>khởi tạo thanh toán, idempotency, callbacks"]
-        T["Ticket Issuance<br/>tạo mã QR sau khi xác nhận thanh toán"]
-        X["Check-in Sync APIs<br/>tải dữ liệu sự kiện, upload lượt quét, xử lý trùng lặp"]
-        D["Document Upload APIs<br/>tải lên artist PDF / press-kit"]
+    subgraph Backend[NestJS backend]
+        Auth[Auth + RBAC]
+        Concert[Concert + ticket type]
+        Order[Order + inventory]
+        Payment[Payment adapters + fulfillment]
+        Notify[Notification + reminder cron]
+        CheckIn[Check-in preload/sync]
+        Artist[Artist document API]
+        VIPReport[VIP import report API]
     end
 
-    subgraph State["State and Coordination"]
-        PG[("PostgreSQL<br/>trạng thái giao dịch chính thức")]
-        R[("Redis<br/>cache, rate limits, quota, phối hợp ngắn hạn")]
-        K[("Kafka<br/>message broker cho async events")]
+    subgraph Async[Background processes]
+        AIWorker[AI bio worker]
+        VIPWorker[VIP CSV worker]
     end
 
-    subgraph Workers["Background Workers"]
-        N["Notification Worker<br/>xác nhận và thông báo trong ứng dụng"]
-        RMD["Reminder Worker<br/>nhắc nhở concert trước 24 giờ"]
-        I["CSV Import Worker<br/>xác thực và loại bỏ trùng lặp danh sách khách VIP"]
-        AIW["AI Bio Worker<br/>trích xuất văn bản PDF và tạo bio"]
-    end
+    PG[(PostgreSQL)]
+    Redis[(Redis)]
+    Kafka[(Kafka)]
+    MinIO[(MinIO)]
+    Room[(Room on device)]
+    PayGW[VNPAY / MoMo]
+    SMTP[SMTP]
+    Gemini[Gemini]
+    QRServer[goQR image API]
+    CSV[CSV directory]
 
-    Pay["VNPAY / MoMo<br/>Cổng thanh toán"]
-    Mail["Email Provider"]
-    Model["AI Model"]
-    Files["Sponsor CSV Files"]
+    Web --> Auth
+    Web --> Concert
+    Web --> Order
+    Order -->|"PENDING + reserve"| PG
+    Order --> Payment
+    Payment --> PayGW
+    PayGW -->|"redirect/webhook data"| Payment
+    Payment -->|"PAID + transaction + tickets"| PG
+    Payment --> Notify
+    Notify --> SMTP
+    Web -->|"signed token -> QR image"| QRServer
+    Concert <-->|"cache-aside"| Redis
 
-    audience -->|"Sử dụng khu vực khán giả"| W
-    organizer -->|"Sử dụng khu vực admin"| W
-    staff -->|"Sử dụng mobile app"| M
+    Web --> Artist
+    Artist --> MinIO
+    Artist --> Kafka
+    Kafka --> AIWorker
+    AIWorker --> MinIO
+    AIWorker --> Gemini
+    AIWorker --> PG
 
-    W -->|"Duyệt, quản lý, checkout qua HTTPS"| G
-    M -->|"Tải dữ liệu sự kiện / upload nhật ký quét khi online"| G
+    CSV --> VIPWorker
+    VIPWorker --> PG
+    Web --> VIPReport
+    VIPReport --> PG
 
-    G --> C
-    G --> B
-    G --> P
-    G --> X
-    G --> D
-
-    C -->|"Đọc dữ liệu concert và tình trạng vé từ cache"| R
-    C -->|"Đọc dữ liệu concert chính thức khi cần"| PG
-
-    B -->|"Kiểm tra quota và phối hợp hot path"| R
-    B -->|"Tạo đơn hàng và cập nhật tồn kho bằng transaction"| PG
-    B -->|"Publish order created / checkout events"| K
-
-    P -->|"Tạo yêu cầu thanh toán"| Pay
-    Pay -->|"Payment callback"| P
-    P -->|"Xác nhận trạng thái thanh toán"| PG
-    P -->|"Kích hoạt phát hành vé"| T
-
-    T -->|"Tạo vé có mã QR"| PG
-    T -->|"Publish ticket issued event"| K
-
-    X -->|"Tải vé đã gán và danh sách khách VIP"| PG
-    X -->|"Lưu lượt quét đã upload và xử lý trùng lặp/xung đột"| PG
-
-    D -->|"Lưu metadata tài liệu"| PG
-    D -->|"Publish AI bio job"| K
-
-    Files -->|"File CSV theo lịch"| I
-
-    K -->|"Notification events"| N
-    K -->|"Reminder events"| RMD
-    K -->|"AI bio jobs"| AIW
-
-    N -->|"Lưu thông báo trong ứng dụng"| PG
-    N -->|"Gửi email"| Mail
-    RMD -->|"Gửi email nhắc nhở"| Mail
-
-    I -->|"Upsert khách VIP hợp lệ và báo cáo import"| PG
-    AIW -->|"Gửi văn bản đã làm sạch"| Model
-    AIW -->|"Lưu bio đã tạo hoặc trạng thái lỗi"| PG
+    Android <-->|"preload/sync REST"| CheckIn
+    Android <-->|"snapshot + scan log"| Room
+    CheckIn -->|"SUCCESS/CONFLICT + idempotency"| PG
 ```
 
 ## Thiết kế cơ sở dữ liệu
 
-TicketBox sử dụng **PostgreSQL** làm cơ sở dữ liệu giao dịch chính thức. Hệ thống có nhiều workflow nhạy cảm về tính nhất quán: giảm tồn kho vé, áp dụng giới hạn mua theo người dùng, xác nhận thanh toán, phát hành vé có mã QR và xác thực check-in. PostgreSQL phù hợp vì cung cấp ACID transactions, row-level locking, foreign keys, unique constraints và các chuyển đổi trạng thái đáng tin cậy cho các workflow này.
+PostgreSQL 18 là cơ sở dữ liệu chính. Prisma schema và các migration trong `backend/prisma/migrations` định nghĩa mô hình mà backend thực sự dùng. PostgreSQL phù hợp với các quan hệ ownership, order–item–ticket và các ràng buộc duy nhất cần cho idempotency/check-in. Redis không phải nguồn dữ liệu chính thức.
 
-Redis không được xem là nguồn dữ liệu chính thức. Redis có thể lưu rate-limit counters tạm thời, lock ngắn hạn, quota counters và cached read models, nhưng PostgreSQL quyết định quyền sở hữu vé cuối cùng, trạng thái thanh toán, tính hợp lệ của vé, tính hợp lệ của khách VIP và trạng thái check-in.
+Các nhóm entity chính:
 
-### Quy ước cốt lõi
-
-- Tất cả các bảng chính sử dụng UUID làm khóa chính.
-- Các bản ghi chính có `created_at` và `updated_at`; `deleted_at` chỉ dùng khi cần soft deletion.
-- Các cập nhật tồn kho có mức cạnh tranh cao chạy trong PostgreSQL transaction rõ ràng.
-- Các dòng tồn kho vé được lock trước khi reservation, xác nhận bán hoặc release.
-- Payment attempts sử dụng idempotency keys để ngăn tạo thanh toán trùng lặp.
-- Provider transaction IDs được lưu để xử lý callback thanh toán theo cách idempotent.
-- QR payload được backend ký; database lưu QR hash và trạng thái xác thực.
-- Redis caches có thể được invalidate hoặc rebuild từ PostgreSQL.
+- **Identity và RBAC:** `users`, `roles`, `permissions`, `user_roles`, `role_permissions`, `refresh_tokens`.
+- **Concert và bán vé:** `concerts`, `ticket_types`, `orders`, `order_items`, `payment_transactions`, `tickets`.
+- **Soát vé:** `check_ins`, `check_in_staff_assignments` và `check_in_assignments`. Controller hiện dùng `check_in_staff_assignments` để liệt kê assignment; service preload còn đọc cả hai cấu trúc để tương thích dữ liệu gate/device.
+- **Nội dung AI:** `artist_documents`, `ai_artist_bios`. `artist_bio_jobs` vẫn có trong schema cũ nhưng pipeline đang chạy không ghi bảng này.
+- **Khách VIP:** `vip_guest_imports`, `vip_guests`, `vip_guest_import_errors`, `audit_logs`.
+- **Notification:** `notifications` có trong schema, nhưng `NotificationsService` hiện gửi trực tiếp qua provider và không đọc/ghi bảng này; vì vậy bảng không phải hộp thư in-app đang hoạt động.
 
 ```mermaid
 erDiagram
-    USERS ||--o{ USER_ROLES : has
-    ROLES ||--o{ USER_ROLES : assigned
-    ROLES ||--o{ ROLE_PERMISSIONS : grants
-    PERMISSIONS ||--o{ ROLE_PERMISSIONS : included
+    USER ||--o{ USER_ROLE : has
+    ROLE ||--o{ USER_ROLE : assigned
+    ROLE ||--o{ ROLE_PERMISSION : grants
+    PERMISSION ||--o{ ROLE_PERMISSION : contains
+    USER ||--o{ REFRESH_TOKEN : owns
 
-    USERS ||--o{ CONCERTS : organizes
-    CONCERTS ||--o{ TICKET_TYPES : offers
+    USER ||--o{ CONCERT : organizes
+    CONCERT ||--o{ TICKET_TYPE : defines
+    USER ||--o{ ORDER : places
+    CONCERT ||--o{ ORDER : receives
+    ORDER ||--|{ ORDER_ITEM : contains
+    TICKET_TYPE ||--o{ ORDER_ITEM : selected_as
+    ORDER ||--o{ PAYMENT_TRANSACTION : paid_by
+    ORDER ||--o{ TICKET : issues
+    ORDER_ITEM ||--o{ TICKET : materializes
+    USER ||--o{ TICKET : owns
+    TICKET_TYPE ||--o{ TICKET : classifies
 
-    USERS ||--o{ ORDERS : places
-    CONCERTS ||--o{ ORDERS : receives
-    ORDERS ||--o{ ORDER_ITEMS : contains
-    TICKET_TYPES ||--o{ ORDER_ITEMS : selected
+    USER ||--o{ CHECK_IN_STAFF_ASSIGNMENT : assigned
+    CONCERT ||--o{ CHECK_IN_STAFF_ASSIGNMENT : scopes
+    USER ||--o{ CHECK_IN_ASSIGNMENT : assigned_legacy
+    CONCERT ||--o{ CHECK_IN_ASSIGNMENT : scopes_legacy
+    TICKET ||--o{ CHECK_IN : scanned_as
+    USER ||--o{ CHECK_IN : performs
+    CONCERT ||--o{ CHECK_IN : records
 
-    ORDERS ||--o{ PAYMENT_TRANSACTIONS : paid_by
+    CONCERT ||--o{ ARTIST_DOCUMENT : stores
+    ARTIST_DOCUMENT ||--o| AI_ARTIST_BIO : produces
 
-    ORDERS ||--o{ TICKETS : issues
-    ORDER_ITEMS ||--o{ TICKETS : generates
-    USERS ||--o{ TICKETS : owns
-    CONCERTS ||--o{ TICKETS : belongs_to
-    TICKET_TYPES ||--o{ TICKETS : has_type
+    CONCERT ||--o{ VIP_GUEST_IMPORT : imports
+    VIP_GUEST_IMPORT ||--o{ VIP_GUEST : contains
+    VIP_GUEST_IMPORT ||--o{ VIP_GUEST_IMPORT_ERROR : reports
+    VIP_GUEST_IMPORT ||--o{ AUDIT_LOG : audits
+    VIP_GUEST ||--o{ CHECK_IN : scanned_as
 
-    TICKETS ||--o{ CHECK_INS : checked_by
-    VIP_GUESTS ||--o{ CHECK_INS : checked_by
-    CONCERTS ||--o{ CHECK_INS : has
-    USERS ||--o{ CHECK_INS : performs
-
-    USERS ||--o{ NOTIFICATIONS : receives
-    CONCERTS ||--o{ NOTIFICATIONS : related_to
-
-    CONCERTS ||--o{ ARTIST_BIO_JOBS : has
-    USERS ||--o{ ARTIST_BIO_JOBS : uploads
-
-    CONCERTS ||--o{ VIP_GUEST_IMPORTS : imports
-    VIP_GUEST_IMPORTS ||--o{ VIP_GUESTS : contains
-    CONCERTS ||--o{ VIP_GUESTS : has
-
-    USERS {
-        uuid id PK
-        string email UK
-        string password_hash
-        string display_name
-        string status
-        datetime created_at
-        datetime updated_at
+    USER {
+      uuid id PK
+      string email UK
+      enum status
     }
-
-    ROLES {
-        uuid id PK
-        string code UK
-        string name
-        datetime created_at
-        datetime updated_at
+    CONCERT {
+      uuid id PK
+      uuid organizer_id FK
+      enum status
+      datetime starts_at
+      datetime performance_start_at
     }
-
-    PERMISSIONS {
-        uuid id PK
-        string code UK
-        string description
-        datetime created_at
-        datetime updated_at
+    TICKET_TYPE {
+      uuid id PK
+      uuid concert_id FK
+      string code
+      int total_quantity
+      int reserved_quantity
+      int sold_quantity
+      int per_user_limit
     }
-
-    USER_ROLES {
-        uuid user_id PK, FK
-        uuid role_id PK, FK
-        datetime created_at
+    ORDER {
+      uuid id PK
+      string order_code UK
+      uuid user_id FK
+      enum status
+      string idempotency_key
+      datetime expires_at
     }
-
-    ROLE_PERMISSIONS {
-        uuid role_id PK, FK
-        uuid permission_id PK, FK
-        datetime created_at
+    PAYMENT_TRANSACTION {
+      uuid id PK
+      uuid order_id FK
+      enum provider
+      string provider_transaction_id
+      string idempotency_key UK
+      enum status
     }
-
-    CONCERTS {
-        uuid id PK
-        uuid organizer_id FK
-        string title
-        string artist_name
-        string description
-        string venue_name
-        string venue_address
-        string banner_url
-        string seating_svg
-        string status
-        datetime starts_at
-        datetime ends_at
-        datetime created_at
-        datetime updated_at
+    TICKET {
+      uuid id PK
+      string ticket_code UK
+      string qr_hash UK
+      enum status
     }
-
-    TICKET_TYPES {
-        uuid id PK
-        uuid concert_id FK
-        string code
-        string name
-        int price_vnd
-        int total_quantity
-        int reserved_quantity
-        int sold_quantity
-        int per_user_limit
-        datetime sale_start_at
-        datetime sale_end_at
-        string status
-        datetime created_at
-        datetime updated_at
+    CHECK_IN {
+      uuid id PK
+      uuid ticket_id FK
+      uuid vip_guest_id FK
+      string source_device_id
+      string local_scan_id
+      enum status
+      datetime server_checked_in_at
     }
-
-    ORDERS {
-        uuid id PK
-        string order_code UK
-        uuid user_id FK
-        uuid concert_id FK
-        string status
-        int total_amount_vnd
-        datetime expires_at
-        datetime paid_at
-        string idempotency_key
-        datetime created_at
-        datetime updated_at
+    VIP_GUEST_IMPORT {
+      uuid id PK
+      string source_fingerprint
+      enum status
     }
-
-    ORDER_ITEMS {
-        uuid id PK
-        uuid order_id FK
-        uuid ticket_type_id FK
-        int quantity
-        int unit_price_vnd
-        int subtotal_vnd
-    }
-
-    PAYMENT_TRANSACTIONS {
-        uuid id PK
-        uuid order_id FK
-        string provider
-        string provider_transaction_id
-        string idempotency_key UK
-        string status
-        int amount_vnd
-        datetime requested_at
-        datetime confirmed_at
-        datetime created_at
-    }
-
-    TICKETS {
-        uuid id PK
-        string ticket_code UK
-        string qr_hash UK
-        uuid order_id FK
-        uuid order_item_id FK
-        uuid owner_user_id FK
-        uuid concert_id FK
-        uuid ticket_type_id FK
-        string status
-        datetime issued_at
-        datetime checked_in_at
-        datetime created_at
-    }
-
-    CHECK_INS {
-        uuid id PK
-        uuid ticket_id FK
-        uuid vip_guest_id FK
-        uuid concert_id FK
-        uuid staff_user_id FK
-        string source_device_id
-        string mode
-        string status
-        string sync_status
-        datetime scanned_at
-        datetime synced_at
-        string note
-        datetime created_at
-    }
-
-    NOTIFICATIONS {
-        uuid id PK
-        uuid user_id FK
-        uuid concert_id FK
-        string type
-        string channel
-        string status
-        string subject
-        string body
-        datetime scheduled_at
-        datetime sent_at
-        datetime read_at
-        datetime created_at
-    }
-
-    ARTIST_BIO_JOBS {
-        uuid id PK
-        uuid concert_id FK
-        uuid uploaded_by FK
-        string file_name
-        string storage_key
-        string extracted_text
-        string generated_bio
-        string failure_reason
-        string status
-        datetime created_at
-        datetime updated_at
-    }
-
-    VIP_GUEST_IMPORTS {
-        uuid id PK
-        uuid concert_id FK
-        string file_name
-        string status
-        int total_rows
-        int accepted_rows
-        int rejected_rows
-        int duplicate_rows
-        datetime imported_at
-        datetime created_at
-    }
-
-    VIP_GUESTS {
-        uuid id PK
-        uuid import_id FK
-        uuid concert_id FK
-        string sponsor_source
-        string external_guest_key
-        string full_name
-        string email
-        string phone
-        string status
-        datetime checked_in_at
-        datetime created_at
+    VIP_GUEST {
+      uuid id PK
+      string external_guest_key
+      string normalized_identity_key
+      string qr_hash UK
+      enum status
     }
 ```
 
-### Các nhóm bảng chính
+Các constraint và index có ý nghĩa nghiệp vụ lớn:
 
-- **Identity and RBAC**: `users`, `roles`, `permissions`, `user_roles` và `role_permissions` hỗ trợ ba nhóm người dùng: Audience, Organizer và Check-in Staff.
-- **Cấu hình concert và vé**: `concerts` lưu metadata concert, thông tin nghệ sĩ và địa điểm, thời gian bán, trạng thái và sơ đồ ghế SVG. `ticket_types` lưu các hạng vé theo khu vực như GA, SVIP, VIP, CAT1 và CAT2, bao gồm giá, sức chứa, thời gian mở bán và giới hạn mua theo người dùng.
-- **Mua vé và tồn kho**: `orders` và `order_items` thể hiện ý định mua. `ticket_types.reserved_quantity` được dùng cho reservation trong giai đoạn checkout/payment đang chờ, trong khi `sold_quantity` thể hiện vé đã thanh toán thành công. Tình trạng vé còn lại cuối cùng được tính từ `total_quantity - reserved_quantity - sold_quantity`.
-- **Thanh toán**: `payment_transactions` ghi nhận các lần thử thanh toán VNPAY/MoMo, idempotency keys, provider transaction IDs, số tiền và trạng thái thanh toán cuối cùng. Payment callbacks chỉ cập nhật trạng thái đơn hàng thông qua các chuyển đổi trạng thái có tính idempotent.
-- **Vé**: `tickets` chỉ được phát hành sau khi xác nhận thanh toán thành công. Mỗi vé có `qr_hash` duy nhất, chủ sở hữu, loại vé, trạng thái và trạng thái check-in.
-- **Check-in**: `check_ins` ghi nhận các lượt quét tại cổng địa điểm. Một bản ghi check-in có thể tham chiếu vé thường hoặc mục trong danh sách khách VIP. Các lượt quét phát sinh offline bao gồm device ID, thời điểm quét, trạng thái đồng bộ và kết quả xử lý xung đột.
-- **Import danh sách khách VIP**: `vip_guest_imports` ghi nhận từng lần import CSV theo lịch. `vip_guests` lưu các khách mời hợp lệ của nhà tài trợ sau khi xác thực và loại bỏ trùng lặp.
-- **AI artist bio**: `artist_documents` lưu PDF hoặc press kit được tải lên và trạng thái trích xuất. `ai_artist_bios` lưu kết quả bio được tạo, trạng thái tạo và lý do lỗi khi trích xuất hoặc tạo nội dung bằng AI thất bại.
-- **Thông báo**: `notifications` lưu thông báo trong ứng dụng và các job email theo lịch cho xác nhận mua vé và nhắc nhở trước 24 giờ.
-- **Audit logs**: `audit_logs` ghi nhận các thao tác nhạy cảm như hủy concert, thay đổi loại vé, import CSV, thay đổi trạng thái thanh toán và xử lý xung đột check-in.
+- `ticket_types(concert_id, code)` là duy nhất; các index theo concert/status phục vụ đọc danh mục.
+- `orders(user_id, idempotency_key)` và `orders(order_code)` là duy nhất.
+- `payment_transactions.idempotency_key` và cặp `(provider, provider_transaction_id)` là duy nhất.
+- `tickets.ticket_code` và `tickets.qr_hash` là duy nhất.
+- Partial unique index chỉ cho phép một `check_ins` trạng thái `SUCCESS` trên mỗi `ticket_id` và mỗi `vip_guest_id`.
+- Partial unique index `(source_device_id, local_scan_id)` bảo đảm một scan offline của một thiết bị chỉ được ghi một lần.
+- Một file import được nhận diện duy nhất bởi `(concert_id, source_name, source_fingerprint)`; khách có `external_guest_key` duy nhất theo concert/nguồn, còn khách không có khóa ngoài được đối chiếu bằng normalized identity key.
+- `ai_artist_bios.document_id` là duy nhất, nên mỗi `artist_document` có tối đa một kết quả bio.
 
-### Ràng buộc và index quan trọng
+Transaction và concurrency:
 
-- `users.email` phải là duy nhất.
-- `ticket_types` có unique `(concert_id, code)`.
-- `ticket_types.sold_quantity + ticket_types.reserved_quantity` không được vượt quá `total_quantity`.
-- `orders` nên được index theo `(user_id, concert_id, status)` và `(concert_id, status)`.
-- `order_items` nên được index theo `(ticket_type_id)`.
-- Giới hạn mua vé theo người dùng được thực thi bằng cách kiểm tra paid orders và issued tickets theo `(user_id, concert_id, ticket_type_id)`.
-- `payment_transactions.idempotency_key` phải là duy nhất.
-- `payment_transactions` nên có unique nullable `(provider, provider_transaction_id)` để xử lý callback lặp lại từ provider.
-- `tickets.qr_hash` phải là duy nhất.
-- `tickets` nên được index theo `(concert_id, ticket_type_id, status)`.
-- `check_ins` chỉ cho phép tối đa một lượt check-in thành công cho mỗi `ticket_id`.
-- `check_ins` chỉ cho phép tối đa một lượt check-in thành công cho mỗi `vip_guest_id`.
-- `check_ins` nên được index theo `(source_device_id, sync_status)` để phục vụ đồng bộ mobile.
-- `vip_guests` nên unique theo `(concert_id, sponsor_source, external_guest_key)` khi có external key.
-- Khi không có external guest key, phát hiện trùng lặp nên dùng tên, email và số điện thoại đã được chuẩn hóa.
-- `notifications` nên được index theo `(user_id, status)` và `(scheduled_at, status)`.
-- `audit_logs` nên được index theo `(actor_user_id, created_at)` và `(target_type, target_id)`.
+- Tạo order chạy trong một Prisma interactive transaction. Mỗi loại vé được giữ bằng atomic conditional update: tăng `reserved_quantity` chỉ khi `total_quantity - reserved_quantity - sold_quantity` còn đủ. Đây là cơ chế chống overselling thực tế; code không dùng pessimistic row lock hay Redis lock.
+- Thanh toán thành công cập nhật order, tạo `payment_transaction`, tạo từng ticket và chuyển số lượng từ `reserved_quantity` sang `sold_quantity` trong một transaction.
+- Cron hết hạn claim order bằng `updateMany` với điều kiện còn `PENDING`, rồi giảm `reserved_quantity` trong cùng transaction.
+- Mỗi scan đồng bộ được xử lý trong transaction riêng. Partial unique index chọn một lượt `SUCCESS`; lỗi unique do hai thiết bị cạnh tranh được chuyển thành bản ghi `CONFLICT`.
 
-## Thiết kế kiểm soát truy cập (RBAC)
+Nguồn dữ liệu chính thức của tồn kho là ba cột số lượng trong `ticket_types`; của thanh toán là `orders` và `payment_transactions`; của vé là `tickets`; của kết quả vào cổng là `check_ins` kết hợp trạng thái `tickets`/`vip_guests`. Redis chỉ giữ bản sao đọc và counter ngắn hạn.
 
-TicketBox sử dụng kiểm soát truy cập theo vai trò kết hợp với kiểm tra quyền sở hữu và phân công. RBAC được thực thi tại API boundary bằng NestJS guards và được kiểm tra lại trong domain services đối với các thao tác nhạy cảm theo quyền sở hữu. Token định danh người dùng đã xác thực và có thể chứa gợi ý vai trò cho UI hoặc routing, nhưng quyết định phân quyền cuối cùng sử dụng bản ghi vai trò và quyền ở phía server.
+## Các luồng nghiệp vụ quan trọng
 
-Danh sách concert đã publish và trang chi tiết concert được phép đọc công khai. Các thao tác mua vé, truy cập vé, quản trị của ban tổ chức, thao tác liên quan đến thanh toán và đồng bộ check-in đều yêu cầu xác thực.
+### Luồng mua vé
 
-| Capability                                                | Audience         | Organizer                                      | Check-in Staff                            |
-| --------------------------------------------------------- | ---------------- | ---------------------------------------------- | ----------------------------------------- |
-| Duyệt concert đã publish và tình trạng vé                 | Được phép        | Được phép                                      | Tùy chọn chỉ đọc                          |
-| Xem chi tiết concert và sơ đồ ghế                         | Được phép        | Được phép                                      | Tùy chọn chỉ đọc                          |
-| Mua vé                                                    | Được phép        | Chỉ được phép nếu cũng hành động như Audience  | Từ chối                                   |
-| Xem vé của chính mình                                     | Được phép nếu là chủ sở hữu | Được phép nếu là chủ sở hữu          | Từ chối                                   |
-| Tạo/cập nhật/hủy concert                                  | Từ chối          | Được phép với concert thuộc sở hữu             | Từ chối                                   |
-| Cấu hình loại vé, thời gian mở bán và giới hạn mua theo người dùng | Từ chối | Được phép với concert thuộc sở hữu | Từ chối                                   |
-| Xem thống kê doanh số/doanh thu                           | Từ chối          | Được phép với concert thuộc sở hữu             | Từ chối                                   |
-| Tải lên artist PDF hoặc press kit                         | Từ chối          | Được phép với concert thuộc sở hữu             | Từ chối                                   |
-| Xem trạng thái xử lý AI bio                               | Từ chối          | Được phép với concert thuộc sở hữu             | Từ chối                                   |
-| Xem kết quả import VIP CSV                                | Từ chối          | Được phép với concert thuộc sở hữu             | Từ chối                                   |
-| Quét mã QR vé và xác thực khách trong danh sách VIP       | Từ chối          | Mặc định từ chối                               | Được phép với concert/cổng được phân công |
-| Đồng bộ check-in offline                                  | Từ chối          | Mặc định từ chối                               | Được phép với concert/cổng được phân công |
+**Điều kiện bắt đầu:** người dùng có JWT và quyền `ticket:purchase`, concert ở trạng thái `PUBLISHED`, thời điểm hiện tại không trước `concert.startsAt` và không sau `concert.endsAt`, loại vé `ACTIVE`, số lượng nguyên dương. Backend hiện không dùng `ticket_type.saleStartAt/saleEndAt` trong kiểm tra tạo order.
 
-Quy tắc kiểm soát truy cập:
+1. Web tạo `idempotencyKey` bằng `crypto.randomUUID()` khi người dùng xác nhận lựa chọn và gọi `POST /orders`.
+2. Backend tìm order theo `(userId, idempotencyKey)`. Nếu đã tồn tại, backend trả lại order đó.
+3. Trong một transaction, backend đọc concert và các loại vé, từ chối `ticketTypeId` trùng, kiểm tra trạng thái và giới hạn số lượng.
+4. Với từng loại vé, backend cộng số lượng của người dùng trong các order `PENDING`/`PAID` rồi so với `perUserLimit`.
+5. Backend chạy conditional `UPDATE ticket_types` cho từng item. Nếu bất kỳ update nào không đủ vé, transaction rollback toàn bộ.
+6. Backend tạo order `PENDING`, các `order_items`, số tiền tính từ giá trong database và `expiresAt = now + 15 phút`; sau commit, cache `concerts:{concertId}:ticket-types` bị xóa.
+7. Web chọn `vnpay` hoặc `momo` và gọi `POST /payments`. Controller chuyển request cho adapter; bước này không xác thực JWT, không đọc order và không lưu payment initiation. VNPAY adapter tạo URL có HMAC SHA-512; MoMo adapter ký HMAC SHA-256, gọi API create và trả `payUrl`.
+8. Sau redirect thành công, web gọi `POST /payments/confirm`; endpoint webhook cũng gọi cùng hàm fulfillment khi body có trạng thái `completed`. Implementation hiện suy ra thành công từ body/redirect và không gọi `verifyWebhook`, vì vậy chữ ký callback không được xác minh tại controller.
+9. Nếu order đã `PAID`, fulfillment trả về mà không phát hành thêm. Nếu chưa, một transaction chuyển order sang `PAID`, tạo `payment_transactions` trạng thái `SUCCESS`, tạo đúng số `tickets`, giảm reserved và tăng sold.
+10. Sau commit, backend gửi notification tuần tự qua email, push, SMS, Zalo. Chỉ email thực sự gọi SMTP; lỗi notification được ghi log và không rollback giao dịch/vé. Người dùng xem order và QR ký HMAC qua API vé/lịch sử; web dùng goQR để kết xuất token thành ảnh QR.
 
-- Các endpoint duyệt concert công khai chỉ expose dữ liệu concert đã publish và không expose các trường chỉ dành cho organizer.
-- Audience ticket APIs được scope theo `ticket.owner_user_id`; người dùng chỉ có thể xem vé của chính mình.
-- Organizer APIs được scope theo `concert.organizer_id`; một organizer không thể quản lý concert thuộc sở hữu của organizer khác.
-- Check-in staff APIs được scope theo assigned concert IDs hoặc gate assignments; staff không thể truy cập purchase, payment, organizer management hoặc revenue APIs.
-- Web admin routes yêu cầu organizer permissions; mobile scan và sync routes yêu cầu check-in permissions.
-- API guards thực hiện xác thực, kiểm tra vai trò và quyền trước khi đi vào business logic.
-- Domain services lặp lại kiểm tra ownership hoặc assignment trước các thay đổi trạng thái nhạy cảm như hủy concert, thay đổi số lượng loại vé, review import CSV, thay đổi trạng thái thanh toán và xử lý xung đột check-in.
-- Các thao tác nhạy cảm được ghi vào audit logs với actor, action, target, timestamp và metadata liên quan.
+Nếu người dùng không thanh toán, cron chạy mỗi 60 giây, chuyển tối đa 100 order quá hạn từ `PENDING` sang `EXPIRED` và nhả phần đã giữ. Lỗi cổng tại bước khởi tạo để order ở `PENDING`; người dùng vẫn duyệt concert và được thử lại trước khi cron hết hạn. Hệ thống không có retry payment tự động.
 
-## Thiết kế cơ chế bảo vệ
+### Luồng soát vé khi mất mạng và đồng bộ lại
 
-### Kiểm soát lưu lượng tăng đột biến
+**Điều kiện bắt đầu:** nhân viên đăng nhập bằng tài khoản có vai trò `CHECKIN_STAFF`, có các quyền preload/scan/sync và có assignment tới concert/gate.
 
-TicketBox giới hạn lưu lượng quá mức trước khi request đi vào business logic tốn tài nguyên như lock tồn kho, tạo đơn hàng hoặc khởi tạo thanh toán.
+1. Android gọi API assignment rồi preload concert. Backend xác minh role, permission và assignment; snapshot gồm concert, assignment, toàn bộ ticket của concert và khách VIP thuộc import `COMPLETED` phù hợp gate.
+2. Backend tạo token QR ký HMAC chứa loại thực thể, id, concert, nonce, thời gian phát hành/hết hạn. Mobile lưu assignment, snapshot, ticket và VIP guest vào Room bằng transaction thay thế snapshot.
+3. CameraX + ML Kit đọc QR. Khi offline, repository tra token trong Room, kiểm tra concert, trạng thái snapshot/ticket/VIP, gate và lượt local đã chấp nhận; sau đó luôn ghi `LocalScanLogEntity` bền vững với UUID `localScanId`, `sourceDeviceId`, kết quả local và trạng thái chờ.
+4. WorkManager xếp unique work theo concert, chỉ chạy khi có mạng và dùng exponential backoff tối thiểu 30 giây. Repository gửi tối đa 100 scan sẵn sàng retry mỗi batch.
+5. Backend kiểm tra lại permission/assignment và fixed-window rate limit theo cả user+concert và device+concert. Mỗi scan được tra trước theo `(sourceDeviceId, localScanId)`; scan đã có trả lại kết quả cũ với cờ idempotent.
+6. Trong transaction riêng cho từng scan, backend kiểm tra chữ ký HMAC, concert, nonce, trạng thái ticket/VIP, payment/order của ticket, thời hạn và gate. Kết quả hợp lệ tạo `check_ins.SUCCESS`, đồng thời chuyển ticket sang `USED` hoặc khách VIP sang `CHECKED_IN`.
+7. Nếu một thiết bị khác đã thắng, backend ghi `CONFLICT`; cùng thiết bị quét lại sau thành công nhận `ALREADY_USED`. Nếu hai transaction cạnh tranh, partial unique index giữ đúng một `SUCCESS`, lỗi unique được bắt và chuyển thành conflict có thời điểm của lượt thắng.
+8. Mobile cập nhật từng log thành synced và lưu mã kết quả backend. Với lỗi mạng hoặc HTTP thuộc nhóm retry, log vẫn ở Room, tăng `retryCount` và đặt `nextRetryAt`; request lặp an toàn nhờ khóa device/local scan.
 
-- Rate limiting dựa trên Redis chạy ở lớp NestJS gateway/middleware.
-- Thuật toán chính là token bucket cho checkout và payment initiation APIs, vì thuật toán này cho phép burst ngắn nhưng vẫn giới hạn hành vi lạm dụng kéo dài.
-- Fixed-window limits có thể được dùng cho các API duyệt công khai đơn giản hơn.
-- Các chiều rate-limit gồm IP address, authenticated user ID, device ID, endpoint group và concert ID trong sale windows.
-- Checkout và payment-initiation endpoints sử dụng giới hạn nghiêm ngặt hơn browsing endpoints.
-- Request vượt giới hạn nhận HTTP `429 Too Many Requests` kèm retry metadata.
-- Các request lặp lại có hành vi giống bot có thể nhận cooldown ngắn dựa trên Redis.
-- Các trang concert có lưu lượng đọc lớn sử dụng Redis cache-aside reads để traffic spikes không trực tiếp trở thành read spikes trên PostgreSQL.
-- Kafka được dùng cho các công việc fan-out không quan trọng tức thời như notifications, reminders, CSV imports, AI jobs và analytics updates.
+DTO backend chấp nhận `mode` là `online` hoặc `offline` và xử lý cả hai qua cùng endpoint sync. Luồng Android hiện luôn lưu local scan trước rồi upload với `mode = offline`; Hệ thống không có hỗ trợ endpoint xác thực online tức thời riêng. Thời gian check-in chính thức là thời gian server nhận/ghi thành công, không phải đồng hồ client. `clientScannedAt` chỉ được lưu để truy vết. Kafka publisher của check-in hiện là no-op ngoài nhánh mô phỏng lỗi; kết quả authoritative đã ở PostgreSQL nên publish lỗi không đổi response sync.
 
-Ví dụ giới hạn có thể cấu hình:
+### Luồng nhập danh sách khách mời từ CSV
 
-| Endpoint group          | Example limit                           | Behavior when exceeded                 |
-| ----------------------- | --------------------------------------: | -------------------------------------- |
-| Public concert browsing | 60 requests/minute per IP               | Return 429 with retry time             |
-| Authenticated user APIs | 120 requests/minute per user            | Return 429 with retry time             |
-| Checkout attempts       | 5 requests/minute per user per concert  | Return 429 and short cooldown          |
-| Payment initiation      | 3 requests/minute per user per order    | Return existing payment attempt or 429 |
-| Mobile check-in sync    | 30 requests/minute per device           | Return 429 and retry later             |
+**Điều kiện bắt đầu:** file `.csv` UTF-8, phân cách bằng dấu phẩy, được đặt trong `VIP_CSV_SOURCE_DIR` và chứa `concert_id` hoặc `concert_title` khớp database. Nguồn Docker là thư mục demo mount read-only.
 
-Payment callbacks không được bảo vệ bằng rate limit người dùng thông thường. Chúng phải vượt qua provider signature verification và có thể được giới hạn bằng network rules riêng cho provider trong môi trường triển khai.
+1. Cùng tiến trình `vip-import-worker` quét thư mục mỗi 60 giây; file không phải CSV, quá 10 MB, quá 10.000 dòng hoặc không xác định được concert bị bỏ qua.
+2. Scheduler băm toàn bộ file bằng SHA-256. Cặp concert, source và fingerprint được `findOrCreate`; unique constraint làm cho quét lại cùng nội dung không tạo import mới.
+3. Publisher của VIP không gửi Kafka. Nó ghi log “database-backed queue”; scheduler đổi trạng thái import sang `QUEUED`. Khi cờ mô phỏng queue lỗi bật, trạng thái thành `FAILED_TO_ENQUEUE` để lần quét sau thử lại.
+4. Worker polling tối đa 10 import/lần, claim bằng conditional `updateMany` sang `PROCESSING`, kiểm tra fingerprint lần nữa để phát hiện file thay đổi sau khi xếp hàng.
+5. Parser kiểm tra UTF-8, dấu phân cách, quote, header trùng/thiếu/thừa, bắt buộc `full_name` và ít nhất một cột định danh trong `external_guest_key`, `email`, `phone`.
+6. Mỗi dòng được kiểm tra số cột, độ dài, email, phone và external key. Lỗi được lưu vào `vip_guest_import_errors`; dòng trùng trong file được ghi loại `DUPLICATE`.
+7. Theo batch mặc định 100 dòng, worker chuẩn hóa tên/email/phone. Khách được nhận diện bằng external key hoặc SHA-256 của email, phone và tên chuẩn hóa; bản ghi có sẵn được cập nhật, bản ghi mới được tạo, xung đột unique được đọc lại rồi cập nhật.
+8. Khi toàn bộ file hợp lệ ở mức snapshot, transaction cuối chuyển các khách có mặt sang `ACTIVE`, giữ khách đã check-in ở `CHECKED_IN`, và chuyển khách cũ không còn trong snapshot sang `CANCELLED`. Nếu file có dòng rejected/duplicate thì bước cleanup khách vắng mặt bị bỏ qua để tránh hủy do file lỗi.
+9. Import chuyển `COMPLETED` cùng counters và audit log. Lỗi file xác định được chuyển `FAILED`; lỗi worker bất ngờ chuyển `RETRYABLE_FAILED` và được đưa lại vào nhóm trạng thái claim. API organizer chỉ đọc báo cáo/import thuộc concert mình sở hữu.
 
-### Bảo vệ tồn kho vé và quota theo người dùng
+## Thiết kế kiểm soát truy cập
 
-TicketBox bảo vệ tồn kho vé giới hạn và giới hạn mua theo người dùng do organizer cấu hình bằng cả phối hợp nhanh qua Redis và transaction chính thức trong PostgreSQL.
+Authentication dùng email/password. Password được băm bcrypt 12 rounds. Access token là JWT ký bằng `JWT_ACCESS_SECRET`, lấy từ Bearer header và có TTL mặc định `1h`. Refresh token ngẫu nhiên 48 byte có hạn 30 ngày; database chỉ lưu bcrypt hash, token được rotate khi refresh và đánh dấu `revokedAt` khi logout.
 
-Luồng mua vé:
+Ba role được seed cùng permission:
 
-1. Gateway rate limit cho phép request đi tiếp.
-2. Redis thực hiện fast quota pre-check cho user, concert, ticket type và số lượng yêu cầu.
-3. Redis lock ngắn hạn phối hợp truy cập cạnh tranh cao vào cùng một loại vé.
-4. PostgreSQL transaction lock dòng `ticket_types` mục tiêu trước khi cập nhật số lượng reserved hoặc sold.
-5. Service kiểm tra sức chứa còn lại và số lượng người dùng đã paid hoặc đã được issued từ PostgreSQL.
-6. Nếu request hợp lệ, hệ thống tạo order và order items, sau đó reserve inventory trong giai đoạn chờ thanh toán.
-7. Nếu thanh toán thành công, reserved inventory chuyển thành sold inventory và vé có mã QR được phát hành.
-8. Nếu order hết hạn hoặc thanh toán thất bại, reserved inventory được release.
-9. Redis availability cache và quota counters được điều chỉnh hoặc invalidate sau các event thay đổi tồn kho.
+| Role            | Quyền chính                                             |
+| --------------- | ------------------------------------------------------- |
+| `AUDIENCE`      | đọc concert, tạo đơn hàng, đọc đơn hàng của mình        |
+| `ORGANIZER`     | đọc/tạo/sửa/hủy concert, quản lý loại vé, đọc analytics |
+| `CHECKIN_STAFF` | đọc concert, preload, scan và sync check-in             |
 
-PostgreSQL vẫn là nguồn quyết định cuối cùng cho tồn kho và giới hạn mua theo người dùng. Redis counters và locks chỉ bảo vệ hot paths và giảm database contention không cần thiết.
+`JwtAuthGuard` xác thực token; `PermissionsGuard` đọc permission từ quan hệ role–permission trong PostgreSQL. Các controller order, ticket, organizer và check-in dùng guard/permission phù hợp. Service organizer tiếp tục kiểm tra `concert.organizerId`; service quản lý staff, AI document và báo cáo VIP cũng kiểm tra ownership. Check-in service yêu cầu role staff, đủ permission và assignment đúng concert/gate/device trước khi trả snapshot hoặc nhận sync.
 
-### Xử lý lỗi cổng thanh toán
+Web lưu access token, refresh token và role trong `localStorage`; route organizer dùng `RequireOrganizer`, còn route concert/order dùng `RequireAuth`. Đây là giới hạn giao diện, không thay thế guard backend. Android lưu token và định danh thiết bị trong `SharedPreferences`, chỉ hiển thị sự kiện trả về từ assignment API.
 
-VNPAY và MoMo được tích hợp thông qua provider adapters để lỗi cổng thanh toán được cô lập khỏi browsing, concert detail, check-in và các tính năng không liên quan đến thanh toán.
+Phạm vi bảo vệ hiện không đồng đều: `PaymentsController` và `NotificationsController` không gắn `JwtAuthGuard`/`PermissionsGuard`; create/confirm/webhook payment cũng không kiểm tra order ownership. Vì vậy tài liệu không xem các route này là được bảo vệ bởi RBAC dù UI gọi chúng từ phiên đăng nhập.
 
-Mỗi payment provider có circuit breaker với ba trạng thái:
+Validation toàn cục dùng `ValidationPipe` với `whitelist` và `transform`; `HttpErrorFormatFilter` chuẩn hóa lỗi HTTP. Logging chủ yếu dùng Nest `Logger` và một số `console.error`; audit log có cho import VIP, thay đổi tài liệu AI và phân công check-in, không phải mọi request.
 
-| State     | Meaning                          | Behavior                                            |
-| --------- | -------------------------------- | --------------------------------------------------- |
-| Closed    | Provider được xem là khỏe mạnh   | Payment requests được gửi bình thường              |
-| Open      | Provider được xem là không khỏe  | Chặn payment initiation mới cho provider đó        |
-| Half-Open | Hệ thống đang kiểm tra phục hồi  | Cho phép một số lượng request thử nghiệm giới hạn  |
+## Thiết kế các cơ chế bảo vệ hệ thống
 
-Ví dụ ngưỡng kích hoạt:
+### Kiểm soát tải đột biến
 
-- Mở circuit sau 5 lần timeout/network failure liên tiếp.
-- Mở circuit nếu hơn 50% trong 20 payment initiation attempts gần nhất thất bại.
-- Giữ circuit ở trạng thái open trong 60 giây trước khi chuyển sang Half-Open.
-- Ở Half-Open, cho phép một test request. Nếu thành công thì đóng circuit; nếu không thì mở lại.
+Rate limiter là fixed window tự cài bằng Redis `INCR` và `EXPIRE` khi counter đầu tiên xuất hiện. Key có dạng `rate-limit:{prefix}:{identityType}:{sha256(identity)}`. User được ưu tiên làm identity khi cấu hình `user_or_ip`; nếu không có user thì dùng IP, gồm `x-forwarded-for`, `request.ip` hoặc remote address.
 
-Hành vi khi lỗi:
+| Nhóm thao tác       | Key logic                                            | Ngưỡng thực tế                        |
+| ------------------- | ---------------------------------------------------- | ------------------------------------- |
+| Đăng ký             | IP                                                   | 3 request / 60 giây                   |
+| Đăng nhập           | IP                                                   | 10 request / 60 giây                  |
+| Tạo order           | user, fallback IP                                    | 5 request / 300 giây                  |
+| Tạo/sửa/hủy concert | user, fallback IP; chung prefix `organizer-mutation` | 20 request / 60 giây                  |
+| Thay đổi loại vé    | user, fallback IP; chung prefix `organizer-mutation` | 20 request / 300 giây                 |
+| Preload check-in    | user + concert                                       | 120 request / 60 giây                 |
+| Sync check-in       | hai counter user+concert và device+concert           | 300 request / 60 giây cho mỗi counter |
 
-- Nếu một provider không khả dụng, checkout có thể đề xuất provider còn lại.
-- Nếu cả hai provider không khả dụng, payment initiation trả về controlled unavailable response.
-- Người dùng vẫn có thể duyệt concert, xem chi tiết concert và xem tình trạng vé.
-- Payment callbacks vẫn được chấp nhận và xác minh ngay cả khi payment initiation mới bị vô hiệu hóa.
-- Unpaid orders hết hạn sẽ release reserved inventory thông qua scheduled worker.
+Khi vượt ngưỡng, backend trả HTTP `429`, message tiếng Việt, `retryAfterSeconds` và header `Retry-After` nếu Redis trả TTL. Payment callback không có rate limit. Nếu Redis lỗi, counter trả `null` và request được cho qua; đây là fail-open để không biến Redis thành điều kiện bắt buộc, nhưng không bảo vệ database trong lúc Redis hỏng.
 
-### Ngăn thanh toán trùng
+Database được giảm tải bằng cache-aside cho đọc công khai. Overselling được ngăn bằng conditional update trong transaction, không bằng Redis lock.
 
-Mỗi lần payment initiation sử dụng một idempotency key cho một user, order, provider và amount cụ thể.
+### Xử lý cổng thanh toán không ổn định
 
-Lưu trữ:
+Mỗi provider có một `CircuitBreaker` in-memory với ba trạng thái:
 
-- PostgreSQL lưu bản ghi idempotency chính thức trong `payment_transactions.idempotency_key`.
-- PostgreSQL cũng lưu provider transaction IDs với unique nullable `(provider, provider_transaction_id)` constraint.
-- Redis có thể cache idempotency responses trong TTL ngắn, ví dụ 15 phút, để trả nhanh kết quả cho payment initiation lặp lại.
+- `closed`: gọi operation; một lần thành công reset failure count.
+- Sau 3 lần operation ném lỗi liên tiếp: chuyển `open`.
+- Sau 30.000 ms: chuyển `half-open`; sau 2 lần thành công thì về `closed`, còn một lỗi mở lại circuit.
 
-Luồng xử lý trùng:
+Implementation không giới hạn số probe đồng thời ở half-open. Circuit của VNPAY và MoMo độc lập nhưng chỉ tồn tại trong từng process backend; restart làm mất trạng thái. Khi open, request tạo payment nhận lỗi `Circuit breaker is open`; các module concert/order/check-in vẫn chạy.
 
-1. Client hoặc server cung cấp idempotency key khi khởi tạo thanh toán.
-2. Nếu idempotency key mới, TicketBox tạo một bản ghi `payment_transactions`.
-3. Nếu cùng key được dùng lại với cùng order, provider và amount, TicketBox trả về trạng thái payment transaction hiện có.
-4. Nếu cùng key được dùng lại với order, provider hoặc amount khác, TicketBox từ chối request với HTTP `409 Conflict`.
-5. Nếu provider callback bị gửi lặp lại, TicketBox phát hiện `(provider, provider_transaction_id)` hiện có hoặc trạng thái order đã là final.
-6. Callback lặp lại không tạo thêm paid order và không phát hành vé trùng.
+VNPAY adapter chỉ xây URL nên không có network timeout. MoMo dùng `fetch` trực tiếp, không gắn `AbortController`, không retry và không có timeout cấu hình trong payment adapter. Repository không triển khai tự chuyển sang provider khác. Người dùng tự chọn provider; khi khởi tạo lỗi, order vẫn `PENDING`, phần vé vẫn được giữ cho tới khi thanh toán lại hoặc cron hết hạn sau 15 phút và release.
 
-Chuyển đổi trạng thái đơn hàng là một chiều:
+Webhook vẫn đi qua controller ngay cả khi circuit mở vì controller không gọi adapter/circuit để xác minh. Không có retry/reconciliation worker cho payment.
+
+### Chống trừ tiền hai lần
+
+Có hai idempotency scope khác nhau:
+
+1. **Tạo order:** client sinh UUID; backend lưu `orders.idempotency_key` với unique `(user_id, idempotency_key)`. Request lặp sau khi order đã tồn tại nhận cùng response. Key giống nhau không được ràng buộc với một fingerprint payload, nên backend trả order cũ mà không so sánh items mới.
+2. **Fulfillment payment:** code kiểm tra `order.status === PAID` trước transaction và trả về nếu đã hoàn tất. `payment_transactions` có unique idempotency key và unique `(provider, provider_transaction_id)`, nhưng controller tạo idempotency key mới dạng `pay-confirm-{orderId}-{random}` cho mỗi lần xác nhận; do đó unique key này không nhận diện callback lặp.
+
+Payment initiation không được ghi vào `payment_transactions`, không sử dụng `PostgreSqlPaymentRepository` và không mang idempotency key. Controller cũng không yêu cầu JWT, không đối chiếu amount request với order và không gọi `verifyWebhook`. Vì vậy cơ chế hiện tại không tạo hai ticket khi callback tuần tự đến sau khi order đã `PAID`, nhưng không cung cấp bảo đảm đầy đủ chống charge/callback trùng ở cổng. Hai callback đồng thời có nguy cơ cùng vượt qua phép đọc trạng thái trước transaction; unique provider transaction hoặc ticket code làm một transaction lỗi trong một số thứ tự cạnh tranh, nhưng state transition không dùng conditional update để claim order.
+
+State thực tế là:
 
 ```text
-pending_payment -> paid -> tickets_issued
-pending_payment -> expired
-pending_payment -> cancelled
+Order: PENDING -> PAID
+Order: PENDING -> EXPIRED
+PaymentTransaction: được tạo trực tiếp ở SUCCESS khi fulfillment
+Ticket: được tạo ACTIVE sau fulfillment -> USED khi check-in
 ```
 
-Vé có mã QR chỉ được phát hành sau khi xác nhận thanh toán đã được xác minh. Redirect thanh toán ở phía client không bao giờ được dùng làm bằng chứng thanh toán.
+Nếu client mất kết nối sau khi cổng trả thành công, webhook là đường fulfillment độc lập với client; nếu chỉ redirect trở lại, trang success gọi `/payments/confirm`. Người dùng xem lại lịch sử order/ticket từ PostgreSQL. Không có job đối soát provider độc lập.
 
 ### Caching
 
-TicketBox sử dụng Redis với chiến lược cache-aside cho dữ liệu có lưu lượng đọc cao. PostgreSQL vẫn là nguồn dữ liệu chính thức, và checkout luôn xác thực tồn kho cũng như quota với PostgreSQL trước khi thay đổi trạng thái cuối cùng.
+Redis dùng cache-aside và JSON serialization:
 
-| Cached object              | Strategy                        | Example TTL    | Invalidation                                                            |
-| -------------------------- | ------------------------------- | -------------: | ----------------------------------------------------------------------- |
-| Concert list               | Cache-aside                     | 60 seconds     | Concert create/update/cancel                                            |
-| Concert detail             | Cache-aside                     | 5 minutes      | Concert update/cancel hoặc published version change                     |
-| SVG seating map            | Cache-aside + version key       | 30 minutes     | Seating map hoặc ticket type change                                     |
-| Ticket availability        | Cache-aside / active adjustment | 3-5 seconds    | Payment success, reservation expiry, ticket release, ticket type change |
-| Organizer sales statistics | Cache-aside projection          | 30-60 seconds  | Payment success, ticket issuance, cancellation                          |
+| Đối tượng                                  | Cache key                                         |      TTL |
+| ------------------------------------------ | ------------------------------------------------- | -------: |
+| Danh sách concert đã công bố, chưa diễn ra | `concerts:list:published`                         |  60 giây |
+| Chi tiết concert và bio mới nhất           | `concerts:detail:{concertId}`                     | 300 giây |
+| Loại vé và `availableQuantity`             | `concerts:{concertId}:ticket-types`               |   5 giây |
+| Marker đã gửi reminder                     | `reminder:sent:concert:{concertId}:user:{userId}` |   48 giờ |
 
-Quy tắc caching:
+Cache miss đọc PostgreSQL rồi set TTL. Redis get/set/del lỗi chỉ ghi warning và trả về fallback, nên API đọc lại database. JSON cache hỏng bị xóa và rebuild.
 
-- Các trang công khai có thể hiển thị số lượng vé còn lại mang tính xấp xỉ.
-- Checkout không bao giờ tin cached availability cho quyết định mua cuối cùng.
-- Thanh toán thành công, reservation expiration và ticket release sẽ cập nhật hoặc invalidate availability keys.
-- Cache metadata concert dùng TTL dài hơn vì dữ liệu thay đổi ít hơn.
-- Cache ticket availability dùng TTL ngắn vì dữ liệu thay đổi trong sale windows.
-- Cache misses rebuild dữ liệu từ PostgreSQL và repopulate Redis.
+Danh sách bị invalidate khi organizer tạo concert; list, detail và ticket types bị invalidate khi cập nhật/hủy concert. Thay đổi ticket type và tạo/hết hạn order xóa cache ticket types. Hoàn tất AI xóa cache detail.
 
-### Bảo vệ check-in ngoại tuyến
+`availableQuantity` được tính từ `totalQuantity - reservedQuantity - soldQuantity` đọc từ PostgreSQL khi rebuild cache. Checkout không dùng giá trị cached: quyết định cuối cùng là conditional update trực tiếp trên `ticket_types` trong PostgreSQL.
 
-Ứng dụng check-in di động phải tiếp tục hoạt động khi mạng yếu hoặc không khả dụng mà không làm mất bản ghi quét.
+## Các quyết định kỹ thuật quan trọng
 
-- Trước hoặc trong sự kiện, mobile app tải dữ liệu vé được phân công và danh sách khách VIP cho concert hoặc gate mà app được phép check.
-- App lưu dữ liệu này và local scan logs trong local storage.
-- Khi offline, lượt quét được xác thực với dữ liệu cục bộ và được ghi vào durable local scan log.
-- App phát hiện lượt quét trùng trên cùng thiết bị ngay lập tức.
-- Khi kết nối trở lại, app upload pending scan logs đến check-in sync API.
-- Backend lưu check-ins được chấp nhận trong PostgreSQL.
-- PostgreSQL thực thi tối đa một check-in thành công cho mỗi vé hoặc mỗi khách VIP.
-- Nếu hai thiết bị quét cùng một vé khi offline, lượt quét hợp lệ được đồng bộ trước sẽ thắng; các lượt quét sau được đánh dấu là duplicate hoặc conflict.
-
-## Architecture Decision Records (ADR)
-
-### ADR 1 — Sử dụng kiến trúc kết hợp Client-Server, Layered và Event-driven
-
-**Decision:** TicketBox sử dụng Client-Server Architecture ở cấp hệ thống, Layered Architecture bên trong backend và Event-driven Architecture cho các workflow bất đồng bộ.
-
-**Rationale:** TicketBox cần kiểm soát tập trung đối với tồn kho vé, trạng thái thanh toán, quyền người dùng và xác thực check-in, vì vậy Client-Server là phù hợp. Backend chứa nhiều miền nghiệp vụ, nên Layered Architecture giúp tách biệt trách nhiệm, tăng khả năng bảo trì và kiểm thử. Notifications, reminders, CSV imports, AI bio generation và analytics không nên chặn luồng mua vé chính, vì vậy Event-driven Architecture được dùng cho các workflow này.
-
-**Trade-offs:** Kiểu kiến trúc hybrid này phức tạp hơn một ứng dụng web phân lớp đơn giản vì cần message broker và background workers. Tuy nhiên, nó cải thiện khả năng mở rộng và cô lập lỗi cho các tác vụ chậm hoặc dễ lỗi.
-
----
-
-### ADR 2 — Sử dụng modular monolith thay vì microservices cho backend
-
-**Decision:** Backend được triển khai dưới dạng NestJS modular monolith.
-
-**Rationale:** Các workflow cốt lõi như checkout, cập nhật tồn kho, áp dụng quota theo người dùng, xác nhận thanh toán, phát hành vé và xác thực check-in cần phối hợp thay đổi trạng thái trên cùng dữ liệu giao dịch. Giữ các domain cốt lõi trong một backend giúp giảm độ phức tạp của distributed transactions nhưng vẫn cho phép ranh giới module rõ ràng.
-
-**Trade-offs:** Modular monolith có thể trở nên tightly coupled nếu ranh giới module không được thực thi tốt. Trong tương lai có thể cần tách thành các service riêng nếu quy mô team ownership hoặc deployment tăng lên.
-
----
-
-### ADR 3 — Sử dụng PostgreSQL làm cơ sở dữ liệu chính thức
-
-**Decision:** PostgreSQL được sử dụng làm system of record cho users, concerts, ticket types, orders, payments, tickets, check-ins, guest lists, AI processing status, notifications và audit logs.
-
-**Rationale:** TicketBox cần tính nhất quán mạnh cho tồn kho vé, giới hạn mua theo người dùng, trạng thái thanh toán, phát hành vé và xác thực check-in. PostgreSQL cung cấp ACID transactions, foreign keys, unique constraints, indexes và row-level locking.
-
-**Trade-offs:** PostgreSQL có thể trở thành bottleneck khi lưu lượng đọc cao nếu mọi request trang công khai đều truy vấn trực tiếp vào nó. TicketBox giảm thiểu rủi ro này bằng Redis caching và transaction boundaries được thiết kế cẩn thận.
-
----
-
-### ADR 4 — Sử dụng Redis cho caching, rate limiting, quota và phối hợp ngắn hạn
-
-**Decision:** Redis được dùng cho public read caches, rate limiting, short-lived locks, quota pre-check counters và temporary coordination state.
-
-**Rationale:** TicketBox có các trang concert đọc nhiều và sale windows có mức cạnh tranh cao. Redis cung cấp truy cập độ trễ thấp cho dữ liệu không cần làm nguồn dữ liệu chính thức, giúp giảm tải PostgreSQL và bảo vệ hot paths trước khi business logic tốn tài nguyên chạy.
-
-**Trade-offs:** Dữ liệu Redis có thể stale hoặc bị mất, vì vậy Redis không được là nguồn quyết định cuối cùng cho quyền sở hữu vé, trạng thái thanh toán hoặc tính hợp lệ của check-in. PostgreSQL vẫn là source of truth.
-
----
-
-### ADR 5 — Sử dụng Kafka làm message broker cho workflow bất đồng bộ
-
-**Decision:** Kafka được sử dụng làm message broker giữa Backend API và background workers.
-
-**Rationale:** TicketBox có nhiều workflow chậm hoặc dễ lỗi: email notifications, nhắc nhở trước 24 giờ, sponsor CSV imports, AI artist-bio generation và analytics projection updates. Kafka tách các workflow này khỏi request checkout và browsing đồng bộ, hỗ trợ xử lý có thể retry và cho phép thêm consumer mới sau này.
-
-**Trade-offs:** Kafka làm tăng độ phức tạp vận hành so với gọi đồng bộ trực tiếp hoặc in-process queue. Với thiết kế này, lợi ích là kiến trúc hướng sự kiện rõ ràng hơn và cô lập tốt hơn các công việc bất đồng bộ.
-
----
-
-### ADR 6 — Sử dụng pessimistic locking cho tồn kho vé có cạnh tranh cao
-
-**Decision:** Cập nhật tồn kho vé sử dụng PostgreSQL transactions và row-level locks trên dòng tồn kho của ticket type trong quá trình reservation, xác nhận bán và release.
-
-**Rationale:** Các hạng vé phổ biến như SVIP có thể có sức chứa rất giới hạn và nhu cầu đồng thời rất cao. Pessimistic locking ngăn hai transaction đồng thời gán cùng một phần capacity cuối cùng.
-
-**Trade-offs:** Pessimistic locking có thể giảm throughput và tăng thời gian chờ khi cạnh tranh cao. Redis rate limiting và phối hợp ngắn hạn giúp giảm database contention không cần thiết trước khi request đi vào critical transaction.
-
----
-
-### ADR 7 — Sử dụng xác thực token kết hợp kiểm tra phân quyền phía server
-
-**Decision:** Client xác thực bằng token, trong khi quyết định phân quyền cuối cùng dùng role, permission, ownership và assignment checks ở phía server.
-
-**Rationale:** TicketBox có ba nhóm người dùng: Audience, Organizer và Check-in Staff. Một số quyền không chỉ phụ thuộc vào vai trò mà còn phụ thuộc vào ownership hoặc assignment, ví dụ organizer chỉ quản lý concert của chính họ hoặc check-in staff chỉ đồng bộ các cổng sự kiện được phân công.
-
-**Trade-offs:** Kiểm tra quyền phía server làm tăng truy vấn database hoặc cache, nhưng ngăn claims lỗi thời từ client cấp quyền truy cập trái phép.
-
----
-
-### ADR 8 — Sử dụng local mobile storage cho check-in offline
-
-**Decision:** Ứng dụng check-in di động lưu dữ liệu vé và danh sách khách VIP được phân công, cùng với offline scan logs, trong local device storage như SQLite hoặc WatermelonDB.
-
-**Rationale:** Kết nối mạng tại địa điểm tổ chức có thể yếu hoặc không khả dụng. Local storage cho phép nhân viên tiếp tục xác thực vé và khách VIP, sau đó đồng bộ scan logs khi kết nối trở lại.
-
-**Trade-offs:** Offline validation có thể tạo xung đột nếu hai thiết bị quét cùng một vé trước khi đồng bộ. Backend xử lý xung đột bằng quy tắc first-valid-sync-wins và unique successful check-in constraints.
-
----
-
-### ADR 9 — Sử dụng provider adapters và idempotency cho tích hợp thanh toán
-
-**Decision:** VNPAY và MoMo được tích hợp thông qua provider adapters, và mọi payment attempt sử dụng idempotency keys cùng provider transaction reconciliation.
-
-**Rationale:** Cổng thanh toán có thể timeout, lỗi hoặc gửi callback lặp lại. Provider adapters cô lập logic riêng của từng cổng thanh toán, trong khi idempotency ngăn payment transactions trùng và phát hành vé trùng.
-
-**Trade-offs:** Quản lý trạng thái thanh toán trở nên phức tạp hơn vì orders, payment transactions và tickets phải đi theo các chuyển đổi trạng thái rõ ràng. Sự phức tạp này cần thiết để tránh double charges và missing tickets.
-
----
-
-### ADR 10 — Sử dụng cache-aside cho dữ liệu concert công khai
-
-**Decision:** TicketBox sử dụng cache-aside caching cho concert lists, concert details, SVG seating maps, ticket availability và organizer statistics projections.
-
-**Rationale:** Các trang concert công khai được đọc thường xuyên, đặc biệt trong sale windows. Cache-aside giúp giảm tải trực tiếp lên PostgreSQL trong khi vẫn cho phép PostgreSQL là nguồn dữ liệu chính thức.
-
-**Trade-offs:** Dữ liệu cache có thể tạm thời stale, đặc biệt là ticket availability. Checkout không bao giờ tin cached availability cho quyết định mua cuối cùng và luôn xác thực với PostgreSQL.
+| Quyết định                                        | Lý do thể hiện trong hệ thống                                                                             | Đánh đổi thực tế                                                                                                                             |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend NestJS modular monolith                   | Các domain dùng chung transaction Prisma/PostgreSQL và được chia theo module, nhưng deploy chung một API. | Đơn giản hóa nhất quán; lỗi/scale của API vẫn có phạm vi lớn và ranh giới module không phải ranh giới deployment.                            |
+| PostgreSQL + Prisma làm system of record          | Quan hệ nghiệp vụ, transaction, foreign key, unique/partial index phục vụ order và check-in.              | PostgreSQL là điểm tập trung; raw SQL vẫn cần cho conditional inventory update và partial index.                                             |
+| Atomic conditional update cho tồn kho             | Không giữ chỗ nếu số còn lại không đủ, rollback toàn order khi một item thất bại.                         | Ngăn overselling tổng thể nhưng quota user vẫn có race vì được aggregate riêng.                                                              |
+| Redis cache-aside và fixed-window counter         | Giảm đọc concert/ticket type và giới hạn các route có burst.                                              | Dữ liệu có độ trễ theo TTL; fail-open bảo toàn availability nhưng mất bảo vệ tải khi Redis hỏng.                                             |
+| JWT ngắn hạn + refresh token hash trong DB + RBAC | Web và Android dùng chung Bearer token; permission thay đổi trong DB mà không nhét role vào JWT.          | Mỗi permission check cần đọc quan hệ DB; một số payment/notification route hiện nằm ngoài guard.                                             |
+| Room + WorkManager cho check-in offline           | Snapshot và scan log tồn tại bền vững trên Android; đồng bộ chạy khi có mạng với backoff.                 | Hai thiết bị có nguy cơ cùng chấp nhận local; backend chỉ giải quyết xung đột lúc sync.                                                      |
+| QR ký HMAC và unique successful check-in          | Backend xác minh issuer/entity/concert/nonce/thời hạn, database chọn một lượt thắng.                      | Secret dùng chung phải được bảo vệ; snapshot cũ vẫn cần quy tắc grace và reconciliation server.                                              |
+| Kafka chỉ cho AI Artist Bio                       | Upload HTTP kết thúc sau khi lưu object/record và publish; tác vụ PDF/AI dài chạy ở worker riêng.         | Thêm Kafka và worker vận hành; trạng thái publish và DB không nằm trong một transaction/outbox.                                              |
+| MinIO cho banner và press kit                     | File nhị phân tách khỏi PostgreSQL; DB chỉ giữ URL/storage key và trạng thái.                             | MinIO outage làm upload/download lỗi; cleanup object và transaction DB là hai hệ thống riêng.                                                |
+| Database polling cho VIP CSV                      | Worker vừa phát hiện file vừa claim trạng thái import, dễ retry và báo cáo bằng cùng database.            | Không phải message queue thực; độ trễ theo chu kỳ 60/10 giây và phụ thuộc filesystem dùng chung.                                             |
+| Adapter + circuit breaker cho VNPAY/MoMo          | Cô lập cách ký/tạo request của từng provider và chặn gọi sau ba lỗi.                                      | Breaker chỉ in-memory, payment không có timeout/retry chung và callback verification chưa được nối vào controller.                           |
+| Cron trong backend cho order expiry/reminder      | Tác vụ đơn giản dùng chung Prisma và notification service, không cần worker riêng.                        | Nhiều replica backend sẽ cùng chạy cron; code dựa vào conditional update/cache marker để giảm lặp nhưng không có distributed scheduler lock. |

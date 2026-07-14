@@ -1,8 +1,10 @@
+# TicketBox — Project Proposal
+
 ## Vấn đề
 
-Hoạt động bán vé concert quy mô lớn tại Việt Nam hiện đang bị phân mảnh qua nhiều kênh như Zalo OA, Google Forms, chuyển khoản ngân hàng thủ công và các bảng tính xử lý tạm thời. Điều này dẫn đến hàng đợi không công bằng, lạm dụng bot, sập website, rủi ro gian lận, vé bị trùng hoặc bị thiếu, trạng thái thanh toán không chắc chắn và nhiều khoảng trống vận hành tại khâu check-in ở địa điểm tổ chức.
+Việc vận hành bán vé concert qua nhiều kênh rời rạc làm khó kiểm soát sức chứa, trạng thái thanh toán, vé điện tử và quyền vào cổng. Tại thời điểm mở bán, nhiều yêu cầu đồng thời còn tạo áp lực lên cơ sở dữ liệu và làm tăng nguy cơ giữ chỗ vượt sức chứa. Ở địa điểm tổ chức, kết nối mạng không ổn định đòi hỏi dữ liệu soát vé và nhật ký quét phải tồn tại ngay trên thiết bị.
 
-TicketBox cần một nền tảng bán vé thống nhất, có khả năng xử lý tải cao, hỗ trợ toàn bộ vòng đời sự kiện từ đăng tải concert, mua vé, xác nhận thanh toán, gửi vé điện tử, quản trị dành cho ban tổ chức, nhập danh sách khách mời, gửi thông báo, đến check-in sự kiện có khả năng hoạt động ngoại tuyến.
+TicketBox hợp nhất các công việc đó trong một hệ thống phục vụ ba nhóm người dùng: khán giả, ban tổ chức và nhân viên check-in. Hệ thống quản lý concert và loại vé, tạo đơn giữ chỗ, kết nối thanh toán, phát hành e-ticket có QR, gửi thông báo, nhập khách VIP từ CSV, tạo tiểu sử nghệ sĩ từ PDF và hỗ trợ soát vé ngoại tuyến.
 
 ## Mục tiêu
 
@@ -22,27 +24,24 @@ TicketBox cần một nền tảng bán vé thống nhất, có khả năng xử
 
 ## Người dùng và nhu cầu
 
-- Người dùng khán giả cần duyệt các concert sắp diễn ra, xem chi tiết nghệ sĩ và địa điểm, xem sơ đồ ghế SVG tương tác theo khu vực vé, xem số lượng vé còn lại đủ mới, mua vé một cách công bằng trong giới hạn do ban tổ chức cấu hình, thanh toán qua các cổng thanh toán được hỗ trợ, nhận vé điện tử có mã QR kèm xác nhận qua thông báo trong ứng dụng và email, nhận nhắc nhở concert và check-in tại cổng sự kiện.
-
-- Người dùng ban tổ chức cần quyền truy cập quản trị được kiểm soát để tạo và quản lý concert, cấu hình loại vé, giá vé, sức chứa, thời gian mở bán và giới hạn mua vé theo người dùng, tải lên PDF nghệ sĩ hoặc press kit để tạo tiểu sử bằng AI, cập nhật hoặc hủy concert, theo dõi thống kê bán vé và doanh thu, đồng thời quản lý dữ liệu vận hành như nhập danh sách khách mời VIP theo lịch.
-
-- Nhân viên check-in cần quyền truy cập di động để quét mã QR vé, xác thực nhanh vé thường và khách mời VIP, tiếp tục check-in khi mạng yếu hoặc mất kết nối, và đồng bộ hoạt động tại cổng khi kết nối trở lại.
+- **Khán giả (`AUDIENCE`)** cần đăng ký, đăng nhập, xem các concert đã công bố, thông tin nghệ sĩ, sơ đồ khu vực và số vé còn lại; chọn số lượng trong giới hạn, tạo đơn, thanh toán bằng VNPAY hoặc MoMo, xem lịch sử đơn và e-ticket có QR.
+- **Ban tổ chức (`ORGANIZER`)** cần tạo, sửa, hủy concert của mình; tải banner; quản lý loại vé, giá, sức chứa, thời gian bán và giới hạn mỗi tài khoản; xem doanh thu; phân công nhân viên check-in; theo dõi nhập khách VIP; tải press kit PDF, xem, sửa hoặc tạo lại tiểu sử nghệ sĩ.
+- **Nhân viên check-in (`CHECKIN_STAFF`)** cần đăng nhập trên Android, chỉ thấy sự kiện được phân công, tải snapshot vé và khách VIP theo cổng, quét QR khi có hoặc không có mạng, xem hàng đợi đồng bộ và nhận kết quả xung đột từ backend.
 
 ## Phạm vi
 
 ### Trong phạm vi
 
-- Xây dựng nguyên mẫu TicketBox chạy cục bộ bằng Docker Compose.
-- Cung cấp chức năng khám phá concert công khai, trang chi tiết concert, thông tin nghệ sĩ và địa điểm, sơ đồ khu vực SVG tương tác theo khu vực vé và hiển thị tình trạng vé còn lại đủ mới.
-- Cung cấp luồng mua vé cho khán giả, bao gồm chọn vé, xử lý thanh toán, xác nhận thanh toán thành công, tạo vé điện tử có mã QR và gửi thông báo mua vé.
-- Cung cấp trang quản trị cho ban tổ chức để tạo và quản lý concert, cấu hình loại vé, giá vé, sức chứa, thời gian mở bán và giới hạn mua vé theo người dùng, cập nhật hoặc hủy concert, tải lên PDF nghệ sĩ hoặc press kit, và xem thống kê doanh số hoặc doanh thu.
-- Cung cấp xác thực và kiểm soát truy cập theo vai trò cho người dùng khán giả, ban tổ chức và nhân viên check-in.
-- Cung cấp các cơ chế bảo vệ lưu lượng, xử lý mua vé công bằng, gán vé an toàn trong môi trường đồng thời và áp dụng giới hạn mua vé theo người dùng.
-- Cung cấp hành vi tích hợp thanh toán cho VNPAY và MoMo, bao gồm callback thanh toán, timeout, retry và chế độ suy giảm khi cổng thanh toán không khả dụng.
-- Cung cấp quy trình thông báo qua thông báo trong ứng dụng và email, đồng thời cho phép bổ sung các kênh thông báo trong tương lai như Zalo OA hoặc SMS mà không thay đổi luồng mua vé cốt lõi.
-- Cung cấp quy trình check-in trên di động để quét mã QR vé, xác thực khách mời VIP, ghi nhận lượt quét khi mạng yếu hoặc không khả dụng, và đồng bộ hoạt động tại cổng khi kết nối trở lại.
-- Cung cấp xử lý bất đồng bộ PDF nghệ sĩ hoặc press kit để tạo tiểu sử nghệ sĩ bằng AI, bao gồm trạng thái xử lý và xử lý lỗi.
-- Cung cấp nhập danh sách khách mời VIP từ file CSV của nhà tài trợ theo lịch, có xác thực dữ liệu, loại bỏ trùng lặp, xử lý dòng lỗi, báo cáo lỗi và không làm gián đoạn hoạt động bán vé hoặc check-in trực tiếp.
+- Một web app React dùng chung cho khán giả và ban tổ chức, một backend API NestJS và một ứng dụng Android dành cho check-in.
+- Quản lý vòng đời concert, banner, loại vé theo khu vực, giá, tổng số lượng, thời gian bán, giới hạn mua trên mỗi người dùng và thống kê doanh thu.
+- Tạo đơn giữ chỗ trong 15 phút, tự động hết hạn đơn chưa thanh toán, nhả số lượng đã giữ và hiển thị lịch sử đơn hàng.
+- Khởi tạo thanh toán VNPAY/MoMo, tiếp nhận kết quả xác nhận, ghi nhận giao dịch thành công, chuyển đơn sang `PAID`, chuyển tồn kho từ giữ chỗ sang đã bán và phát hành vé.
+- E-ticket với QR ký HMAC; check-in vé thường và khách VIP theo assignment, kể cả lưu quét ngoại tuyến và đồng bộ lại từ thiết bị Android.
+- Cache danh sách concert, chi tiết concert và tình trạng loại vé; rate limiting cho đăng ký, đăng nhập, tạo đơn, thao tác quản trị và API check-in.
+- Email xác nhận mua vé và nhắc concert trước khoảng 24 giờ qua SMTP; các adapter push, SMS và Zalo hiện xử lý trong nội bộ tiến trình mà không kết nối dịch vụ bên ngoài.
+- Tải PDF lên MinIO, trích xuất văn bản, tạo tiểu sử bằng Gemini theo cấu hình Docker và lưu trạng thái xử lý; hỗ trợ chế độ `openai` hoặc `mock` qua cấu hình backend.
+- Quét định kỳ thư mục CSV của nhà tài trợ, kiểm tra cấu trúc và từng dòng, nhận diện file bằng SHA-256, cập nhật snapshot khách VIP, lưu lỗi và audit log.
+- Môi trường chạy cục bộ bằng Docker Compose với PostgreSQL, Redis, Kafka và MinIO.
 
 ### Ngoài phạm vi
 
@@ -54,16 +53,13 @@ TicketBox cần một nền tảng bán vé thống nhất, có khả năng xử
 
 ## Rủi ro và ràng buộc
 
-- Lưu lượng truy cập tăng đột biến trong thời điểm mở bán vé có thể làm quá tải API backend. Các yêu cầu quá mức cần được giới hạn trước khi đi vào xử lý nghiệp vụ tốn tài nguyên.
-- Client có hành vi giống bot và các lần thử mua vé lặp lại có thể làm giảm tính công bằng đối với người dùng hợp lệ. Các API bán vé quan trọng cần có cơ chế bảo vệ lưu lượng và giảm thiểu lạm dụng.
-- Cạnh tranh khi mua vé có thể gây bán vượt số lượng hoặc gán trùng vé cuối cùng. Việc giảm tồn kho và gán vé phải được xử lý bằng các cơ chế nhất quán an toàn trong môi trường đồng thời.
-- Giới hạn mua vé theo người dùng có thể bị vượt qua trong các yêu cầu đồng thời. Việc kiểm tra hạn mức phải có tính nguyên tử và được đối soát với dữ liệu đơn hàng đã thanh toán chính thức.
-- Trạng thái đơn hàng, thanh toán và vé có thể trở nên không nhất quán. Các chuyển đổi trạng thái phải rõ ràng, có tính idempotent, an toàn khi retry và có khả năng khôi phục.
-- Cổng thanh toán có thể lỗi, timeout hoặc không khả dụng trong thời gian dài. Xử lý thanh toán phải được cô lập để người dùng vẫn có thể duyệt concert và xem thông tin vé khi nhà cung cấp thanh toán bị suy giảm.
-- Các trang công khai có lưu lượng đọc lớn có thể làm quá tải cơ sở dữ liệu. Dữ liệu concert được truy cập thường xuyên cần được cache, và độ mới của thông tin vé còn lại phải được quản lý cẩn thận.
-- Chức năng quản trị và check-in liên quan đến các thao tác nhạy cảm. Kiểm soát truy cập phải ngăn chặn việc thay đổi concert, xác thực vé và truy cập doanh thu trái phép.
-- Check-in ngoại tuyến có thể làm mất bản ghi quét hoặc cho phép check-in trùng. Quy trình check-in di động phải hỗ trợ xác thực cục bộ, lưu trữ ngoại tuyến bền vững, đồng bộ và xử lý xung đột.
-- Tích hợp danh sách khách mời VIP của nhà tài trợ bị giới hạn ở file CSV theo lịch. TicketBox không thể phụ thuộc vào xác thực API thời gian thực từ hệ thống của nhà tài trợ.
-- File CSV danh sách khách mời có thể chứa dòng sai định dạng, dữ liệu trùng lặp hoặc thay đổi muộn. Quy trình nhập phải có xác thực dữ liệu, loại bỏ trùng lặp, báo cáo lỗi và không làm gián đoạn hoạt động bán vé hoặc check-in trực tiếp.
-- Việc gửi thông báo có thể thất bại hoặc bị chậm. Việc phát hành vé và quyền truy cập vé không được phụ thuộc hoàn toàn vào việc gửi thông báo trong ứng dụng hoặc email thành công.
-- Tiểu sử nghệ sĩ do AI tạo phụ thuộc vào chất lượng trích xuất văn bản từ PDF và khả năng sẵn sàng của mô hình AI. Quy trình này phải hiển thị trạng thái xử lý và có hành vi dự phòng khi trích xuất hoặc tạo nội dung thất bại.
+- PostgreSQL là điểm nhất quán trung tâm; sự cố cơ sở dữ liệu ảnh hưởng đến hầu hết luồng nghiệp vụ. Redis hỏng làm cache miss và rate limiter chuyển sang cho phép request, nên tải sẽ dồn về backend và PostgreSQL.
+- Cập nhật tồn kho có điều kiện ngăn tổng số lượng giữ/bán vượt sức chứa, nhưng phép cộng quota theo người dùng được kiểm tra trước khi giữ chỗ và không khóa các order cạnh tranh; các request đồng thời của cùng người dùng có nguy cơ vượt `perUserLimit`.
+- Luồng payment hiện xác nhận thành công từ redirect/webhook rồi phát hành vé. Controller chưa gọi hàm kiểm tra chữ ký của adapter, payment initiation chưa được lưu, và idempotency của bước xác nhận chủ yếu dựa vào trạng thái `PAID` cùng unique constraint giao dịch; callback cạnh tranh vẫn là rủi ro nhất quán cần được nhìn nhận khi đánh giá hệ thống.
+- MoMo thực hiện HTTP call nhưng không đặt timeout hay retry ở adapter; VNPAY được tạo URL cục bộ. Circuit breaker nằm trong memory từng backend instance nên trạng thái không được chia sẻ giữa các replica.
+- Số vé còn lại trên web trễ tối đa theo TTL cache ngắn. Quyết định giữ chỗ cuối cùng luôn dựa trên cập nhật có điều kiện ở PostgreSQL, không dựa trên số hiển thị trong Redis.
+- Hai thiết bị offline có nguy cơ cùng chấp nhận một QR tại chỗ. Backend giải quyết khi đồng bộ theo lượt ghi thành công đầu tiên; unique index chỉ cho phép một check-in `SUCCESS`, các lượt sau trở thành `CONFLICT` hoặc `ALREADY_USED`.
+- Kafka hoặc AI worker lỗi không chặn duyệt concert và mua vé nhưng làm tài liệu tiểu sử ở trạng thái chờ/lỗi. MinIO lỗi ảnh hưởng tải banner và press kit.
+- Worker VIP đọc file từ filesystem dùng chung. File sai encoding, delimiter, schema, quá 10 MB, quá 10.000 dòng hoặc thay đổi sau khi xếp hàng bị từ chối; lỗi từng dòng được lưu để ban tổ chức tra cứu.
+- Notification được gửi tuần tự sau khi hoàn tất giao dịch; lỗi gửi được ghi log và không hoàn tác order hoặc vé. Bảng `notifications` tồn tại trong schema nhưng luồng gửi hiện tại không ghi hoặc cung cấp hộp thư in-app từ bảng này.
+- Web kết xuất ảnh QR qua `api.qrserver.com`, vì vậy signed QR token được gửi tới dịch vụ ngoài thay vì được render hoàn toàn trong TicketBox.
