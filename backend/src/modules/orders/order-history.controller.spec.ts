@@ -11,8 +11,10 @@ import { PermissionService } from "../rbac/permission.service";
 import { OrdersController } from "./orders.controller";
 import { OrdersService } from "./orders.service";
 
-test("GET /orders/history requires JWT and uses only its subject as owner", async (t) => {
-  const calls: string[] = [];
+test("order reads require JWT and use only its subject as owner", async (t) => {
+  const historyCalls: string[] = [];
+  const orderCalls: Array<{ userId: string; orderId: string }> = [];
+  const ownedOrderId = "00000000-0000-4000-8000-000000000001";
   const moduleRef = await Test.createTestingModule({
     imports: [
       PassportModule.register({ defaultStrategy: "jwt" }),
@@ -31,8 +33,18 @@ test("GET /orders/history requires JWT and uses only its subject as owner", asyn
         provide: OrdersService,
         useValue: {
           getOrderHistory: async (userId: string) => {
-            calls.push(userId);
+            historyCalls.push(userId);
             return [];
+          },
+          getOrderForCheckout: async (userId: string, orderId: string) => {
+            orderCalls.push({ userId, orderId });
+            return {
+              orderId,
+              orderCode: "ORD-1",
+              status: "PENDING",
+              totalAmountVnd: 150000,
+              expiresAt: "2026-07-15T10:00:00.000Z",
+            };
           },
         },
       },
@@ -50,6 +62,7 @@ test("GET /orders/history requires JWT and uses only its subject as owner", asyn
   t.after(async () => app.close());
 
   await request(app.getHttpServer()).get("/orders/history").expect(401);
+  await request(app.getHttpServer()).get("/orders/" + ownedOrderId).expect(401);
   await request(app.getHttpServer())
     .get("/orders/history")
     .set("Authorization", "Bearer invalid-token")
@@ -65,5 +78,19 @@ test("GET /orders/history requires JWT and uses only its subject as owner", asyn
     .expect(200);
 
   assert.deepEqual(response.body, []);
-  assert.deepEqual(calls, ["jwt-owner"]);
+  assert.deepEqual(historyCalls, ["jwt-owner"]);
+
+  const orderResponse = await request(app.getHttpServer())
+    .get("/orders/" + ownedOrderId + "?userId=foreign-user")
+    .set("Authorization", "Bearer " + token)
+    .expect(200);
+
+  assert.deepEqual(orderResponse.body, {
+    orderId: ownedOrderId,
+    orderCode: "ORD-1",
+    status: "PENDING",
+    totalAmountVnd: 150000,
+    expiresAt: "2026-07-15T10:00:00.000Z",
+  });
+  assert.deepEqual(orderCalls, [{ userId: "jwt-owner", orderId: ownedOrderId }]);
 });

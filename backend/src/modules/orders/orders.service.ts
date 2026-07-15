@@ -69,6 +69,28 @@ export class OrdersService {
     }));
   }
 
+  async getOrderForCheckout(
+    userId: string,
+    orderId: string,
+  ): Promise<CreateOrderResponseDto> {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, userId },
+      select: {
+        id: true,
+        orderCode: true,
+        status: true,
+        totalAmountVnd: true,
+        expiresAt: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    return this.toCreateOrderResponseDto(order);
+  }
+
   async createOrder(
     userId: string,
     dto: CreateOrderRequestDto,

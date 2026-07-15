@@ -7,3 +7,7 @@ export function createOrder(request: CreateOrderRequest): Promise<CreateOrderRes
     body: JSON.stringify(request),
   });
 }
+
+export function getOrder(orderId: string): Promise<CreateOrderResponse> {
+  return apiFetch<CreateOrderResponse>(`/orders/${encodeURIComponent(orderId)}`);
+}

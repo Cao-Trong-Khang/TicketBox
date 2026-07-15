@@ -12,7 +12,7 @@ export type CreateOrderRequest = {
 export type CreateOrderResponse = {
   orderId: string;
   orderCode: string;
-  status: 'PENDING';
+  status: 'PENDING' | 'PAID' | 'FAILED' | 'EXPIRED' | 'CANCELLED';
   totalAmountVnd: number;
   expiresAt: string;
 };

@@ -1,19 +1,47 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Button } from '../../../components/ui/Button';
 import { CreateOrderResponse } from '../types';
+import { getOrder } from '../api';
 import { createPayment, getPaymentProviders, ProviderAvailability } from '../../../api/payment';
+import type { ApiError } from '../../../lib/api-client';
 
 export function OrderPendingPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const order = location.state?.order as CreateOrderResponse | undefined;
+  const { orderId } = useParams<{ orderId: string }>();
+  const locationOrder = location.state?.order as CreateOrderResponse | undefined;
 
+  const [order, setOrder] = useState<CreateOrderResponse | null>(locationOrder ?? null);
+  const [isOrderLoading, setIsOrderLoading] = useState(!locationOrder && Boolean(orderId));
+  const [orderError, setOrderError] = useState<string | null>(
+    !locationOrder && !orderId ? 'Không có dữ liệu đơn hàng. Vui lòng quay lại danh sách sự kiện.' : null,
+  );
   const [provider, setProvider] = useState<'vnpay' | 'momo' |null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [availability, setAvailability] = useState<ProviderAvailability[]>([]);
   const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
+
+  useEffect(() => {
+    if (order || !orderId) return;
+
+    let isActive = true;
+    setIsOrderLoading(true);
+    setOrderError(null);
+    getOrder(orderId)
+      .then((loadedOrder) => {
+        if (isActive) setOrder(loadedOrder);
+      })
+      .catch((err: unknown) => {
+        if (isActive) setOrderError(formatOrderLoadError(err));
+      })
+      .finally(() => {
+        if (isActive) setIsOrderLoading(false);
+      });
+
+    return () => { isActive = false; };
+  }, [order, orderId]);
 
   useEffect(() => {
     getPaymentProviders()
@@ -22,12 +50,23 @@ export function OrderPendingPage() {
       .finally(() => setAvailabilityLoaded(true));
   }, []);
 
+  if (isOrderLoading) {
+    return (
+      <section className="order-pending-page">
+        <div className="order-pending-container">
+          <h1>Đơn hàng của bạn</h1>
+          <p className="order-empty-message" role="status">Đang tải đơn hàng...</p>
+        </div>
+      </section>
+    );
+  }
+
   if (!order) {
     return (
       <section className="order-pending-page">
         <div className="order-pending-container">
           <h1>Đơn hàng của bạn</h1>
-          <p className="order-empty-message">Không có dữ liệu đơn hàng. Vui lòng quay lại danh sách sự kiện.</p>
+          <p className="order-empty-message">{orderError ?? 'Không có dữ liệu đơn hàng. Vui lòng quay lại danh sách sự kiện.'}</p>
           <Button type="button" onClick={() => navigate('/concerts')}>
             Quay lại danh sách sự kiện
           </Button>
@@ -38,9 +77,9 @@ export function OrderPendingPage() {
 
   const handlePay = async () => {
     if (!provider) {
-    setPayError('Vui lòng chọn một phương thức thanh toán trước khi tiếp tục.');
-    return;
-  }
+      setPayError('Vui lòng chọn một phương thức thanh toán trước khi tiếp tục.');
+      return;
+    }
     setIsPaying(true);
     setPayError(null);
     try {
@@ -49,7 +88,7 @@ export function OrderPendingPage() {
       sessionStorage.setItem(storageKey, idempotencyKey);
       const response = await createPayment({ provider, orderId: order.orderId, idempotencyKey });
       sessionStorage.setItem('ticketbox:last-payment-id', response.paymentId);
-      if (!response.paymentUrl) throw new Error('Thanh toan dang cho xu ly. Vui long kiem tra lai sau.');
+      if (!response.paymentUrl) throw new Error('Thanh toán đang chờ xử lý. Vui lòng kiểm tra lại sau.');
       window.location.href = response.paymentUrl;
     } catch (err) {
       setPayError(err instanceof Error ? err.message : 'Có lỗi xảy ra trong quá trình thanh toán.');
@@ -199,4 +238,16 @@ export function OrderPendingPage() {
       </div>
     </section>
   );
+}
+
+function formatOrderLoadError(error: unknown): string {
+  if (isApiError(error) && error.status === 404) {
+    return 'Không tìm thấy đơn hàng. Vui lòng quay lại lịch sử đơn hàng.';
+  }
+
+  return 'Không thể tải đơn hàng. Vui lòng thử lại sau.';
+}
+
+function isApiError(error: unknown): error is ApiError {
+  return typeof error === 'object' && error !== null && 'status' in error;
 }

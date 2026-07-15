@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Param,
   Post,
   Body,
   UseGuards,
@@ -29,6 +30,16 @@ export class OrdersController {
   async getOrderHistory(@Req() req: Request): Promise<OrderHistoryItemDto[]> {
     const userId = (req.user as AuthenticatedUser).id;
     return this.ordersService.getOrderHistory(userId);
+  }
+
+  @Get(':orderId')
+  @Permissions(PERMISSION_CODES.ticketReadOwn)
+  async getOrder(
+    @Req() req: Request,
+    @Param('orderId') orderId: string,
+  ): Promise<CreateOrderResponseDto> {
+    const userId = (req.user as AuthenticatedUser).id;
+    return this.ordersService.getOrderForCheckout(userId, orderId);
   }
 
   @Post()

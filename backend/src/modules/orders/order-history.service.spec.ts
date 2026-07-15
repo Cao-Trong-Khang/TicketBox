@@ -32,6 +32,17 @@ const HISTORY_QUERY = {
   },
 };
 
+const CHECKOUT_QUERY = {
+  where: { id: "order-PENDING", userId: "audience-1" },
+  select: {
+    id: true,
+    orderCode: true,
+    status: true,
+    totalAmountVnd: true,
+    expiresAt: true,
+  },
+};
+
 test("history uses an owned, deterministic, bounded explicit projection", async () => {
   let receivedQuery: unknown;
   const service = createHistoryService(async (query) => {
@@ -60,6 +71,37 @@ test("history uses an owned, deterministic, bounded explicit projection", async 
       ],
     },
   ]);
+});
+
+test("checkout order lookup is scoped to owner and returns payment handoff fields", async () => {
+  let receivedQuery: unknown;
+  const service = createHistoryService(
+    async () => [],
+    async (query) => {
+      receivedQuery = query;
+      return checkoutRow(OrderStatus.PENDING);
+    },
+  );
+
+  const result = await service.getOrderForCheckout("audience-1", "order-PENDING");
+
+  assert.deepEqual(receivedQuery, CHECKOUT_QUERY);
+  assert.deepEqual(result, {
+    orderId: "order-PENDING",
+    orderCode: "DEMO-PENDING",
+    status: OrderStatus.PENDING,
+    totalAmountVnd: 1000000,
+    expiresAt: "2026-07-05T02:15:00.000Z",
+  });
+});
+
+test("checkout order lookup rejects missing or foreign orders", async () => {
+  const service = createHistoryService(async () => [], async () => null);
+
+  await assert.rejects(
+    service.getOrderForCheckout("audience-1", "order-PENDING"),
+    /Order not found/,
+  );
 });
 
 test("history maps all statuses, multiple items, nullable fields, and empty results", async () => {
@@ -109,6 +151,7 @@ test("history serializes no sensitive fields and performs no writes or cache cal
 
 function createHistoryService(
   findMany: (query: unknown) => Promise<ReturnType<typeof historyRow>[]>,
+  findFirst?: (query: unknown) => Promise<ReturnType<typeof checkoutRow> | null>,
 ): OrdersService {
   const fail = () => {
     throw new Error("history must not mutate state or touch cache");
@@ -116,6 +159,7 @@ function createHistoryService(
   const prisma = {
     order: {
       findMany,
+      findFirst: findFirst ?? fail,
       create: fail,
       update: fail,
       delete: fail,
@@ -125,6 +169,16 @@ function createHistoryService(
   const redisCache = { get: fail, set: fail, del: fail };
   const checkoutLocks = { withLocks: fail };
   return new OrdersService(prisma as never, redisCache as never, checkoutLocks as never);
+}
+
+function checkoutRow(status: OrderStatus) {
+  return {
+    id: "order-" + status,
+    orderCode: "DEMO-" + status,
+    status,
+    totalAmountVnd: 1000000,
+    expiresAt: new Date("2026-07-05T02:15:00.000Z"),
+  };
 }
 
 function historyRow(status: OrderStatus) {

@@ -9,7 +9,7 @@ export function PaymentSuccessPage() {
   const navigate = useNavigate();
   const paymentId = searchParams.get('paymentId') ?? sessionStorage.getItem('ticketbox:last-payment-id');
   const [payment, setPayment] = useState<PaymentResponse | null>(null);
-  const [error, setError] = useState<string | null>(() => paymentId ? null : 'Khong tim thay ma thanh toan.');
+  const [error, setError] = useState<string | null>(() => paymentId ? null : 'Không tìm thấy mã thanh toán.');
 
   useEffect(() => {
     if (!paymentId) return;
@@ -20,7 +20,7 @@ export function PaymentSuccessPage() {
         if (!active) return;
         setPayment(value);
         if (['initiated', 'pending', 'timeout'].includes(value.status)) setTimeout(poll, 2000);
-      } catch { if (active) setError('Khong the kiem tra trang thai thanh toan.'); }
+      } catch { if (active) setError('Không thể kiểm tra trạng thái thanh toán.'); }
     };
     void poll();
     return () => { active = false; };
@@ -29,16 +29,16 @@ export function PaymentSuccessPage() {
   const success = payment?.status === 'success' && payment.orderStatus === 'PAID';
   const pending = !error && (!payment || ['initiated', 'pending', 'timeout'].includes(payment.status));
   const review = payment?.status === 'requires_review';
-  const title = success ? 'Thanh toan thanh cong' : pending ? 'Dang xac minh thanh toan' : review ? 'Thanh toan can kiem tra' : 'Thanh toan that bai';
-  const message = success ? 'Ve cua ban da duoc phat hanh.' : pending ? 'He thong dang doi ket qua xac thuc tu cong thanh toan.' : review ? 'Giao dich den muon va dang duoc kiem tra. He thong chua phat hanh ve.' : (error ?? 'Giao dich khong thanh cong. Vui long thu lai.');
+  const title = success ? 'Thanh toán thành công' : pending ? 'Đang xác minh thanh toán' : review ? 'Thanh toán cần kiểm tra' : 'Thanh toán thất bại';
+  const message = success ? 'Vé của bạn đã được phát hành.' : pending ? 'Hệ thống đang đợi kết quả xác thực từ cổng thanh toán.' : review ? 'Giao dịch đến muộn và đang được kiểm tra. Hệ thống chưa phát hành vé.' : (error ?? 'Giao dịch không thành công. Vui lòng thử lại.');
 
   return <section style={{ padding: '60px 20px', minHeight: '60vh', display: 'flex', justifyContent: 'center' }}>
     <div style={{ maxWidth: 480, width: '100%', background: 'white', padding: 40, borderRadius: 12, textAlign: 'center' }}>
       {success ? <CheckCircle2 color="#059669" size={48} /> : <AlertCircle color={pending ? '#d97706' : '#dc2626'} size={48} />}
       <h1>{title}</h1><p>{message}</p>
-      <p>Ma thanh toan: {paymentId ?? 'N/A'}</p>
-      <Button type="button" onClick={() => navigate('/orders')} style={{ width: '100%' }}>Xem don hang cua toi</Button>
-      <Button type="button" onClick={() => navigate('/concerts')} style={{ width: '100%', marginTop: 12 }}>Ve danh sach su kien</Button>
+      <p>Mã thanh toán: {paymentId ?? 'N/A'}</p>
+      <Button type="button" onClick={() => navigate('/orders')} style={{ width: '100%' }}>Xem đơn hàng của tôi</Button>
+      <Button type="button" onClick={() => navigate('/concerts')} style={{ width: '100%', marginTop: 12 }}>Về danh sách sự kiện</Button>
     </div>
   </section>;
 }

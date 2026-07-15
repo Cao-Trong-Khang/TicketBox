@@ -37,20 +37,21 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe('authoritative payment pages', () => {
   it('does not accept forged browser success parameters as settlement proof', async () => {
     renderSuccess('/payments/success?vnp_ResponseCode=00&resultCode=0');
-    expect(screen.getByRole('heading', { name: 'Thanh toan that bai' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Thanh toán thất bại' })).toBeInTheDocument();
     expect(paymentApi.getPaymentStatus).not.toHaveBeenCalled();
   });
 
   it.each([
-    ['success', 'PAID', 'Thanh toan thanh cong'],
-    ['failed', 'FAILED', 'Thanh toan that bai'],
-    ['requires_review', 'EXPIRED', 'Thanh toan can kiem tra'],
+    ['success', 'PAID', 'Thanh toán thành công'],
+    ['failed', 'FAILED', 'Thanh toán thất bại'],
+    ['requires_review', 'EXPIRED', 'Thanh toán cần kiểm tra'],
   ])('renders backend status %s instead of redirect parameters', async (status, orderStatus, title) => {
     paymentApi.getPaymentStatus.mockResolvedValue({
       paymentId: 'pay-1', orderId: 'order-1', provider: 'vnpay',
@@ -68,9 +69,9 @@ describe('authoritative payment pages', () => {
       .mockResolvedValueOnce({ paymentId: 'pay-1', orderId: 'order-1', provider: 'momo', status: 'success', orderStatus: 'PAID', paymentUrl: null, failureCode: null });
     renderSuccess('/payments/success?paymentId=pay-1');
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByRole('heading', { name: 'Dang xac minh thanh toan' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Đang xác minh thanh toán' })).toBeInTheDocument();
     await act(async () => { vi.advanceTimersByTime(2000); await Promise.resolve(); });
-    expect(screen.getByRole('heading', { name: 'Thanh toan thanh cong' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Thanh toán thành công' })).toBeInTheDocument();
   });
 
   it('disables one unavailable provider and guides the user to the alternative', async () => {
@@ -82,6 +83,30 @@ describe('authoritative payment pages', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('VNPAY đang tạm gián đoạn');
     expect(screen.getByRole('radio', { name: 'VNPay' })).toBeDisabled();
     expect(screen.getByRole('radio', { name: 'MoMo' })).toBeEnabled();
+  });
+
+  it('loads an existing order by route id when navigation state is missing', async () => {
+    paymentApi.getPaymentProviders.mockResolvedValue([
+      { provider: 'vnpay', status: 'available' },
+      { provider: 'momo', status: 'available' },
+    ]);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(order),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={['/orders/order-1']}>
+        <Routes><Route path="/orders/:orderId" element={<OrderPendingPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Đang tải đơn hàng...');
+    expect(await screen.findByText('ORD-1')).toBeInTheDocument();
+    expect(screen.queryByText(/Không có dữ liệu đơn hàng/)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/orders/order-1'), expect.any(Object));
   });
 
   it('retains the same initiation key across a transport retry', async () => {
