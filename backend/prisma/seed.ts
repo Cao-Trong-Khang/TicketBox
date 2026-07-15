@@ -233,7 +233,7 @@ async function main() {
       description: 'Đêm nhạc quy tụ các nghệ sĩ nổi bật từ chương trình Anh Trai Say Hi, mang đến sân khấu hoành tráng, âm nhạc trẻ trung và trải nghiệm bùng nổ cho khán giả.',
       venueName: 'Sân vận động Mỹ Đình',
       venueAddress: 'Nam Từ Liêm, Hà Nội',
-      bannerUrl: 'https://placehold.co/1200x500?text=Anh+Trai+Say+Hi+Concert',
+      bannerUrl: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1200&q=80',
       seatingSvg: mockSvg('ANH TRAI SAY HI'),
       status: ConcertStatus.PUBLISHED,
       startsAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // Sales start: 5 days ago
@@ -252,7 +252,7 @@ async function main() {
       description: 'Concert đặc biệt dành cho khán giả yêu thích chương trình Chị Đẹp Đạp Gió Rẽ Sóng, với các tiết mục trình diễn được dàn dựng công phu.',
       venueName: 'Nhà thi đấu Quân khu 7',
       venueAddress: '202 Hoàng Văn Thụ, Quận Phú Nhuận, TP. Hồ Chí Minh',
-      bannerUrl: 'https://placehold.co/1200x500?text=Chi+Dep+Dap+Gio+Concert',
+      bannerUrl: 'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=1200&q=80',
       seatingSvg: mockSvg('CHI DEP DAP GIO RE SONG'),
       status: ConcertStatus.PUBLISHED,
       startsAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // Sales start: 5 days ago
@@ -271,7 +271,7 @@ async function main() {
       description: 'Live concert đánh dấu sự trở lại đầy đột phá nghệ thuật của Vũ Cát Tường trong một không gian âm nhạc mới lạ.',
       venueName: 'Nhà hát lớn Hà Nội',
       venueAddress: '1 Tràng Tiền, Hoàn Kiếm, Hà Nội',
-      bannerUrl: 'https://placehold.co/1200x500?text=Vu+Cat+Tuong+Deco',
+      bannerUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1200&q=80',
       seatingSvg: mockSvg('VU CAT TUONG DECO'),
       status: ConcertStatus.PUBLISHED,
       startsAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // Sales start: 5 days ago
@@ -289,7 +289,7 @@ async function main() {
       description: 'Đêm nhạc lớn kỷ niệm hành trình rap của Đen và những người bạn. Cùng sẻ chia những giai điệu mộc mạc và chân thực nhất.',
       venueName: 'Nhà thi đấu Phú Thọ',
       venueAddress: '1 Lữ Gia, Quận 11, TP. Hồ Chí Minh',
-      bannerUrl: 'https://placehold.co/1200x500?text=Show+cua+Den',
+      bannerUrl: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1200&q=80',
       seatingSvg: mockSvg('SHOW CUA DEN'),
       status: ConcertStatus.PUBLISHED,
       startsAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // Sales start: 5 days ago
@@ -306,7 +306,7 @@ async function main() {
       description: 'Buổi biểu diễn nhạc Việt trữ tình ấm cúng với ban nhạc acoustic, đưa người nghe qua những miền ký ức tuyệt vời.',
       venueName: 'Nhà hát Bến Thành',
       venueAddress: '6 Mạc Đĩnh Chi, Bến Nghé, Quận 1, TP. Hồ Chí Minh',
-      bannerUrl: 'https://placehold.co/1200x500?text=Lan+Nha+Acoustic',
+      bannerUrl: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&w=1200&q=80',
       seatingSvg: mockSvg('LAN NHA ACOUSTIC'),
       status: ConcertStatus.FINISHED,
       startsAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000), // 10 days ago
@@ -322,7 +322,7 @@ async function main() {
       description: 'Chương trình nghệ thuật kể chuyện đặc biệt của Hà Anh Tuấn với thế giới âm nhạc diệu kỳ kết hợp cùng huyền thoại Kitaro.',
       venueName: 'Sân lễ hội đền Vua Đinh Vua Lê',
       venueAddress: 'Hoa Lư, Ninh Bình',
-      bannerUrl: 'https://placehold.co/1200x500?text=Chan+Troi+Ruc+Ro',
+      bannerUrl: 'https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?auto=format&fit=crop&w=1200&q=80',
       seatingSvg: mockSvg('STORII CONCERT'),
       status: ConcertStatus.FINISHED,
       startsAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
@@ -340,7 +340,7 @@ async function main() {
       description: 'Lễ hội âm nhạc thổi bùng ngọn lửa nhạc rock Việt Nam, đem lại năng lượng bất tận thông qua những âm thanh guitar điện sấm sét.',
       venueName: 'Sân vận động Hoa Lư',
       venueAddress: '2 Đinh Tiên Hoàng, Đa Kao, Quận 1, TP. Hồ Chí Minh',
-      bannerUrl: 'https://placehold.co/1200x500?text=Rock+Viet+Alive',
+      bannerUrl: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1200&q=80',
       seatingSvg: mockSvg('ROCK VIET ALIVE'),
       status: ConcertStatus.CANCELLED,
       startsAt: new Date(Date.now() + 8 * 24 * 60 * 60 * 1000), // in 8 days (Cancelled)
@@ -356,7 +356,7 @@ async function main() {
       description: 'Lễ hội âm nhạc Gió Mùa lớn nhất miền Bắc quay trở lại, mang tính nghệ thuật sáng tạo đa quốc gia đậm chất văn hoá.',
       venueName: 'Hoàng thành Thăng Long',
       venueAddress: '19C Hoàng Diệu, Điện Biên, Ba Đình, Hà Nội',
-      bannerUrl: 'https://placehold.co/1200x500?text=Monsoon+Festival',
+      bannerUrl: 'https://images.unsplash.com/photo-1507874457470-272b3c8d8ee2?auto=format&fit=crop&w=1200&q=80',
       seatingSvg: mockSvg('MONSOON FESTIVAL DRAFT'),
       status: ConcertStatus.DRAFT,
       startsAt: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000), // in 120 days
