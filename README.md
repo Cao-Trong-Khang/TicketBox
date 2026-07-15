@@ -1,72 +1,148 @@
 # TicketBox
 
-TicketBox is a high-concurrency concert ticketing prototype. This repository is organized around the archived OpenSpec blueprint and provides a local development foundation for the web frontend, backend API, and supporting infrastructure.
+TicketBox là đồ án mô phỏng hệ thống bán vé concert có các luồng chính: xem sự kiện, đặt vé, thanh toán, quản lý concert cho organizer, check-in vé, check-in VIP offline, import danh sách VIP và sinh tiểu sử nghệ sĩ bằng AI.
 
-## Project Layout
+## Thành Phần
 
-- `frontend/` - Vite + React + TypeScript web application shell for Audience and Organizer workflows.
-- `backend/` - NestJS + TypeScript modular monolith API foundation.
-- `mobile-checkin/` - Android/Kotlin Check-in Staff app for assigned-event preload, offline scans, and scan-log sync.
-- `docker-compose.yml` - Local development stack with frontend, backend, PostgreSQL, Redis, and Kafka.
-- `openspec/` - Product and implementation specifications.
+- `frontend/`: Web app React + Vite + TypeScript cho khán giả và organizer.
+- `backend/`: API NestJS + Prisma + PostgreSQL.
+- `mobile-checkin/`: App Android/Kotlin cho nhân viên check-in.
+- `docker-compose.yml`: Stack local gồm frontend, backend, PostgreSQL, Redis, Kafka và MinIO.
+- `docs/`, `demo-docs/`, `openspec/`: tài liệu đặc tả và demo.
 
-## Service URLs
+## Yêu Cầu
+
+Cài trước các công cụ sau:
+
+- Node.js 22 trở lên.
+- npm.
+- Docker Desktop, nếu chạy bằng Docker Compose hoặc muốn bật PostgreSQL/Redis/Kafka/MinIO nhanh.
+- Java 17 và Android Studio, nếu chạy app mobile check-in.
+
+## Port Mặc Định
 
 - Frontend: `http://localhost:5173`
 - Backend API: `http://localhost:3000`
-- Backend health: `http://localhost:3000/health`
-- PostgreSQL: `localhost:5432`
+- Health check: `http://localhost:3000/health`
+- PostgreSQL qua Docker: `localhost:5434`
 - Redis: `localhost:6379`
 - Kafka: `localhost:9092`
+- MinIO API: `http://localhost:9000`
+- MinIO Console: `http://localhost:9001`
 
-## Local Development
+## Cách 1: Chạy Nhanh Bằng Docker Compose
 
-Install and run each app directly:
+Đây là cách khuyến nghị để demo toàn bộ hệ thống local.
 
-```bash
+```powershell
+docker compose up --build
+```
+
+Mở terminal khác và seed dữ liệu demo:
+
+```powershell
+docker compose exec backend npm run prisma:seed
+```
+
+Sau đó truy cập:
+
+- Web: `http://localhost:5173`
+- API health: `http://localhost:3000/health`
+
+Dừng stack:
+
+```powershell
+docker compose down
+```
+
+Xoá cả dữ liệu PostgreSQL/MinIO local:
+
+```powershell
+docker compose down -v
+```
+
+## Cách 2: Chạy Từng Service Để Development
+
+### 1. Bật hạ tầng phụ trợ
+
+```powershell
+docker compose up -d postgres redis kafka minio minio-init
+```
+
+### 2. Cấu hình backend
+
+```powershell
+cd backend
+copy .env.example .env
+npm install
+npm run prisma:deploy
+npm run prisma:seed
+npm run start:dev
+```
+
+Backend sẽ chạy tại `http://localhost:3000`.
+
+Lưu ý: `npm run prisma:seed` sẽ xoá dữ liệu demo cũ và tạo lại dữ liệu mới.
+
+### 3. Cấu hình frontend
+
+Mở terminal mới:
+
+```powershell
 cd frontend
+copy .env.example .env
 npm install
 npm run dev
 ```
 
-```bash
-cd backend
-npm install
-npm run start:dev
+Frontend sẽ chạy tại `http://localhost:5173`.
+
+## Tài Khoản Demo
+
+Tất cả tài khoản seed dùng chung mật khẩu:
+
+```text
+TicketBox@123456
 ```
 
-Copy environment examples if you want to override defaults:
+Một số tài khoản có sẵn:
 
-```bash
-copy frontend\.env.example frontend\.env
-copy backend\.env.example backend\.env
+| Vai trò | Email |
+| --- | --- |
+| Organizer | `organizer@ticketbox.local` |
+| Organizer | `organizer2@ticketbox.local` |
+| Check-in Staff | `staff1@ticketbox.local` |
+| Check-in Staff | `staff2@ticketbox.local` |
+| Audience | `audience@ticketbox.local` |
+| Audience | `nguyenvana@gmail.com` |
+| Audience | `tranbanb@gmail.com` |
+
+## Chạy Mobile Check-in
+
+App mobile mặc định trỏ đến backend deploy:
+
+```properties
+TICKETBOX_BACKEND_API_URL=https://ticketbox-backend.vercel.app/
 ```
 
-## Docker Development
+Nếu chạy backend local bằng Android emulator, build với URL local:
 
-Start the full local stack:
-
-```bash
-docker compose up --build
+```powershell
+cd mobile-checkin
+.\gradlew.bat assembleDebug -PTICKETBOX_BACKEND_API_URL=http://10.0.2.2:3000/
 ```
 
-Validate the Compose file:
+Nếu dùng máy thật, thay `10.0.2.2` bằng IP LAN của máy đang chạy backend, ví dụ:
 
-```bash
-docker compose config
+```powershell
+.\gradlew.bat assembleDebug -PTICKETBOX_BACKEND_API_URL=http://192.168.1.10:3000/
 ```
 
-The Docker setup is for local development and course-project demonstration only. It does not include production cloud deployment, live payment settlement, or real external integrations.
-
-## Backend Deployment and Mobile API URL
-
-Backend Docker deployment notes, production environment variable checklist, and mobile build commands for connecting the Android app to a deployed backend are in `backend/DEPLOYMENT.md`.
-
-## Verification
+## Lệnh Kiểm Tra
 
 Frontend:
 
-```bash
+```powershell
 cd frontend
 npm test
 npm run typecheck
@@ -75,47 +151,98 @@ npm run build
 
 Backend:
 
-```bash
+```powershell
 cd backend
-npm run build
 npm test
+npm run build
+npm run lint
 ```
 
-Mobile check-in:
+Mobile:
 
-```bash
+```powershell
 cd mobile-checkin
-gradle test
+.\gradlew.bat test
 ```
 
-## Offline Check-in Demo
+## Biến Môi Trường Quan Trọng
 
-1. Start PostgreSQL, Redis, and Kafka with `docker compose up -d postgres redis kafka`.
-2. In `backend/`, run migrations and seed data:
+Backend đọc biến môi trường từ `backend/.env`.
 
-```bash
-npm install
-npm run prisma:deploy
+Các biến tối thiểu khi chạy local:
+
+- `DATABASE_URL`
+- `JWT_ACCESS_SECRET`
+- `CHECK_IN_QR_HMAC_SECRET`
+- `FRONTEND_ORIGIN`
+- `PUBLIC_API_ORIGIN`
+- `REDIS_URL`
+- `KAFKA_BROKERS`
+- `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`
+
+Các biến thanh toán/AI có thể để trống khi demo cơ bản:
+
+- `VNPAY_TMN_CODE`
+- `VNPAY_HASH_SECRET`
+- `MOMO_PARTNER_CODE`
+- `MOMO_ACCESS_KEY`
+- `MOMO_SECRET_KEY`
+- `GEMINI_API_KEY`
+
+Frontend đọc `frontend/.env`:
+
+```env
+VITE_API_BASE_URL=http://localhost:3000
+```
+
+## Dữ Liệu Seed
+
+Seed tạo sẵn:
+
+- 3 organizer.
+- 5 nhân viên check-in.
+- 35 audience.
+- 8 concert với banner ảnh thật.
+- Ticket types, orders, payments, tickets, scan logs.
+- VIP guests và dữ liệu phục vụ demo import CSV.
+
+Chạy lại seed:
+
+```powershell
+cd backend
 npm run prisma:seed
-npm run start:dev
 ```
 
-3. Sign in to the mobile app as `staff1@ticketbox.local` with password `TicketBox@123456`.
-4. Configure the mobile app backend URL with `TICKETBOX_BACKEND_API_URL=http://10.0.2.2:3000/` for the Android emulator, or the host LAN URL for a physical device.
-5. Select an assigned event, preload the event data, then scan `qr-ticket-demo-valid-001` or `qr-vip-demo-valid-001`.
+## Troubleshooting
 
-The detailed walkthrough, cross-device conflict fixture, and retry fixture are in `docs/offline-checkin-demo.md`.
+Nếu backend không kết nối được database, kiểm tra PostgreSQL đã chạy chưa:
 
-The mobile staff app walkthrough is in `docs/mobile-checkin-staff-demo.md`. It covers login, assigned event selection, dashboard readiness, QR scan, manual input, duplicate handling, VIP list review, scan history, and logout.
+```powershell
+docker compose ps postgres
+```
 
-## VIP CSV Import Demo
+Nếu đổi schema Prisma hoặc mới clone repo, chạy lại:
 
-Sponsor VIP guest-list import fixtures and command sequences are documented in `docs/vip-csv-import-demo.md`. The demo covers valid scheduled CSV import, missing required columns, malformed rows, duplicate rows, and Kafka enqueue failure simulation.
+```powershell
+cd backend
+npm run prisma:generate
+npm run prisma:deploy
+```
 
-## Current Verification Notes
+Nếu frontend gọi nhầm API, kiểm tra `frontend/.env` có:
 
-- `docker compose config` validates the local stack definition.
-- `docker compose up -d postgres redis kafka` starts the local PostgreSQL, Redis, and Kafka services when Docker Desktop is available.
-- Check-in database verification run locally: `npm run prisma:deploy`, `npm run prisma:seed`, and a Prisma readback confirmed 2 staff assignments, 2 demo tickets, and 2 demo VIP guests.
-- Backend check-in verification run locally: `npm test`, `npm run build`, and `npm run lint` pass in `backend/`.
-- Mobile check-in unit tests are included under `mobile-checkin/app/src/test`, but they were not run in this environment because `gradle`, `ANDROID_HOME`, and `ANDROID_SDK_ROOT` are not configured.
+```env
+VITE_API_BASE_URL=http://localhost:3000
+```
+
+Nếu port bị chiếm, dừng container/app đang chạy hoặc đổi port trong `docker-compose.yml` và `.env`.
+
+## Deploy
+
+Ghi chú deploy backend và cấu hình mobile khi dùng backend deploy nằm trong:
+
+```text
+backend/DEPLOYMENT.md
+```
+
+Docker image backend tự chạy migration bằng `prisma migrate deploy` trước khi start API.
