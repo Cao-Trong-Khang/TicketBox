@@ -20,7 +20,8 @@ android {
         val backendApiUrl = providers.gradleProperty("TICKETBOX_BACKEND_API_URL")
             .orElse("http://10.0.2.2:3000/")
             .get()
-        buildConfigField("String", "BACKEND_API_URL", "\"$backendApiUrl\"")
+        val normalizedBackendApiUrl = if (backendApiUrl.endsWith("/")) backendApiUrl else "$backendApiUrl/"
+        buildConfigField("String", "BACKEND_API_URL", "\"$normalizedBackendApiUrl\"")
 
         javaCompileOptions {
             annotationProcessorOptions {
