@@ -157,7 +157,8 @@ integrationTest('payment HTTP contract enforces auth, ownership, validation and 
 
     const persisted = await prisma.paymentTransaction.findUniqueOrThrow({ where: { id: initiation.body.paymentId } });
     const callback = fixtureProvider.createSignedCallback(persisted.providerRequestId, 150000, 'success');
-    await request(app.getHttpServer()).post('/payments/webhooks/vnpay').send(callback).expect(200);
+    const vnpayIpn = await request(app.getHttpServer()).get('/payments/webhooks/vnpay').query(callback).expect(200);
+    assert.deepEqual(vnpayIpn.body, { RspCode: '00', Message: 'Confirm Success' });
     const status = await request(app.getHttpServer()).get('/payments/' + initiation.body.paymentId)
       .set('x-user-id', owner.id).set('x-permission', 'ticket:purchase').expect(200);
     assert.equal(status.body.status, 'success');

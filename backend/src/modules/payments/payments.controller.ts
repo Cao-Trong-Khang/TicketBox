@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/types';
@@ -30,6 +30,16 @@ export class PaymentWebhooksController {
   @RateLimit({ keyPrefix: 'payments-webhook-vnpay', limit: 120, ttlSeconds: 60, identity: 'ip' })
   @HttpCode(HttpStatus.OK)
   vnpay(@Body() body: Record<string, unknown>) { return this.payments.handleWebhook('vnpay', body); }
+
+  @Get('vnpay')
+  @UseGuards(RateLimitGuard)
+  @RateLimit({ keyPrefix: 'payments-webhook-vnpay', limit: 120, ttlSeconds: 60, identity: 'ip' })
+  vnpayQuery(@Query() query: Record<string, unknown>) {
+    return this.payments.handleWebhook('vnpay', query).then(() => ({
+      RspCode: '00',
+      Message: 'Confirm Success',
+    }));
+  }
 
   @Post('momo')
   @UseGuards(RateLimitGuard)

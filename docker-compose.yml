@@ -93,6 +93,7 @@ services:
   backend:
     build:
       context: ./backend
+    command: sh -c "npx prisma generate && npm run build && npm run prisma:deploy && npm run start:prod"
     environment:
       NODE_ENV: development
       DOCKER_RUNTIME: "true"
@@ -115,7 +116,7 @@ services:
       AI_BIO_GROUP_ID: ticketbox-ai-bio-worker
       AI_PROVIDER: gemini
       AI_MODEL: gemini-2.5-flash
-      AI_API_KEY: ${GEMINI_API_KEY}
+      AI_API_KEY: ${GEMINI_API_KEY:-}
       AI_TIMEOUT_MS: 30000
       AI_RATE_LIMIT_RETRY_MS: 60000
       AI_TEXT_MAX_CHARS: 4000
@@ -143,11 +144,11 @@ services:
       PUBLIC_API_ORIGIN: http://localhost:3000
       VNPAY_IPN_URL: http://localhost:3000/payments/webhooks/vnpay
       MOMO_IPN_URL: http://localhost:3000/payments/webhooks/momo
-      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE}
-      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET}
-      MOMO_PARTNER_CODE: ${MOMO_PARTNER_CODE}
-      MOMO_ACCESS_KEY: ${MOMO_ACCESS_KEY}
-      MOMO_SECRET_KEY: ${MOMO_SECRET_KEY}
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:-}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:-}
+      MOMO_PARTNER_CODE: ${MOMO_PARTNER_CODE:-}
+      MOMO_ACCESS_KEY: ${MOMO_ACCESS_KEY:-}
+      MOMO_SECRET_KEY: ${MOMO_SECRET_KEY:-}
       VNPAY_TIMEOUT_MS: 10000
       MOMO_TIMEOUT_MS: 10000
       VNPAY_QUERY_TIMEOUT_MS: 30000
@@ -191,7 +192,7 @@ services:
       AI_BIO_GROUP_ID: ticketbox-ai-bio-worker
       AI_PROVIDER: gemini          
       AI_MODEL: gemini-2.5-flash
-      AI_API_KEY: ${GEMINI_API_KEY}
+      AI_API_KEY: ${GEMINI_API_KEY:-}
       AI_TIMEOUT_MS: 30000
       AI_RATE_LIMIT_RETRY_MS: 60000
       AI_TEXT_MAX_CHARS: 4000

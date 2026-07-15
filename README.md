@@ -58,6 +58,10 @@ docker compose config
 
 The Docker setup is for local development and course-project demonstration only. It does not include production cloud deployment, live payment settlement, or real external integrations.
 
+## Backend Deployment and Mobile API URL
+
+Backend Docker deployment notes, production environment variable checklist, and mobile build commands for connecting the Android app to a deployed backend are in `backend/DEPLOYMENT.md`.
+
 ## Verification
 
 Frontend:
@@ -96,7 +100,7 @@ npm run prisma:seed
 npm run start:dev
 ```
 
-3. Sign in to the mobile app as `checkin@ticketbox.local` with password `Checkin@123456`.
+3. Sign in to the mobile app as `staff1@ticketbox.local` with password `TicketBox@123456`.
 4. Configure the mobile app backend URL with `TICKETBOX_BACKEND_API_URL=http://10.0.2.2:3000/` for the Android emulator, or the host LAN URL for a physical device.
 5. Select an assigned event, preload the event data, then scan `qr-ticket-demo-valid-001` or `qr-vip-demo-valid-001`.
 

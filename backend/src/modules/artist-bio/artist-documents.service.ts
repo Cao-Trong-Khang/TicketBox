@@ -1,28 +1,37 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AiArtistBioStatus, ArtistDocumentStatus, ConcertStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { getArtistBioConfig } from '../../config/app.config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthenticatedUser } from '../auth/types';
 import { PermissionService } from '../rbac/permission.service';
 import { PERMISSION_CODES, ROLE_CODES } from '../rbac/rbac.constants';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
+import { AiProviderError, ArtistBioAiProvider } from './artist-bio-ai.provider';
 import { ArtistBioJobsPublisher } from './artist-bio-jobs.publisher';
 import { ArtistDocumentStorage } from './artist-document.storage';
 import { ArtistDocumentDetailDto, ArtistDocumentListItemDto, PDF_MAX_BYTES } from './artist-bio.types';
-import { PdfTextExtractor } from './pdf-text-extractor';
+import { PdfTextExtractionError, PdfTextExtractor } from './pdf-text-extractor';
 
 type UploadedPdf = { originalname: string; mimetype: string; size: number; buffer: Buffer };
 
 @Injectable()
 export class ArtistDocumentsService {
+  private readonly processingMode: 'worker' | 'inline';
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly permissionService: PermissionService,
     private readonly storage: ArtistDocumentStorage,
     private readonly publisher: ArtistBioJobsPublisher,
     private readonly pdfExtractor: PdfTextExtractor,
+    private readonly ai: ArtistBioAiProvider,
     private readonly redis: RedisCacheService,
-  ) {}
+    configService: ConfigService,
+  ) {
+    this.processingMode = getArtistBioConfig(configService).processingMode;
+  }
 
   async upload(user: AuthenticatedUser, concertId: string, file?: UploadedPdf, generatedBio?: string): Promise<{ document_id: string; status: 'uploaded' | 'done' }> {
     await this.assertOwner(user.id, concertId, true);
@@ -31,19 +40,15 @@ export class ArtistDocumentsService {
 
     const fileName = decodeUploadedFileName(file.originalname);
     this.pdfExtractor.assertValidPdf(fileName, file.mimetype, file.buffer);
+    const approvedBio = this.validateBiography(generatedBio);
+
+    if (this.processingMode === 'inline') {
+      return this.uploadInline(concertId, fileName, file.buffer, approvedBio);
+    }
 
     const documentId = randomUUID();
     const storageKey = this.storage.buildStorageKey(concertId, documentId);
     await this.storage.upload(storageKey, file.buffer);
-    const approvedBio = generatedBio?.trim();
-    if (generatedBio !== undefined && !approvedBio) {
-      await this.storage.remove(storageKey).catch(() => undefined);
-      throw new BadRequestException('generated_bio must not be empty');
-    }
-    if (approvedBio && approvedBio.length > 10000) {
-      await this.storage.remove(storageKey).catch(() => undefined);
-      throw new BadRequestException('generated_bio must be 10000 characters or fewer');
-    }
     try {
       if (approvedBio) {
         const now = new Date();
@@ -113,7 +118,7 @@ export class ArtistDocumentsService {
     const remainingReferences = await this.prisma.artistDocument.count({
       where: { storageKey: document.storageKey },
     });
-    if (remainingReferences === 0) {
+    if (remainingReferences === 0 && this.processingMode === 'worker') {
       await this.storage.remove(document.storageKey).catch(() => undefined);
     }
     await this.redis.del(`concerts:detail:${concertId}`);
@@ -135,9 +140,40 @@ export class ArtistDocumentsService {
     return { generated_bio: value };
   }
 
-  async regenerate(user: AuthenticatedUser, concertId: string, documentId: string): Promise<{ document_id: string; status: 'uploaded' }> {
+  async regenerate(user: AuthenticatedUser, concertId: string, documentId: string): Promise<{ document_id: string; status: 'uploaded' | 'done' }> {
     await this.assertOwner(user.id, concertId, true);
     const source = await this.findDocument(concertId, documentId);
+
+    if (this.processingMode === 'inline') {
+      if (!source.extractedText) throw new ConflictException('The source PDF text is unavailable for regeneration');
+      const generatedBio = await this.generateBiography(source.extractedText, source.bio?.generatedBio ?? undefined);
+      const newId = randomUUID();
+      const now = new Date();
+      await this.prisma.$transaction([
+        this.prisma.artistDocument.create({
+          data: {
+            id: newId,
+            concertId,
+            fileName: source.fileName,
+            storageKey: source.storageKey,
+            status: ArtistDocumentStatus.DONE,
+            extractedText: source.extractedText,
+          },
+        }),
+        this.prisma.aiArtistBio.create({
+          data: {
+            documentId: newId,
+            concertId,
+            status: AiArtistBioStatus.DONE,
+            generatedBio,
+            generatedAt: now,
+          },
+        }),
+      ]);
+      await this.redis.del(`concerts:detail:${concertId}`);
+      return { document_id: newId, status: 'done' };
+    }
+
     const newId = randomUUID();
     await this.prisma.artistDocument.create({ data: { id: newId, concertId, fileName: source.fileName, storageKey: source.storageKey } });
     try {
@@ -152,6 +188,63 @@ export class ArtistDocumentsService {
       throw new ServiceUnavailableException('Biography regeneration could not be queued; the attempt remains available for retry');
     }
     return { document_id: newId, status: 'uploaded' };
+  }
+
+  private async uploadInline(concertId: string, fileName: string, buffer: Buffer, approvedBio?: string): Promise<{ document_id: string; status: 'done' }> {
+    let extractedText: string;
+    try {
+      extractedText = await this.pdfExtractor.extract(buffer);
+    } catch (error) {
+      if (error instanceof PdfTextExtractionError) throw new BadRequestException(error.message);
+      throw error;
+    }
+
+    const generatedBio = approvedBio ?? await this.generateBiography(extractedText);
+    const documentId = randomUUID();
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.artistDocument.create({
+        data: {
+          id: documentId,
+          concertId,
+          fileName,
+          storageKey: `inline://${concertId}/${documentId}.pdf`,
+          status: ArtistDocumentStatus.DONE,
+          extractedText,
+        },
+      }),
+      this.prisma.aiArtistBio.create({
+        data: {
+          documentId,
+          concertId,
+          status: AiArtistBioStatus.DONE,
+          generatedBio,
+          generatedAt: now,
+        },
+      }),
+    ]);
+    await this.redis.del(`concerts:detail:${concertId}`);
+    return { document_id: documentId, status: 'done' };
+  }
+
+  private async generateBiography(extractedText: string, previousBio?: string): Promise<string> {
+    try {
+      const generatedBio = (await this.ai.generate(extractedText, previousBio)).trim();
+      if (!generatedBio) throw new AiProviderError('unavailable', 'AI provider returned an empty biography');
+      if (generatedBio.length > 10000) throw new AiProviderError('unavailable', 'AI provider returned a biography longer than 10000 characters');
+      return generatedBio;
+    } catch (error) {
+      if (error instanceof AiProviderError) throw new ServiceUnavailableException(error.message);
+      throw error;
+    }
+  }
+
+  private validateBiography(generatedBio?: string): string | undefined {
+    if (generatedBio === undefined) return undefined;
+    const value = generatedBio.trim();
+    if (!value) throw new BadRequestException('generated_bio must not be empty');
+    if (value.length > 10000) throw new BadRequestException('generated_bio must be 10000 characters or fewer');
+    return value;
   }
 
   private async findDocument(concertId: string, documentId: string) {

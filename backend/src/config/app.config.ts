@@ -10,6 +10,7 @@ export type BannersConfig = { maxFileSize: number; bucket: string; cacheMaxAge: 
 export type ArtistBioConfig = {
   topic: string;
   groupId: string;
+  processingMode: 'worker' | 'inline';
   minioEndpoint: string;
   minioPort: number;
   minioUseSsl: boolean;
@@ -91,6 +92,22 @@ export function getHttpConfig(configService: ConfigService): HttpConfig {
 }
 
 export function getPostgresConfig(configService: ConfigService): PostgresConfig {
+  const databaseUrl = configService.get<string>('DATABASE_URL');
+  if (databaseUrl) {
+    try {
+      const parsed = new URL(databaseUrl);
+      return {
+        host: parsed.hostname,
+        port: parsed.port ? Number(parsed.port) : 5432,
+        user: decodeURIComponent(parsed.username || 'ticketbox'),
+        password: decodeURIComponent(parsed.password || 'ticketbox'),
+        database: parsed.pathname.replace(/^\//, '') || 'ticketbox',
+      };
+    } catch {
+      // Fall back to discrete Postgres variables so startup errors remain local to Prisma.
+    }
+  }
+
   return {
     host: configService.get<string>('POSTGRES_HOST', 'localhost'),
     port: readNumber(configService, 'POSTGRES_PORT', 5432),
@@ -101,6 +118,19 @@ export function getPostgresConfig(configService: ConfigService): PostgresConfig 
 }
 
 export function getRedisConfig(configService: ConfigService): RedisConfig {
+  const redisUrl = configService.get<string>('REDIS_URL') || configService.get<string>('KV_URL');
+  if (redisUrl) {
+    try {
+      const parsed = new URL(redisUrl);
+      return {
+        host: parsed.hostname,
+        port: parsed.port ? Number(parsed.port) : 6379,
+      };
+    } catch {
+      // Fall back to discrete Redis variables so runtime Redis errors stay visible.
+    }
+  }
+
   return { host: configService.get<string>('REDIS_HOST', 'localhost'), port: readNumber(configService, 'REDIS_PORT', 6379) };
 }
 
@@ -111,10 +141,14 @@ export function getKafkaConfig(configService: ConfigService): KafkaConfig {
 export function getArtistBioConfig(configService: ConfigService): ArtistBioConfig {
   const provider = configService.get<string>('AI_PROVIDER', 'mock').toLowerCase();
   if (!['mock', 'openai', 'gemini'].includes(provider)) throw new Error(`Invalid AI_PROVIDER value: ${provider}`);
+  const defaultProcessingMode = configService.get<string>('VERCEL') === '1' ? 'inline' : 'worker';
+  const processingMode = configService.get<string>('AI_BIO_PROCESSING_MODE', defaultProcessingMode).toLowerCase();
+  if (!['worker', 'inline'].includes(processingMode)) throw new Error(`Invalid AI_BIO_PROCESSING_MODE value: ${processingMode}`);
 
   return {
     topic: readRequired(configService, 'AI_BIO_TOPIC', 'ai.bio.requested'),
     groupId: readRequired(configService, 'AI_BIO_GROUP_ID', 'ticketbox-ai-bio-worker'),
+    processingMode: processingMode as ArtistBioConfig['processingMode'],
     minioEndpoint: readRequired(configService, 'MINIO_ENDPOINT', 'localhost'),
     minioPort: readPositiveNumber(configService, 'MINIO_PORT', 9000),
     minioUseSsl: readBoolean(configService, 'MINIO_USE_SSL', false),
@@ -191,7 +225,8 @@ function readBoolean(configService: ConfigService, key: string, fallback: boolea
 }
 
 function readRequired(configService: ConfigService, key: string, fallback: string): string {
-  const value = configService.get<string>(key, fallback).trim();
+  const configuredValue = configService.get<string>(key);
+  const value = configuredValue?.trim() || fallback.trim();
   if (!value) throw new Error(`Invalid empty environment value for ${key}`);
   return value;
 }

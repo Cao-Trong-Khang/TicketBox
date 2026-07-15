@@ -181,7 +181,9 @@ test('Artist Bio workflow keeps description separate from upload through public 
     storage as never,
     publisher as never,
     new PdfTextExtractor(config),
+    { generate: async () => 'Generated biography' } as never,
     redis as never,
+    config,
   );
 
   const upload = await documentsService.upload(organizer, concertId, {

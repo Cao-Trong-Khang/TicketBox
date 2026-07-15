@@ -33,6 +33,6 @@ export function updateArtistBio(concertId: string, documentId: string, generated
   return apiFetch(`${base(concertId)}/${documentId}/bio`, { method: 'PUT', body: JSON.stringify({ generated_bio: generatedBio }) });
 }
 
-export function regenerateArtistBio(concertId: string, documentId: string): Promise<{ document_id: string; status: 'uploaded' }> {
+export function regenerateArtistBio(concertId: string, documentId: string): Promise<{ document_id: string; status: 'uploaded' | 'done' }> {
   return apiFetch(`${base(concertId)}/${documentId}/regenerate`, { method: 'POST' });
 }

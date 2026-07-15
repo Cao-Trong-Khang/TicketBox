@@ -4,6 +4,10 @@ import { PrismaClient } from '@prisma/client';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
+    if (process.env.PRISMA_LAZY_CONNECT === 'true' || process.env.VERCEL === '1') {
+      return;
+    }
+
     await this.$connect();
   }
 

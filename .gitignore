@@ -1,6 +1,8 @@
 # AI Agent
 .codex/
 .agent/
+.agents/
+skills-lock.json
 .github/
 
 # Dependencies
@@ -9,10 +11,13 @@ package-lock.json
 package.json
 
 # Build output
+.vercel/
 dist/
 build/
+apk-download/
 coverage/
 *.tsbuildinfo
+*.apk
 /backend/src/*.js
 /backend/src/**/*.js
 
@@ -36,6 +41,7 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Docker/local data
 .docker/

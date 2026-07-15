@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ArtistDocumentStatus } from '@prisma/client';
+import { getArtistBioConfig } from '../../config/app.config';
 import { AiProviderError, ArtistBioAiProvider } from './artist-bio-ai.provider';
 import { ArtistDocumentsService } from './artist-documents.service';
 import { StorageTimeoutError } from './artist-document.storage';
@@ -174,15 +175,28 @@ type ArtistServiceHarness = {
   service: ArtistDocumentsService;
   published: unknown[];
   created: unknown[];
+  createdBios: unknown[];
   deleted: string[];
   removedStorageKeys: string[];
+  uploadedStorageKeys: string[];
+  generatedInputs: Array<{ text: string; previousBio?: string }>;
 };
 
-function artistServiceHarness(ownerId = 'owner', publishFails = false, editable = true, existingDocument: Record<string, unknown> | null = null, remainingStorageReferences = 0): ArtistServiceHarness {
+function artistServiceHarness(
+  ownerId = 'owner',
+  publishFails = false,
+  editable = true,
+  existingDocument: Record<string, unknown> | null = null,
+  remainingStorageReferences = 0,
+  processingMode: 'worker' | 'inline' = 'worker',
+): ArtistServiceHarness {
   const published: unknown[] = [];
   const created: unknown[] = [];
+  const createdBios: unknown[] = [];
   const deleted: string[] = [];
   const removedStorageKeys: string[] = [];
+  const uploadedStorageKeys: string[] = [];
+  const generatedInputs: Array<{ text: string; previousBio?: string }> = [];
   const prisma = {
     userRole: { findMany: async () => [{ role: { code: 'ORGANIZER' } }] },
     concert: { findUnique: async () => ({
@@ -199,21 +213,75 @@ function artistServiceHarness(ownerId = 'owner', publishFails = false, editable 
       delete: async ({ where }: { where: { id: string } }) => { deleted.push(where.id); return existingDocument; },
       count: async () => remainingStorageReferences,
     },
-    aiArtistBio: { create: async ({ data }: { data: unknown }) => data, update: async () => ({}) },
+    aiArtistBio: { create: async ({ data }: { data: unknown }) => { createdBios.push(data); return data; }, update: async () => ({}) },
     auditLog: { create: async () => ({}) },
     $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
   };
   const permission = { userHasPermissions: async () => true };
   const storage = {
     buildStorageKey: (concertId: string, documentId: string) => `artist-documents/${concertId}/${documentId}.pdf`,
-    upload: async () => undefined,
+    upload: async (key: string) => { uploadedStorageKeys.push(key); },
     remove: async (key: string) => { removedStorageKeys.push(key); },
   };
   const publisher = { publish: async (event: unknown) => { if (publishFails) throw new Error('Kafka down'); published.push(event); } };
   const redis = { del: async () => undefined };
-  const service = new ArtistDocumentsService(prisma as never, permission as never, storage as never, publisher as never, new PdfTextExtractor(config()), redis as never);
-  return { service, published, created, deleted, removedStorageKeys };
+  const serviceConfig = new ConfigService({
+    MINIO_ACCESS_KEY: 'test',
+    MINIO_SECRET_KEY: 'test-secret',
+    AI_PROVIDER: 'mock',
+    AI_TEXT_MAX_CHARS: '4000',
+    PDF_MIN_TEXT_CHARS: '50',
+    KAFKA_BROKERS: 'localhost:9092',
+    AI_BIO_PROCESSING_MODE: processingMode,
+  });
+  const validator = new PdfTextExtractor(serviceConfig);
+  const extractor = {
+    assertValidPdf: validator.assertValidPdf.bind(validator),
+    extract: async () => 'Artist press kit source text that is long enough for inline processing.',
+  };
+  const ai = {
+    generate: async (text: string, previousBio?: string) => {
+      generatedInputs.push({ text, previousBio });
+      return 'Generated biography';
+    },
+  };
+  const service = new ArtistDocumentsService(
+    prisma as never,
+    permission as never,
+    storage as never,
+    publisher as never,
+    extractor as never,
+    ai as never,
+    redis as never,
+    serviceConfig,
+  );
+  return { service, published, created, createdBios, deleted, removedStorageKeys, uploadedStorageKeys, generatedInputs };
 }
+
+test('Vercel defaults artist biography processing to inline mode', () => {
+  const artistBioConfig = getArtistBioConfig(new ConfigService({
+    VERCEL: '1',
+    MINIO_ACCESS_KEY: 'unused',
+    MINIO_SECRET_KEY: 'unused',
+  }));
+  assert.equal(artistBioConfig.processingMode, 'inline');
+});
+
+test('inline upload extracts, generates, and persists without MinIO or Kafka', async () => {
+  const harness = artistServiceHarness('owner', false, true, null, 0, 'inline');
+  const result = await harness.service.upload({ id: 'owner', email: 'owner@test' }, '11111111-1111-4111-8111-111111111111', {
+    originalname: 'press-kit.pdf', mimetype: 'application/pdf', size: 12, buffer: Buffer.from('%PDF-1.4 demo'),
+  });
+
+  assert.equal(result.status, 'done');
+  assert.equal(harness.uploadedStorageKeys.length, 0);
+  assert.equal(harness.published.length, 0);
+  assert.equal(harness.generatedInputs.length, 1);
+  assert.equal(harness.created.length, 1);
+  assert.equal(harness.createdBios.length, 1);
+  assert.equal((harness.created[0] as { status: ArtistDocumentStatus }).status, ArtistDocumentStatus.DONE);
+  assert.match((harness.created[0] as { storageKey: string }).storageKey, /^inline:\/\//);
+});
 
 test('owned organizer upload persists and publishes before returning uploaded', async () => {
   const harness = artistServiceHarness();
