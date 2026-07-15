@@ -5,6 +5,7 @@ import { RbacModule } from "../rbac/rbac.module";
 import { RedisCacheModule } from "../redis-cache/redis-cache.module";
 import { ConcertsController } from "./concerts.controller";
 import { ConcertsService } from "./concerts.service";
+import { BannerDatabaseStorageService } from "./banner-database-storage.service";
 import { BannerDownloadService } from "./banner-download.service";
 import { BannerStorageService } from "./banner-storage.service";
 import { BannerUploadService } from "./banner-upload.service";
@@ -28,6 +29,7 @@ import { OrganizerTicketTypesService } from "./organizer-ticket-types.service";
     ConcertsService,
     OrganizerConcertsService,
     OrganizerTicketTypesService,
+    BannerDatabaseStorageService,
     BannerStorageService,
     BannerUploadService,
     BannerDownloadService,

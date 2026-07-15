@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
+import { BannerDatabaseStorageService } from "./banner-database-storage.service";
 import { BannerStorageService, BannerStorageTimeoutError } from "./banner-storage.service";
 
 const BANNER_FILENAME_PATTERN =
@@ -10,12 +11,20 @@ const BANNER_FILENAME_PATTERN =
 
 @Injectable()
 export class BannerDownloadService {
-  constructor(private readonly storage: BannerStorageService) {}
+  constructor(
+    private readonly storage: BannerStorageService,
+    private readonly databaseStorage: BannerDatabaseStorageService,
+  ) {}
 
   async getPublicBanner(
     filename: string,
   ): Promise<{ buffer: Buffer; mimeType: string }> {
     this.assertValidFilename(filename);
+
+    const databaseBanner = await this.databaseStorage.download(filename);
+    if (databaseBanner) {
+      return databaseBanner;
+    }
 
     try {
       const buffer = await this.storage.download(`banners/${filename}`);

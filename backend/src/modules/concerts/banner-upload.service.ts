@@ -11,6 +11,7 @@ import { extname } from "node:path";
 import { getBannersConfig } from "../../config/app.config";
 import { PrismaService } from "../../prisma/prisma.service";
 import { ROLE_CODES } from "../rbac/rbac.constants";
+import { BannerDatabaseStorageService } from "./banner-database-storage.service";
 import { BannerStorageService, BannerStorageTimeoutError } from "./banner-storage.service";
 
 export const DEFAULT_BANNER_MAX_FILE_SIZE = 5_242_880;
@@ -37,6 +38,7 @@ export class BannerUploadService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: BannerStorageService,
+    private readonly databaseStorage: BannerDatabaseStorageService,
     configService: ConfigService,
   ) {
     this.maxFileSize = getBannersConfig(configService).maxFileSize;
@@ -64,12 +66,20 @@ export class BannerUploadService {
       await this.storage.upload(objectKey, file.buffer, normalizedMimeType);
     } catch (error) {
       if (error instanceof BannerStorageTimeoutError || error instanceof Error) {
-        throw new ServiceUnavailableException(
-          "Banner upload is unavailable right now",
-        );
+        try {
+          await this.databaseStorage.upload(
+            fileName,
+            file.buffer,
+            normalizedMimeType,
+          );
+        } catch {
+          throw new ServiceUnavailableException(
+            "Banner upload is unavailable right now",
+          );
+        }
+      } else {
+        throw error;
       }
-
-      throw error;
     }
 
     return { bannerUrl: `/uploads/banners/${fileName}` };

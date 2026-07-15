@@ -11,10 +11,14 @@ import { BannerUploadService } from "./banner-upload.service";
 
 test("valid image upload returns a stable backend banner URL", async () => {
   const uploaded: Array<{ key: string; mimeType: string; size: number }> = [];
+  const databaseUploads: Array<{ filename: string; mimeType: string; size: number }> = [];
   const service = createBannerUploadService({
     organizerAllowed: true,
     onUpload: async (key, buffer, mimeType) => {
       uploaded.push({ key, mimeType, size: buffer.length });
+    },
+    onDatabaseUpload: async (filename, buffer, mimeType) => {
+      databaseUploads.push({ filename, mimeType, size: buffer.length });
     },
   });
 
@@ -32,6 +36,7 @@ test("valid image upload returns a stable backend banner URL", async () => {
   assert.equal(uploaded.length, 1);
   assert.match(uploaded[0].key, /^banners\/[0-9a-f-]+\.jpg$/);
   assert.equal(uploaded[0].mimeType, "image/jpeg");
+  assert.equal(databaseUploads.length, 0);
 });
 
 test("oversized file throws 413", async () => {
@@ -103,11 +108,39 @@ test("non-organizer throws 403", async () => {
   );
 });
 
-test("MinIO upload failure throws 503", async () => {
+test("object storage upload failure falls back to database-backed banner storage", async () => {
+  const databaseUploads: Array<{ filename: string; mimeType: string; size: number }> = [];
   const service = createBannerUploadService({
     organizerAllowed: true,
     onUpload: async () => {
       throw new Error("MinIO unavailable");
+    },
+    onDatabaseUpload: async (filename, buffer, mimeType) => {
+      databaseUploads.push({ filename, mimeType, size: buffer.length });
+    },
+  });
+
+  const response = await service.upload("organizer-1", {
+    originalname: "banner.jpeg",
+    mimetype: "image/jpeg",
+    size: 128,
+    buffer: Buffer.from("image"),
+  });
+
+  assert.match(response.bannerUrl, /^\/uploads\/banners\/[0-9a-f-]+\.jpeg$/);
+  assert.equal(databaseUploads.length, 1);
+  assert.match(databaseUploads[0].filename, /^[0-9a-f-]+\.jpeg$/);
+  assert.equal(databaseUploads[0].mimeType, "image/jpeg");
+});
+
+test("storage and database fallback failures throw 503", async () => {
+  const service = createBannerUploadService({
+    organizerAllowed: true,
+    onUpload: async () => {
+      throw new Error("MinIO unavailable");
+    },
+    onDatabaseUpload: async () => {
+      throw new Error("database unavailable");
     },
   });
 
@@ -165,6 +198,7 @@ test("mismatched mime type and extension is rejected", async () => {
 function createBannerUploadService(options: {
   organizerAllowed: boolean;
   onUpload?: (key: string, buffer: Buffer, mimeType: string) => Promise<void>;
+  onDatabaseUpload?: (filename: string, buffer: Buffer, mimeType: string) => Promise<void>;
 }) {
   const prisma = {
     role: {
@@ -181,6 +215,11 @@ function createBannerUploadService(options: {
       await options.onUpload?.(key, buffer, mimeType);
     },
   };
+  const databaseStorage = {
+    upload: async (filename: string, buffer: Buffer, mimeType: string) => {
+      await options.onDatabaseUpload?.(filename, buffer, mimeType);
+    },
+  };
   const config = {
     get: (key: string, fallback?: unknown) => {
       if (key === "BANNERS_MAX_FILE_SIZE") {
@@ -191,5 +230,10 @@ function createBannerUploadService(options: {
     },
   } as ConfigService;
 
-  return new BannerUploadService(prisma as never, storage as never, config);
+  return new BannerUploadService(
+    prisma as never,
+    storage as never,
+    databaseStorage as never,
+    config,
+  );
 }
